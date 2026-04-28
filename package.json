@@ -1,6 +1,6 @@
 {
   "name": "suunto-mcp",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "description": "MCP server that connects your Suunto watch data to Claude and other AI assistants.",
   "type": "module",
   "bin": {
