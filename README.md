@@ -4,6 +4,9 @@
 
 # Suunto MCP
 
+[![CI](https://github.com/googlarz/suunto-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/googlarz/suunto-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Bring your Suunto watch into the conversation.**
 
 > ⏳ **Status: awaiting API access.** I've applied for a Suunto apizone API
@@ -231,6 +234,22 @@ in the API.
   `limit` is met or there's nothing left.
 - **Token refresh is automatic** — the access token is silently re-issued
   before each request if it's within 60 seconds of expiry.
+
+## Tests
+
+```bash
+npm test
+```
+
+27 unit tests cover:
+- OAuth URL building, code exchange, refresh, token-expiry refresh logic
+- Token storage (round-trip, file permissions, missing-file fallback)
+- API client: bearer + subscription-key headers, retry on 429/500 with `Retry-After`, no retry on 4xx, byte-stream downloads
+- `list_workouts` auto-pagination across multiple pages
+- FIT summary extraction, empty-FIT handling, record sampling
+- Config loading, env overrides, missing-credential errors
+
+CI runs on Node 20 and 22 on every push and PR.
 
 ## Roadmap
 

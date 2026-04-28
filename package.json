@@ -12,7 +12,8 @@
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "auth": "node dist/auth-cli.js",
-    "webhook": "node dist/webhook.js"
+    "webhook": "node dist/webhook.js",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/*.test.js"
   },
   "files": [
     "dist",
