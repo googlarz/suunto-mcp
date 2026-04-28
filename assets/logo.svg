@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 200" width="720" height="200" role="img" aria-label="Suunto MCP">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0b0b0d"/>
+      <stop offset="1" stop-color="#1a1a20"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ff4d2e"/>
+      <stop offset="1" stop-color="#ff8a3d"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="720" height="200" rx="20" fill="url(#g)"/>
+
+  <!-- watch face -->
+  <g transform="translate(100,100)">
+    <circle r="68" fill="none" stroke="url(#ring)" stroke-width="6"/>
+    <circle r="58" fill="#0e0e12" stroke="#22232a" stroke-width="2"/>
+    <!-- HR waveform across face -->
+    <path d="M -44 4 L -22 4 L -14 -18 L -6 26 L 4 -28 L 12 14 L 22 4 L 44 4"
+          fill="none" stroke="#ff4d2e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- tick marks -->
+    <g stroke="#3a3b44" stroke-width="2" stroke-linecap="round">
+      <line x1="0" y1="-62" x2="0" y2="-54"/>
+      <line x1="62" y1="0" x2="54" y2="0"/>
+      <line x1="0" y1="62" x2="0" y2="54"/>
+      <line x1="-62" y1="0" x2="-54" y2="0"/>
+    </g>
+    <!-- crown -->
+    <rect x="62" y="-8" width="10" height="16" rx="2" fill="#ff4d2e"/>
+  </g>
+
+  <!-- wordmark -->
+  <g transform="translate(210,118)" fill="#f4f4f5" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <text font-size="46" font-weight="800" letter-spacing="-1.5">Suunto<tspan fill="#ff4d2e"> · </tspan>MCP</text>
+    <text y="34" font-size="16" font-weight="500" fill="#9a9aa3" letter-spacing="0.4">
+      Talk to your watch. Train smarter with AI.
+    </text>
+  </g>
+</svg>

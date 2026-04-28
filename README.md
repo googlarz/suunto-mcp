@@ -1,6 +1,17 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="Suunto MCP" width="640"/>
+</p>
+
 # Suunto MCP
 
 **Bring your Suunto watch into the conversation.**
+
+> ⏳ **Status: awaiting API access.** The author has applied for a Suunto
+> apizone API key and is waiting on approval. Until then, the code is
+> implemented end-to-end against the documented Suunto API surface but has
+> not been verified against a live account. Expect to file at least one
+> issue once real credentials land. PRs from anyone with API access already
+> are very welcome.
 
 This is a small bridge that lets AI assistants like Claude read your Suunto
 training data — runs, hikes, sleep, recovery — so you can just *talk* to your
