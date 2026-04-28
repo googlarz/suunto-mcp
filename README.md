@@ -125,13 +125,31 @@ Restart Claude. Ask: *"What Suunto tools do you have?"* — and you're off.
 
 ## Tools exposed to the AI
 
+**Workouts**
+
 | Tool                  | What it does                                                  |
 |-----------------------|---------------------------------------------------------------|
-| `list_workouts`       | Recent workouts, filter by date range                         |
+| `list_workouts`       | Recent workouts, filter by date range, auto-paginates         |
 | `get_workout`         | Full summary for one workout                                  |
 | `get_workout_samples` | Time-series HR / pace / altitude / power / GPS                |
 | `get_workout_fit`     | Downloads the FIT file and returns parsed, structured JSON    |
 | `export_workout_gpx`  | GPX track export — for maps, Strava, route planning           |
+
+**24/7 health data** (requires the Activity / Sleep / Recovery API products to be enabled on your apizone subscription)
+
+| Tool                  | What it does                                                  |
+|-----------------------|---------------------------------------------------------------|
+| `get_daily_activity`  | Steps, calories, daily HR for a single day                    |
+| `list_daily_activity` | Steps, calories, daily HR for a date range                    |
+| `get_sleep`           | Sleep stages, duration, score for a night                     |
+| `list_sleep`          | Sleep data over a date range                                  |
+| `get_recovery`        | Recovery / HRV / stress for a single day                      |
+| `list_recovery`       | Recovery data over a date range                               |
+
+**Webhooks**
+
+| Tool                  | What it does                                                  |
+|-----------------------|---------------------------------------------------------------|
 | `list_subscriptions`  | Active webhook subscriptions on the account                   |
 
 The AI picks the right one for your question. You don't need to know which.
@@ -182,12 +200,23 @@ in the API.
 
 ---
 
+## Reliability
+
+- **Automatic retries** with exponential backoff + jitter on `429`, `500`,
+  `502`, `503`, `504` (up to 4 attempts).
+- **`Retry-After` header is honored** when Suunto returns one.
+- **Auto-pagination** in `list_workouts` — keeps fetching pages until your
+  `limit` is met or there's nothing left.
+- **Token refresh is automatic** — the access token is silently re-issued
+  before each request if it's within 60 seconds of expiry.
+
 ## Roadmap
 
-- [ ] Daily activity / steps / 24/7 HR resource
-- [ ] Sleep + recovery resources (when those API products are GA on apizone)
+- [ ] Webhook subscription management tools (create / delete / renew)
 - [ ] Cached workout index for faster "this month" queries
+- [ ] Workout Upload API (push third-party workouts back to Suunto)
 - [ ] Optional Strava mirror tool
+- [ ] Tests against a recorded API fixture
 
 PRs welcome.
 

@@ -87,6 +87,75 @@ const tools = [
     },
   },
   {
+    name: "get_daily_activity",
+    description:
+      "Get 24/7 activity summary for a single date: steps, calories, daily heart rate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "YYYY-MM-DD" },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "list_daily_activity",
+    description:
+      "Get 24/7 activity summaries for a date range (steps, calories, daily HR).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "YYYY-MM-DD (inclusive)" },
+        to: { type: "string", description: "YYYY-MM-DD (inclusive)" },
+      },
+      required: ["from", "to"],
+    },
+  },
+  {
+    name: "get_sleep",
+    description:
+      "Get sleep data for a single night (stages, duration, score) keyed by the night's wake-up date.",
+    inputSchema: {
+      type: "object",
+      properties: { date: { type: "string", description: "YYYY-MM-DD" } },
+      required: ["date"],
+    },
+  },
+  {
+    name: "list_sleep",
+    description: "Get sleep data for a date range.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "YYYY-MM-DD" },
+        to: { type: "string", description: "YYYY-MM-DD" },
+      },
+      required: ["from", "to"],
+    },
+  },
+  {
+    name: "get_recovery",
+    description:
+      "Get recovery / HRV data for a single date (resources, stress, recovery score).",
+    inputSchema: {
+      type: "object",
+      properties: { date: { type: "string", description: "YYYY-MM-DD" } },
+      required: ["date"],
+    },
+  },
+  {
+    name: "list_recovery",
+    description: "Get recovery / HRV data for a date range.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "YYYY-MM-DD" },
+        to: { type: "string", description: "YYYY-MM-DD" },
+      },
+      required: ["from", "to"],
+    },
+  },
+  {
     name: "list_subscriptions",
     description:
       "List active webhook subscriptions on this Suunto account (workouts, sleep, recovery, daily activity).",
@@ -130,6 +199,20 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const bytes = await suunto.getWorkoutGpx(a.workoutKey);
         return text(new TextDecoder().decode(bytes));
       }
+      case "get_daily_activity":
+        return text(JSON.stringify(await suunto.getDailyActivity(a.date), null, 2));
+      case "list_daily_activity":
+        return text(
+          JSON.stringify(await suunto.listDailyActivity(a.from, a.to), null, 2),
+        );
+      case "get_sleep":
+        return text(JSON.stringify(await suunto.getSleep(a.date), null, 2));
+      case "list_sleep":
+        return text(JSON.stringify(await suunto.listSleep(a.from, a.to), null, 2));
+      case "get_recovery":
+        return text(JSON.stringify(await suunto.getRecovery(a.date), null, 2));
+      case "list_recovery":
+        return text(JSON.stringify(await suunto.listRecovery(a.from, a.to), null, 2));
       case "list_subscriptions": {
         const data = await suunto.subscriptions();
         return text(JSON.stringify(data, null, 2));
