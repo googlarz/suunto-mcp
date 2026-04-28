@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-test
+.git
+.github
+.env
+.env.local
+tokens.json
+*.log
+*.tgz
+README.md
+CONTRIBUTING.md
+LICENSE
+assets

@@ -113,6 +113,10 @@ npm install
 npm run build
 ```
 
+> A `Dockerfile` is also included for containerized deployments and for
+> [glama.ai](https://glama.ai/mcp/servers/googlarz/suunto-mcp)'s automated
+> introspection checks.
+
 ### 3. Configure
 
 ```bash
