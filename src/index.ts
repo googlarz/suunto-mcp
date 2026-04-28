@@ -14,8 +14,15 @@ import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
 
 const cfg = loadConfig();
-assertCredentials(cfg);
 const suunto = new SuuntoClient(cfg);
+
+// Credential check runs lazily — at the moment a tool or resource actually
+// tries to hit the API. This lets MCP introspection (ListTools,
+// ListResources) succeed without credentials, which catalogs like
+// glama.ai use to verify the server boots correctly.
+function ensureReady() {
+  assertCredentials(cfg);
+}
 
 const server = new Server(
   { name: "suunto-mcp", version: "0.1.0" },
@@ -27,6 +34,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+  ensureReady();
   const contents = await readResource(req.params.uri, suunto);
   return { contents: [contents] };
 });
@@ -183,6 +191,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const a = args as Record<string, any>;
 
   try {
+    ensureReady();
     switch (name) {
       case "list_workouts": {
         const since = a.since ? Date.parse(a.since) : undefined;
