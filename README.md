@@ -6,9 +6,11 @@ This is a small bridge that lets AI assistants like Claude read your Suunto
 training data — runs, hikes, sleep, recovery — so you can just *talk* to your
 watch.
 
-> _Built by a long-time Suunto user (hi 👋) who got tired of clicking through
-> dashboards and wanted to ask his coach-shaped chatbot "how was my last
-> long run?" instead._
+> _Built by a Suunto user (hi 👋) who wanted to ask his coach-shaped
+> chatbot "how was my last long run?" instead of clicking through
+> dashboards — and to plug live training data into a personal
+> [health-skill](https://github.com/googlarz/health-skill) for context-aware
+> health Q&A._
 
 ---
 
@@ -173,6 +175,15 @@ For most personal setups, skip this. Polling on demand is simpler.
 
 ---
 
+## Pairs well with `health-skill`
+
+If you already use [googlarz/health-skill](https://github.com/googlarz/health-skill)
+— a Claude skill for symptom triage, lab interpretation, and lifestyle
+guidance — Suunto MCP gives it a live feed of your training, sleep, and
+recovery data. Together they answer questions like *"is my resting HR drift
+this week consistent with the cold I had?"* or *"given my recovery scores,
+should I keep this week's intervals?"* with real numbers instead of guesses.
+
 ## Privacy
 
 - All data flows **directly between your machine and Suunto's API.**
@@ -215,7 +226,6 @@ in the API.
 - [ ] Webhook subscription management tools (create / delete / renew)
 - [ ] Cached workout index for faster "this month" queries
 - [ ] Workout Upload API (push third-party workouts back to Suunto)
-- [ ] Optional Strava mirror tool
 - [ ] Tests against a recorded API fixture
 
 PRs welcome.
