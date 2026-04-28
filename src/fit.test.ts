@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { summarizeFit } from "./fit.js";
+import { parseFit, summarizeFit } from "./fit.js";
 
 test("fit: summarizeFit pulls session totals", () => {
   const parsed = {
@@ -58,4 +58,51 @@ test("fit: summarizeFit picks middle record correctly", () => {
   assert.equal(s.records_sample?.middle.idx, 5);
   assert.equal(s.records_sample?.first.idx, 0);
   assert.equal(s.records_sample?.last.idx, 10);
+});
+
+// ---------- Real parser integration tests ----------
+
+/**
+ * Build a minimum-valid FIT byte stream:
+ *   14-byte header  +  N data bytes  +  2-byte file CRC.
+ *
+ * Header layout (FIT spec):
+ *   [0]    header size (14)
+ *   [1]    protocol version (0x20 = 2.0)
+ *   [2-3]  profile version (LE uint16)
+ *   [4-7]  data size (LE uint32) — bytes between header and CRC
+ *   [8-11] ".FIT" magic
+ *   [12-13] header CRC (0 = skip validation)
+ */
+function buildMinimalFit(dataSize = 0): Uint8Array {
+  const totalSize = 14 + dataSize + 2;
+  const buf = new Uint8Array(totalSize);
+  const view = new DataView(buf.buffer);
+  buf[0] = 14;
+  buf[1] = 0x20;
+  view.setUint16(2, 100, true);
+  view.setUint32(4, dataSize, true);
+  buf.set([0x2e, 0x46, 0x49, 0x54], 8); // ".FIT"
+  view.setUint16(12, 0, true);
+  // file CRC (last 2 bytes) left as 0
+  return buf;
+}
+
+test("fit: parseFit accepts a minimum-valid FIT byte stream", async () => {
+  const bytes = buildMinimalFit();
+  const parsed = await parseFit(bytes);
+  // No data records — sessions/records should be absent or empty.
+  assert.ok(parsed);
+  const summary = summarizeFit(parsed);
+  assert.equal(summary.sport, undefined);
+  assert.equal(summary.records_sample, null);
+});
+
+test("fit: parseFit rejects obvious garbage", async () => {
+  const garbage = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
+  await assert.rejects(parseFit(garbage));
+});
+
+test("fit: parseFit rejects empty input", async () => {
+  await assert.rejects(parseFit(new Uint8Array(0)));
 });

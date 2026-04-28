@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { URL } from "node:url";
 import type { Config } from "./config.js";
 import { loadTokens, saveTokens, type TokenBundle } from "./storage.js";
+import { SuuntoNotAuthenticatedError, SuuntoTokenError } from "./errors.js";
 
 const AUTH_BASE = "https://cloudapi-oauth.suunto.com/oauth";
 
@@ -25,7 +26,9 @@ async function tokenRequest(c: Config, body: Record<string, string>): Promise<To
     body: new URLSearchParams(body).toString(),
   });
   if (!res.ok) {
-    throw new Error(`Token request failed: ${res.status} ${await res.text()}`);
+    throw new SuuntoTokenError(
+      `Token request failed: ${res.status} ${await res.text()}`,
+    );
   }
   const data = (await res.json()) as {
     access_token: string;
@@ -56,19 +59,35 @@ export async function refresh(c: Config, refreshToken: string): Promise<TokenBun
   });
 }
 
+// Concurrent-refresh deduplication: if multiple callers find the token
+// expired at the same time, they all await one shared refresh promise so
+// Suunto only sees a single refresh_token grant. Suunto invalidates older
+// refresh tokens on use, so a parallel double-refresh would log the user out.
+let inFlightRefresh: Promise<TokenBundle> | null = null;
+
 export async function getValidAccessToken(c: Config): Promise<string> {
   const tokens = await loadTokens(c.tokenPath);
-  if (!tokens) {
-    throw new Error(
-      `Not authenticated. Run \`npm run auth\` to pair your Suunto account first.`,
-    );
+  if (!tokens) throw new SuuntoNotAuthenticatedError();
+  if (tokens.expiresAt > Date.now() + 60_000) return tokens.accessToken;
+
+  if (!inFlightRefresh) {
+    inFlightRefresh = (async () => {
+      try {
+        const fresh = await refresh(c, tokens.refreshToken);
+        await saveTokens(c.tokenPath, fresh);
+        return fresh;
+      } finally {
+        inFlightRefresh = null;
+      }
+    })();
   }
-  if (tokens.expiresAt > Date.now() + 60_000) {
-    return tokens.accessToken;
-  }
-  const fresh = await refresh(c, tokens.refreshToken);
-  await saveTokens(c.tokenPath, fresh);
+  const fresh = await inFlightRefresh;
   return fresh.accessToken;
+}
+
+// Test-only: clear the shared refresh promise between tests.
+export function __resetRefreshSingleton(): void {
+  inFlightRefresh = null;
 }
 
 export async function runAuthFlow(c: Config): Promise<TokenBundle> {

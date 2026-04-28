@@ -4,21 +4,34 @@
   "description": "MCP server that connects your Suunto watch data to Claude and other AI assistants.",
   "type": "module",
   "bin": {
-    "suunto-mcp": "dist/index.js"
+    "suunto-mcp": "dist/index.js",
+    "suunto-mcp-auth": "dist/auth-cli.js",
+    "suunto-mcp-webhook": "dist/webhook.js"
   },
   "main": "dist/index.js",
+  "homepage": "https://github.com/googlarz/suunto-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/googlarz/suunto-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/googlarz/suunto-mcp/issues"
+  },
+  "author": "Dawid <googlarz@gmail.com>",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/index.js dist/auth-cli.js dist/webhook.js",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "auth": "node dist/auth-cli.js",
     "webhook": "node dist/webhook.js",
-    "test": "tsc -p tsconfig.test.json && node --test dist-test/*.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/*.test.js",
+    "prepublishOnly": "npm test && npm run build"
   },
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "assets"
   ],
   "keywords": [
     "mcp",
@@ -26,7 +39,11 @@
     "suunto",
     "fitness",
     "wearables",
-    "claude"
+    "claude",
+    "anthropic",
+    "training",
+    "fit-file",
+    "ai-assistant"
   ],
   "license": "MIT",
   "engines": {
@@ -36,6 +53,9 @@
     "@modelcontextprotocol/sdk": "^1.0.4",
     "fit-file-parser": "^1.21.0",
     "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "^1.1.6"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

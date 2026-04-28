@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadTokens, saveTokens } from "./storage.js";
+import { loadTokens, saveTokens, __resetStorageCache } from "./storage.js";
+
+const origStorageEnv = process.env.SUUNTO_TOKEN_STORAGE;
+process.env.SUUNTO_TOKEN_STORAGE = "file";
+__resetStorageCache();
+process.on("exit", () => {
+  if (origStorageEnv === undefined) delete process.env.SUUNTO_TOKEN_STORAGE;
+  else process.env.SUUNTO_TOKEN_STORAGE = origStorageEnv;
+});
 
 test("storage: save then load round-trips", async () => {
   const dir = await mkdtemp(join(tmpdir(), "suunto-mcp-"));

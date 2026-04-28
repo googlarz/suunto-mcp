@@ -4,10 +4,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
+import { RESOURCES, readResource } from "./resources.js";
 
 const cfg = loadConfig();
 assertCredentials(cfg);
@@ -15,8 +18,17 @@ const suunto = new SuuntoClient(cfg);
 
 const server = new Server(
   { name: "suunto-mcp", version: "0.1.0" },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, resources: {} } },
 );
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  resources: RESOURCES,
+}));
+
+server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+  const contents = await readResource(req.params.uri, suunto);
+  return { contents: [contents] };
+});
 
 const tools = [
   {

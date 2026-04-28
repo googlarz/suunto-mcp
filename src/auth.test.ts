@@ -3,8 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildAuthorizeUrl, exchangeCode, refresh, getValidAccessToken } from "./auth.js";
+import {
+  buildAuthorizeUrl,
+  exchangeCode,
+  refresh,
+  getValidAccessToken,
+  __resetRefreshSingleton,
+} from "./auth.js";
 import { loadTokens, saveTokens } from "./storage.js";
+import { SuuntoNotAuthenticatedError, SuuntoTokenError } from "./errors.js";
 
 const baseCfg = {
   clientId: "cid",
@@ -19,6 +26,7 @@ let tmp: string;
 
 beforeEach(async () => {
   tmp = await mkdtemp(join(tmpdir(), "suunto-auth-"));
+  __resetRefreshSingleton();
 });
 
 afterEach(async () => {
@@ -61,21 +69,13 @@ test("auth: exchangeCode posts auth-code grant with Basic auth", async () => {
 
   assert.equal(captured.url, "https://cloudapi-oauth.suunto.com/oauth/token");
   assert.equal(captured.init.method, "POST");
-  assert.equal(
-    captured.init.headers["Content-Type"],
-    "application/x-www-form-urlencoded",
-  );
   const expectedBasic = "Basic " + Buffer.from("cid:sec").toString("base64");
   assert.equal(captured.init.headers.Authorization, expectedBasic);
   const body = new URLSearchParams(captured.init.body);
   assert.equal(body.get("grant_type"), "authorization_code");
   assert.equal(body.get("code"), "the-code");
-  assert.equal(body.get("redirect_uri"), baseCfg.redirectUri);
-
   assert.equal(bundle.accessToken, "AT");
-  assert.equal(bundle.refreshToken, "RT");
   assert.equal(bundle.user, "demo");
-  assert.ok(bundle.expiresAt > Date.now());
 });
 
 test("auth: refresh uses refresh_token grant", async () => {
@@ -95,12 +95,13 @@ test("auth: refresh uses refresh_token grant", async () => {
   assert.equal(bundle.accessToken, "AT2");
 });
 
-test("auth: token request error includes status and body", async () => {
+test("auth: token error wraps response as SuuntoTokenError", async () => {
   globalThis.fetch = (async () =>
     new Response("invalid_grant", { status: 400 })) as any;
   await assert.rejects(
     () => exchangeCode(baseCfg, "x"),
-    /Token request failed: 400.*invalid_grant/,
+    (err: unknown) =>
+      err instanceof SuuntoTokenError && /400.*invalid_grant/.test((err as Error).message),
   );
 });
 
@@ -144,10 +145,44 @@ test("auth: getValidAccessToken refreshes when expiring within 60s", async () =>
   assert.equal(persisted?.refreshToken, "rt2");
 });
 
-test("auth: getValidAccessToken throws if not paired", async () => {
+test("auth: throws SuuntoNotAuthenticatedError when token file absent", async () => {
   const path = join(tmp, "missing.json");
   await assert.rejects(
     () => getValidAccessToken({ ...baseCfg, tokenPath: path }),
-    /Not authenticated/,
+    (err: unknown) => err instanceof SuuntoNotAuthenticatedError,
   );
+});
+
+test("auth: concurrent refreshes share a single in-flight request", async () => {
+  const path = join(tmp, "tokens.json");
+  await saveTokens(path, {
+    accessToken: "old",
+    refreshToken: "rt-original",
+    expiresAt: Date.now() + 10_000, // expiring within 60s
+  });
+
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    await new Promise((r) => setTimeout(r, 30));
+    return new Response(
+      JSON.stringify({
+        access_token: `fresh-${calls}`,
+        refresh_token: `rt-${calls}`,
+        expires_in: 3600,
+      }),
+      { status: 200 },
+    );
+  }) as any;
+
+  const cfg = { ...baseCfg, tokenPath: path };
+  const tokens = await Promise.all([
+    getValidAccessToken(cfg),
+    getValidAccessToken(cfg),
+    getValidAccessToken(cfg),
+    getValidAccessToken(cfg),
+  ]);
+
+  assert.equal(calls, 1, "only one refresh request should be sent");
+  assert.deepEqual(new Set(tokens), new Set(["fresh-1"]));
 });

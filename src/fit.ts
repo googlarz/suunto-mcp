@@ -1,5 +1,6 @@
-// @ts-expect-error - no published types
-import FitParser from "fit-file-parser";
+// @ts-ignore - no published types; package is CJS so default-import resolution varies
+import FitParserModule from "fit-file-parser";
+const FitParser: any = (FitParserModule as any).default ?? FitParserModule;
 
 export interface ParsedFit {
   activity?: any;

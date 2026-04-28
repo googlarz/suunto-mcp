@@ -1,5 +1,12 @@
 import type { Config } from "./config.js";
 import { getValidAccessToken } from "./auth.js";
+import {
+  SuuntoApiError,
+  SuuntoAuthError,
+  SuuntoForbiddenError,
+  SuuntoNotFoundError,
+  SuuntoRateLimitError,
+} from "./errors.js";
 
 const API_BASE = "https://cloudapi.suunto.com";
 
@@ -8,6 +15,14 @@ const MAX_RETRIES = 4;
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function errorFor(status: number, path: string, body: string, retryAfter?: number) {
+  if (status === 401) return new SuuntoAuthError(path, body);
+  if (status === 403) return new SuuntoForbiddenError(path, body);
+  if (status === 404) return new SuuntoNotFoundError(path, body);
+  if (status === 429) return new SuuntoRateLimitError(path, body, retryAfter);
+  return new SuuntoApiError(status, path, body);
 }
 
 export class SuuntoClient {
@@ -39,15 +54,16 @@ export class SuuntoClient {
 
       if (res.ok) return res;
 
+      const retryAfter = Number(res.headers.get("retry-after")) || 0;
+
       if (RETRYABLE_STATUS.has(res.status) && attempt < MAX_RETRIES) {
-        const retryAfter = Number(res.headers.get("retry-after")) || 0;
         await sleep(retryAfter > 0 ? retryAfter * 1000 : backoffMs(attempt));
         attempt++;
         continue;
       }
 
       const body = await res.text().catch(() => "");
-      throw new Error(`Suunto API ${res.status} ${path}: ${body}`);
+      throw errorFor(res.status, path, body, retryAfter > 0 ? retryAfter : undefined);
     }
     throw lastErr ?? new Error("Suunto API: exhausted retries");
   }
@@ -112,19 +128,15 @@ export class SuuntoClient {
   }
 
   // ---------- 24/7 Activity ----------
-  // Endpoint paths reflect the documented Suunto 24/7 product. If your
-  // entitlement uses a different path prefix, override via SUUNTO_DAILY_PREFIX.
 
   private dailyPrefix() {
     return process.env.SUUNTO_DAILY_PREFIX ?? "/v2";
   }
 
-  /** Daily activity summary for one date (YYYY-MM-DD): steps, calories, HR. */
   getDailyActivity(date: string) {
     return this.json<any>(`${this.dailyPrefix()}/activity/${date}`);
   }
 
-  /** Daily activity range. */
   listDailyActivity(from: string, to: string) {
     const q = new URLSearchParams({ from, to });
     return this.json<any>(`${this.dailyPrefix()}/activity?${q.toString()}`);
@@ -132,7 +144,6 @@ export class SuuntoClient {
 
   // ---------- Sleep ----------
 
-  /** Sleep summary for one date (YYYY-MM-DD): stages, duration, score. */
   getSleep(date: string) {
     return this.json<any>(`${this.dailyPrefix()}/sleep/${date}`);
   }

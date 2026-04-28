@@ -5,6 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveTokens } from "./storage.js";
 import { SuuntoClient } from "./api.js";
+import {
+  SuuntoApiError,
+  SuuntoAuthError,
+  SuuntoForbiddenError,
+  SuuntoNotFoundError,
+  SuuntoRateLimitError,
+} from "./errors.js";
 
 const origFetch = globalThis.fetch;
 let tmp: string;
@@ -82,8 +89,51 @@ test("api: 4xx (non-429) errors are not retried", async () => {
     return new Response("bad", { status: 400 });
   }) as any;
   const c = new SuuntoClient(cfg);
-  await assert.rejects(() => c.json<any>("/v2/test"), /Suunto API 400/);
+  await assert.rejects(
+    () => c.json<any>("/v2/test"),
+    (err: unknown) => err instanceof SuuntoApiError && (err as SuuntoApiError).status === 400,
+  );
   assert.equal(n, 1);
+});
+
+test("api: 401 throws SuuntoAuthError", async () => {
+  globalThis.fetch = (async () => new Response("nope", { status: 401 })) as any;
+  const c = new SuuntoClient(cfg);
+  await assert.rejects(
+    () => c.json<any>("/v2/test"),
+    (err: unknown) => err instanceof SuuntoAuthError,
+  );
+});
+
+test("api: 403 throws SuuntoForbiddenError", async () => {
+  globalThis.fetch = (async () => new Response("nope", { status: 403 })) as any;
+  const c = new SuuntoClient(cfg);
+  await assert.rejects(
+    () => c.json<any>("/v2/test"),
+    (err: unknown) => err instanceof SuuntoForbiddenError,
+  );
+});
+
+test("api: 404 throws SuuntoNotFoundError", async () => {
+  globalThis.fetch = (async () => new Response("missing", { status: 404 })) as any;
+  const c = new SuuntoClient(cfg);
+  await assert.rejects(
+    () => c.json<any>("/v2/test"),
+    (err: unknown) => err instanceof SuuntoNotFoundError,
+  );
+});
+
+test("api: 429 after retries exhausted throws SuuntoRateLimitError with retryAfter", async () => {
+  globalThis.fetch = (async () =>
+    new Response("rate", {
+      status: 429,
+      headers: { "retry-after": "0" },
+    })) as any;
+  const c = new SuuntoClient(cfg);
+  await assert.rejects(
+    () => c.json<any>("/v2/test"),
+    (err: unknown) => err instanceof SuuntoRateLimitError,
+  );
 });
 
 test("api: bytes() returns raw Uint8Array", async () => {

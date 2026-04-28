@@ -119,6 +119,26 @@ You only do this once. The MCP server refreshes tokens automatically.
 Add to your MCP config (e.g. `~/.claude/mcp_config.json` or the equivalent in
 Claude Desktop):
 
+**Once published to npm** (no clone needed):
+
+```json
+{
+  "mcpServers": {
+    "suunto": {
+      "command": "npx",
+      "args": ["-y", "suunto-mcp"],
+      "env": {
+        "SUUNTO_CLIENT_ID": "...",
+        "SUUNTO_CLIENT_SECRET": "...",
+        "SUUNTO_SUBSCRIPTION_KEY": "..."
+      }
+    }
+  }
+}
+```
+
+**From a local clone:**
+
 ```json
 {
   "mcpServers": {
@@ -225,6 +245,23 @@ in the API.
 
 ---
 
+## MCP Resources (ambient context)
+
+In addition to tools, the server exposes **resources** — passive data the
+client can pull without the model having to call a tool:
+
+| URI | What |
+|---|---|
+| `suunto://recent/workout` | Most recent workout summary |
+| `suunto://today/sleep` | Last night's sleep |
+| `suunto://today/recovery` | Today's recovery / HRV |
+| `suunto://today/activity` | Today's steps / calories / HR |
+| `suunto://this-week/summary` | Aggregated training totals for the current ISO week |
+
+Clients that surface MCP resources (Claude Desktop, Cursor) will let you
+attach these directly into a conversation — useful for "given my recovery
+today, should I…" style questions.
+
 ## Reliability
 
 - **Automatic retries** with exponential backoff + jitter on `429`, `500`,
@@ -234,6 +271,29 @@ in the API.
   `limit` is met or there's nothing left.
 - **Token refresh is automatic** — the access token is silently re-issued
   before each request if it's within 60 seconds of expiry.
+- **Concurrent-refresh deduplication** — multiple parallel calls share a
+  single in-flight refresh, so Suunto never sees a double `refresh_token`
+  grant (which would invalidate the older token and log you out).
+- **Structured error types** — `SuuntoAuthError`, `SuuntoForbiddenError`,
+  `SuuntoNotFoundError`, `SuuntoRateLimitError`, `SuuntoApiError`,
+  `SuuntoNotAuthenticatedError`, `SuuntoTokenError`. Lets clients
+  distinguish "re-authenticate" from "wait and retry" from "this resource
+  doesn't exist."
+
+## Token storage
+
+By default, tokens are written to `~/.suunto-mcp/tokens.json` with file
+mode `0600`. For stronger protection, opt into the OS keychain
+(macOS Keychain, Linux libsecret, Windows Credential Manager):
+
+```bash
+SUUNTO_TOKEN_STORAGE=keychain npm install @napi-rs/keyring
+SUUNTO_TOKEN_STORAGE=keychain npm run auth
+```
+
+The keychain backend is an optional dependency — `npm install` will not
+fail if it can't be built on your platform; it just falls back to the
+file-based default.
 
 ## Tests
 
@@ -241,12 +301,16 @@ in the API.
 npm test
 ```
 
-27 unit tests cover:
+40 unit + integration tests cover:
 - OAuth URL building, code exchange, refresh, token-expiry refresh logic
-- Token storage (round-trip, file permissions, missing-file fallback)
+- Concurrent-refresh deduplication (4 parallel calls → 1 token request)
+- Token storage (round-trip, file permissions, missing-file fallback, parent-dir creation)
 - API client: bearer + subscription-key headers, retry on 429/500 with `Retry-After`, no retry on 4xx, byte-stream downloads
+- Structured error types (`SuuntoAuthError`, `SuuntoForbiddenError`, `SuuntoNotFoundError`, `SuuntoRateLimitError`)
 - `list_workouts` auto-pagination across multiple pages
+- FIT integration: parser accepts a minimum-valid byte stream, rejects garbage and empty input
 - FIT summary extraction, empty-FIT handling, record sampling
+- MCP resources: enumeration, dispatch, today's-date wiring, week aggregation
 - Config loading, env overrides, missing-credential errors
 
 CI runs on Node 20 and 22 on every push and PR.
@@ -254,9 +318,11 @@ CI runs on Node 20 and 22 on every push and PR.
 ## Roadmap
 
 - [ ] Webhook subscription management tools (create / delete / renew)
+- [ ] Webhook signature verification
 - [ ] Cached workout index for faster "this month" queries
 - [ ] Workout Upload API (push third-party workouts back to Suunto)
-- [ ] Tests against a recorded API fixture
+- [ ] HTTP / SSE transport (currently stdio only)
+- [ ] Recorded API fixture for end-to-end tests
 
 PRs welcome.
 
