@@ -1,0 +1,43 @@
+{
+  "name": "suunto-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that connects your Suunto watch data to Claude and other AI assistants.",
+  "type": "module",
+  "bin": {
+    "suunto-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "auth": "node dist/auth-cli.js",
+    "webhook": "node dist/webhook.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "suunto",
+    "fitness",
+    "wearables",
+    "claude"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "fit-file-parser": "^1.21.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.3"
+  }
+}
