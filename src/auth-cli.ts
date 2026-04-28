@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./env.js";
 import { loadConfig, assertCredentials } from "./config.js";
 import { runAuthFlow } from "./auth.js";
 

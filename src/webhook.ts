@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "./env.js";
 // Minimal webhook receiver for Suunto push notifications.
 // Suunto POSTs JSON for new workouts, daily activity, sleep, and recovery.
 // Run this on a public HTTPS host (or via a tunnel like cloudflared) and

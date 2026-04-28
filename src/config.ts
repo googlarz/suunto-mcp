@@ -28,8 +28,16 @@ export function assertCredentials(c: Config): void {
   if (!c.subscriptionKey) missing.push("SUUNTO_SUBSCRIPTION_KEY");
   if (missing.length) {
     throw new Error(
-      `Missing required env vars: ${missing.join(", ")}. ` +
-        `Copy .env.example to .env and fill in the values from https://apizone.suunto.com.`,
+      `Missing required env vars: ${missing.join(", ")}.\n` +
+        `\n` +
+        `Did you copy .env.example to .env and fill in the values?\n` +
+        `  cp .env.example .env\n` +
+        `  $EDITOR .env\n` +
+        `\n` +
+        `Get your credentials at https://apizone.suunto.com → your app:\n` +
+        `  - Client ID         → app overview page\n` +
+        `  - Client Secret     → "OAuth settings" section (regenerate if hidden)\n` +
+        `  - Subscription Key  → user profile → "Subscriptions" → primary key\n`,
     );
   }
 }

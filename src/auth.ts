@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { exec } from "node:child_process";
 import { URL } from "node:url";
 import type { Config } from "./config.js";
 import { loadTokens, saveTokens, type TokenBundle } from "./storage.js";
@@ -90,6 +91,23 @@ export function __resetRefreshSingleton(): void {
   inFlightRefresh = null;
 }
 
+function tryOpenBrowser(url: string): void {
+  if (process.env.SUUNTO_NO_BROWSER) return;
+  const cmd =
+    process.platform === "darwin"
+      ? `open ${shellQuote(url)}`
+      : process.platform === "win32"
+        ? `start "" ${shellQuote(url)}`
+        : `xdg-open ${shellQuote(url)}`;
+  exec(cmd, () => {
+    /* swallow — fall back to manual paste */
+  });
+}
+
+function shellQuote(s: string): string {
+  return `"${s.replace(/"/g, '\\"')}"`;
+}
+
 export async function runAuthFlow(c: Config): Promise<TokenBundle> {
   const state = Math.random().toString(36).slice(2);
   const url = new URL(c.redirectUri);
@@ -139,7 +157,11 @@ export async function runAuthFlow(c: Config): Promise<TokenBundle> {
     });
 
     server.listen(port, () => {
-      console.error(`\nOpen this URL in your browser to pair Suunto:\n\n  ${authorizeUrl}\n`);
+      console.error(
+        `\nOpening Suunto authorization in your browser…\n\n  ${authorizeUrl}\n\n` +
+          `If the browser didn't open, copy the URL above into it manually.\n`,
+      );
+      tryOpenBrowser(authorizeUrl);
     });
   });
 }

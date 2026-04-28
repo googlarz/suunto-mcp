@@ -6,7 +6,8 @@
   "bin": {
     "suunto-mcp": "dist/index.js",
     "suunto-mcp-auth": "dist/auth-cli.js",
-    "suunto-mcp-webhook": "dist/webhook.js"
+    "suunto-mcp-webhook": "dist/webhook.js",
+    "suunto-mcp-doctor": "dist/doctor.js"
   },
   "main": "dist/index.js",
   "homepage": "https://github.com/googlarz/suunto-mcp#readme",
@@ -19,11 +20,12 @@
   },
   "author": "Dawid <googlarz@gmail.com>",
   "scripts": {
-    "build": "tsc && chmod +x dist/index.js dist/auth-cli.js dist/webhook.js",
+    "build": "tsc && chmod +x dist/index.js dist/auth-cli.js dist/webhook.js dist/doctor.js",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "auth": "node dist/auth-cli.js",
     "webhook": "node dist/webhook.js",
+    "doctor": "node dist/doctor.js",
     "test": "tsc -p tsconfig.test.json && node --test dist-test/*.test.js",
     "prepublishOnly": "npm test && npm run build"
   },
@@ -51,6 +53,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "dotenv": "^16.4.5",
     "fit-file-parser": "^1.21.0",
     "zod": "^3.23.8"
   },
