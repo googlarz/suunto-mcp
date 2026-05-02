@@ -6,7 +6,7 @@ import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 
 function die(msg: string): never {
-  console.error(`suunto: ${msg}`);
+  console.error(`suunto-mcp: ${msg}`);
   process.exit(1);
 }
 
@@ -36,10 +36,10 @@ Other:
   list-subscriptions
 
 All commands output JSON to stdout. Pipe to jq for filtering:
-  suunto-mcp-cli list-workouts --limit 5 | jq '.[].sport'
+  suunto-mcp-cli list-workouts --limit 5 | jq '.payload[].sport'
 `.trim();
 
-const [, , cmd, ...argv] = process.argv;
+const [, , cmd, ...rest] = process.argv;
 
 if (!cmd || cmd === "--help" || cmd === "-h") {
   console.log(HELP);
@@ -54,7 +54,7 @@ try {
   switch (cmd) {
     case "list-workouts": {
       const { values } = parseArgs({
-        args: argv,
+        args: rest,
         options: {
           since: { type: "string" },
           until: { type: "string" },
@@ -70,20 +70,20 @@ try {
     }
 
     case "get-workout": {
-      const key = argv[0] ?? die("Usage: get-workout <workoutKey>");
+      const key = rest[0] ?? die("Usage: get-workout <workoutKey>");
       out(await suunto.getWorkout(key));
       break;
     }
 
     case "get-workout-samples": {
-      const key = argv[0] ?? die("Usage: get-workout-samples <workoutKey>");
+      const key = rest[0] ?? die("Usage: get-workout-samples <workoutKey>");
       out(await suunto.getWorkoutSamples(key));
       break;
     }
 
     case "get-workout-fit": {
       const { values, positionals } = parseArgs({
-        args: argv,
+        args: rest,
         options: { full: { type: "boolean", default: false } },
         allowPositionals: true,
       });
@@ -95,21 +95,21 @@ try {
     }
 
     case "export-workout-gpx": {
-      const key = argv[0] ?? die("Usage: export-workout-gpx <workoutKey>");
+      const key = rest[0] ?? die("Usage: export-workout-gpx <workoutKey>");
       const bytes = await suunto.getWorkoutGpx(key);
       process.stdout.write(new TextDecoder().decode(bytes) + "\n");
       break;
     }
 
     case "get-daily-activity": {
-      const date = argv[0] ?? die("Usage: get-daily-activity <YYYY-MM-DD>");
+      const date = rest[0] ?? die("Usage: get-daily-activity <YYYY-MM-DD>");
       out(await suunto.getDailyActivity(date));
       break;
     }
 
     case "list-daily-activity": {
       const { values } = parseArgs({
-        args: argv,
+        args: rest,
         options: {
           from: { type: "string" },
           to: { type: "string" },
@@ -121,14 +121,14 @@ try {
     }
 
     case "get-sleep": {
-      const date = argv[0] ?? die("Usage: get-sleep <YYYY-MM-DD>");
+      const date = rest[0] ?? die("Usage: get-sleep <YYYY-MM-DD>");
       out(await suunto.getSleep(date));
       break;
     }
 
     case "list-sleep": {
       const { values } = parseArgs({
-        args: argv,
+        args: rest,
         options: {
           from: { type: "string" },
           to: { type: "string" },
@@ -140,14 +140,14 @@ try {
     }
 
     case "get-recovery": {
-      const date = argv[0] ?? die("Usage: get-recovery <YYYY-MM-DD>");
+      const date = rest[0] ?? die("Usage: get-recovery <YYYY-MM-DD>");
       out(await suunto.getRecovery(date));
       break;
     }
 
     case "list-recovery": {
       const { values } = parseArgs({
-        args: argv,
+        args: rest,
         options: {
           from: { type: "string" },
           to: { type: "string" },
@@ -164,7 +164,7 @@ try {
     }
 
     default:
-      die(`Unknown command: ${cmd}. Run with --help for usage.`);
+      die(`Unknown command: ${cmd}. Run 'suunto-mcp-cli --help' for usage.`);
   }
 } catch (err: any) {
   die(err.message ?? String(err));
