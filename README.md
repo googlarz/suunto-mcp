@@ -266,26 +266,26 @@ Useful for scripting, quick checks, or piping into `jq`.
 ```bash
 # After npm run build (or npm install -g suunto-mcp once published):
 
-suunto-mcp-cli list-workouts --since 2026-04-01 --limit 10
-suunto-mcp-cli get-workout <workoutKey>
-suunto-mcp-cli get-sleep 2026-04-20
-suunto-mcp-cli list-sleep --from 2026-04-01 --to 2026-04-30
-suunto-mcp-cli list-recovery --from 2026-04-01 --to 2026-04-30
-suunto-mcp-cli export-workout-gpx <workoutKey> > route.gpx
+suunto-mcp list-workouts --since 2026-04-01 --limit 10
+suunto-mcp get-workout <workoutKey>
+suunto-mcp get-sleep 2026-04-20
+suunto-mcp list-sleep --from 2026-04-01 --to 2026-04-30
+suunto-mcp list-recovery --from 2026-04-01 --to 2026-04-30
+suunto-mcp export-workout-gpx <workoutKey> > route.gpx
 ```
 
 All commands output JSON to stdout:
 
 ```bash
 # Most recent workout's sport and distance
-suunto-mcp-cli list-workouts --limit 1 | jq '.payload[0] | {sport, km: (.totalDistance/1000)}'
+suunto-mcp list-workouts --limit 1 | jq '.payload[0] | {sport, km: (.totalDistance/1000)}'
 
 # Average sleep score over the last week
-suunto-mcp-cli list-sleep --from 2026-04-14 --to 2026-04-20 \
+suunto-mcp list-sleep --from 2026-04-14 --to 2026-04-20 \
   | jq '[.payload[].sleepScore] | add/length'
 ```
 
-Run `suunto-mcp-cli --help` for the full command list.
+Run `suunto-mcp --help` for the full command list.
 
 ---
 

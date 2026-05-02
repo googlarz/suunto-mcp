@@ -1,5 +1,15 @@
 #!/usr/bin/env node
 import "./env.js";
+
+// CLI mode: any explicit command arg, OR running interactively in a terminal.
+// MCP server mode: stdin is piped (how every MCP client spawns this binary).
+const [, , firstArg] = process.argv;
+if (firstArg !== undefined || process.stdin.isTTY) {
+  const { runCli } = await import("./cli.js");
+  await runCli(process.argv.slice(2));
+  process.exit(0);
+}
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
