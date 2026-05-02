@@ -6,6 +6,7 @@
 
 [![CI](https://github.com/googlarz/suunto-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/googlarz/suunto-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Glama](https://glama.ai/mcp/servers/googlarz/suunto-mcp/badge)](https://glama.ai/mcp/servers/googlarz/suunto-mcp)
 
 **Bring your Suunto watch into the conversation.**
 
