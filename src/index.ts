@@ -43,26 +43,26 @@ const tools = [
   {
     name: "list_workouts",
     description:
-      "Returns the user's recent Suunto workouts as an array of summaries. Each item: workoutKey (string id), activityId, sport, startTime (epoch ms), totalTime (s), totalDistance (m), totalCalories, avgHeartRate, maxHeartRate, totalAscent (m), totalDescent (m). Auto-paginates up to limit. No mutations.",
+      "Returns the user's recent Suunto workouts ordered newest-first. Each item: workoutKey (string id), activityId, sport, startTime (epoch ms), totalTime (s), totalDistance (m), totalCalories, avgHeartRate, maxHeartRate, totalAscent (m), totalDescent (m). Auto-paginates across pages until limit is reached or no more workouts exist. Use get_workout for full detail (laps, HR zones, sport-specific metrics) on a single result. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
         since: {
           type: "string",
           format: "date-time",
-          description: "ISO 8601 datetime lower bound on startTime. Example: 2026-04-01T00:00:00Z.",
+          description: "ISO 8601 lower bound on startTime (inclusive). Example: 2026-04-01T00:00:00Z.",
         },
         until: {
           type: "string",
           format: "date-time",
-          description: "ISO 8601 datetime upper bound on startTime.",
+          description: "ISO 8601 upper bound on startTime (inclusive).",
         },
         limit: {
           type: "integer",
           minimum: 1,
           maximum: 1000,
           default: 25,
-          description: "Maximum workouts to return.",
+          description: "Maximum number of workouts to return (1–1000). Defaults to 25.",
         },
       },
     },
@@ -70,14 +70,14 @@ const tools = [
   {
     name: "get_workout",
     description:
-      "Returns the full summary object for one workout: every field Suunto exposes (laps, HR zones, training-effect, sport-specific metrics) keyed by the given workoutKey. No mutations.",
+      "Returns the full summary for one workout: all fields Suunto exposes including laps, HR zones, training-effect score, and sport-specific metrics (pace zones for running, power for cycling, etc.). Throws SuuntoNotFoundError if the workoutKey does not exist. Use list_workouts to discover valid workoutKey values. For second-by-second time-series (HR, pace, GPS) use get_workout_samples instead. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
         workoutKey: {
           type: "string",
           minLength: 1,
-          description: "The workoutKey from list_workouts.",
+          description: "Unique workout identifier from list_workouts.",
         },
       },
       required: ["workoutKey"],
@@ -86,14 +86,14 @@ const tools = [
   {
     name: "get_workout_samples",
     description:
-      "Returns the time-series sample stream for one workout: timestamp, heartRate (bpm), speed (m/s), altitude (m), power (W), cadence, latitude, longitude — sampled at the device's recording rate. Response can be large for long workouts. No mutations.",
+      "Returns the time-series sample stream for one workout. Each sample: timestamp (ms), heartRate (bpm), speed (m/s), altitude (m), power (W), cadence, latitude, longitude. Sampled at the device's recording interval (typically 1 s). Long workouts (>2 h) may return thousands of records — use get_workout_fit with full=false for a compact summary instead. Throws SuuntoNotFoundError if the key is invalid. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
         workoutKey: {
           type: "string",
           minLength: 1,
-          description: "The workoutKey from list_workouts.",
+          description: "Unique workout identifier from list_workouts.",
         },
       },
       required: ["workoutKey"],
@@ -102,19 +102,19 @@ const tools = [
   {
     name: "get_workout_fit",
     description:
-      "Downloads the workout's FIT file (binary) from Suunto and returns it parsed to JSON. Default response is a compact summary { sport, total_distance_km, avg_heart_rate, training_effect, laps, records_sample (first/middle/last) }. Set full=true for every parsed record (often >100 KB). No mutations.",
+      "Downloads the workout's binary FIT file from Suunto and returns it parsed to JSON. Default (full=false): compact summary { sport, total_distance_km, avg_heart_rate, training_effect, laps, records_sample (first 5 / middle 5 / last 5 records) }. Set full=true to receive every parsed FIT record — responses are often >100 KB for long workouts. Use the default for analysis and summaries; full=true only when raw record-level data is required. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
         workoutKey: {
           type: "string",
           minLength: 1,
-          description: "The workoutKey from list_workouts.",
+          description: "Unique workout identifier from list_workouts.",
         },
         full: {
           type: "boolean",
           default: false,
-          description: "If true, return all parsed records instead of the summary.",
+          description: "false (default): return compact summary. true: return all parsed FIT records.",
         },
       },
       required: ["workoutKey"],
@@ -123,14 +123,14 @@ const tools = [
   {
     name: "export_workout_gpx",
     description:
-      "Returns the workout's GPS track as a GPX 1.1 XML string (raw text, not JSON). Suitable for import into Strava, Komoot, Google Earth, or other route tools. No mutations.",
+      "Returns the workout's GPS route as a GPX 1.1 XML string (not JSON). Each trackpoint contains lat, lon, elevation, and timestamp. Suitable for direct import into Strava, Komoot, Google Earth, or any GPX-compatible tool. Returns a valid but empty GPX document if the workout has no GPS data. Use get_workout_samples for numeric time-series (HR, power, cadence) instead of GPS. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
         workoutKey: {
           type: "string",
           minLength: 1,
-          description: "The workoutKey from list_workouts.",
+          description: "Unique workout identifier from list_workouts.",
         },
       },
       required: ["workoutKey"],
@@ -139,7 +139,7 @@ const tools = [
   {
     name: "get_daily_activity",
     description:
-      "Returns the 24/7 activity summary for one calendar day: { steps, activeCalories, totalCalories, avgHeartRate, minHeartRate, maxHeartRate, restingHeartRate }. Requires the Activity API product on apizone. No mutations.",
+      "Returns the 24/7 activity summary for one calendar day: { steps, activeCalories, totalCalories, avgHeartRate, minHeartRate, maxHeartRate, restingHeartRate }. Throws SuuntoNotFoundError if the watch did not sync data for that date. Use list_daily_activity to fetch a date range efficiently. Requires Activity API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -156,7 +156,7 @@ const tools = [
   {
     name: "list_daily_activity",
     description:
-      "Returns 24/7 activity summaries for each day in [from, to] inclusive — one entry per day with steps, calories, heart-rate stats. Requires the Activity API product on apizone. No mutations.",
+      "Returns 24/7 activity summaries for each day in [from, to] inclusive, ordered chronologically. Each entry: { date, steps, activeCalories, totalCalories, avgHeartRate, minHeartRate, maxHeartRate, restingHeartRate }. Days where the watch did not sync are omitted from the result. Use get_daily_activity for a single day. Requires Activity API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -164,13 +164,13 @@ const tools = [
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "Start date YYYY-MM-DD, inclusive.",
+          description: "Start date YYYY-MM-DD, inclusive. Example: 2026-04-01.",
         },
         to: {
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "End date YYYY-MM-DD, inclusive.",
+          description: "End date YYYY-MM-DD, inclusive. Example: 2026-04-30.",
         },
       },
       required: ["from", "to"],
@@ -179,7 +179,7 @@ const tools = [
   {
     name: "get_sleep",
     description:
-      "Returns the sleep summary for one night, keyed by wake-up date: { totalSleep (s), deepSleep, lightSleep, remSleep, awake, efficiency, sleepScore }. Requires the Sleep API product on apizone. No mutations.",
+      "Returns the sleep summary for one night keyed by the morning wake-up date: { totalSleep (s), deepSleep (s), lightSleep (s), remSleep (s), awake (s), efficiency (%), sleepScore }. A session ending the morning of 2026-04-20 is keyed to 2026-04-20. Throws SuuntoNotFoundError if no sleep was recorded for that date. Use list_sleep for a date range. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -187,7 +187,7 @@ const tools = [
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "Wake-up date YYYY-MM-DD. A sleep ending the morning of 2026-04-20 is keyed 2026-04-20.",
+          description: "Wake-up date YYYY-MM-DD. Example: 2026-04-20.",
         },
       },
       required: ["date"],
@@ -196,7 +196,7 @@ const tools = [
   {
     name: "list_sleep",
     description:
-      "Returns sleep summaries for each night in [from, to] inclusive, keyed by wake-up date. Same per-night fields as get_sleep. Requires the Sleep API product on apizone. No mutations.",
+      "Returns sleep summaries for each night in [from, to] inclusive, keyed by wake-up date, ordered chronologically. Each entry: { date, totalSleep (s), deepSleep (s), lightSleep (s), remSleep (s), awake (s), efficiency (%), sleepScore }. Nights where no sleep was recorded are omitted. Use get_sleep for a single night. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -204,13 +204,13 @@ const tools = [
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "First wake-up date YYYY-MM-DD, inclusive.",
+          description: "First wake-up date YYYY-MM-DD, inclusive. Example: 2026-04-01.",
         },
         to: {
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "Last wake-up date YYYY-MM-DD, inclusive.",
+          description: "Last wake-up date YYYY-MM-DD, inclusive. Example: 2026-04-30.",
         },
       },
       required: ["from", "to"],
@@ -219,7 +219,7 @@ const tools = [
   {
     name: "get_recovery",
     description:
-      "Returns recovery / HRV summary for one date: { recoveryScore, hrv (ms), stressLevel, readiness }. Requires the Recovery API product on apizone. No mutations.",
+      "Returns the recovery and HRV summary for one date: { recoveryScore (0–100), hrv (ms, rMSSD), stressLevel, readiness }. Throws SuuntoNotFoundError if no recovery data exists for that date. Use list_recovery for a date range. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -227,7 +227,7 @@ const tools = [
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "Calendar date YYYY-MM-DD.",
+          description: "Calendar date YYYY-MM-DD. Example: 2026-04-20.",
         },
       },
       required: ["date"],
@@ -236,7 +236,7 @@ const tools = [
   {
     name: "list_recovery",
     description:
-      "Returns recovery / HRV summaries for each day in [from, to] inclusive. Same per-day fields as get_recovery. Requires the Recovery API product on apizone. No mutations.",
+      "Returns recovery and HRV summaries for each day in [from, to] inclusive, ordered chronologically. Each entry: { date, recoveryScore (0–100), hrv (ms, rMSSD), stressLevel, readiness }. Days without recovery data are omitted. Use get_recovery for a single day. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -244,13 +244,13 @@ const tools = [
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "Start date YYYY-MM-DD, inclusive.",
+          description: "Start date YYYY-MM-DD, inclusive. Example: 2026-04-01.",
         },
         to: {
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "End date YYYY-MM-DD, inclusive.",
+          description: "End date YYYY-MM-DD, inclusive. Example: 2026-04-30.",
         },
       },
       required: ["from", "to"],
@@ -259,7 +259,7 @@ const tools = [
   {
     name: "list_subscriptions",
     description:
-      "Returns the webhook subscriptions currently active on this Suunto account: { id, eventType, callbackUrl, createdAt }. Empty list on a fresh account. No mutations.",
+      "Returns all active webhook subscriptions on this Suunto account as an array of { id, eventType, callbackUrl, createdAt }. Returns an empty array if no webhooks are registered. Use to audit which event types are already wired before adding new subscriptions. Requires Subscriptions API product on apizone. Read-only.",
     inputSchema: { type: "object", properties: {} },
   },
 ];
