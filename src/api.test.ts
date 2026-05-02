@@ -203,6 +203,54 @@ test("api: listWorkouts honors since parameter", async () => {
   assert.equal(captured, "1234");
 });
 
+test("api: listDailyActivity sorts payload chronologically by date", async () => {
+  const unsorted = [
+    { date: "2026-04-03", steps: 3 },
+    { date: "2026-04-01", steps: 1 },
+    { date: "2026-04-02", steps: 2 },
+  ];
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ payload: unsorted }), { status: 200 })) as any;
+  const c = new SuuntoClient(cfg);
+  const out = await c.listDailyActivity("2026-04-01", "2026-04-03");
+  assert.deepEqual(
+    out.payload.map((e: any) => e.date),
+    ["2026-04-01", "2026-04-02", "2026-04-03"],
+  );
+});
+
+test("api: listSleep sorts payload chronologically by date", async () => {
+  const unsorted = [
+    { date: "2026-04-03", sleepScore: 80 },
+    { date: "2026-04-01", sleepScore: 70 },
+    { date: "2026-04-02", sleepScore: 75 },
+  ];
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ payload: unsorted }), { status: 200 })) as any;
+  const c = new SuuntoClient(cfg);
+  const out = await c.listSleep("2026-04-01", "2026-04-03");
+  assert.deepEqual(
+    out.payload.map((e: any) => e.date),
+    ["2026-04-01", "2026-04-02", "2026-04-03"],
+  );
+});
+
+test("api: listRecovery sorts payload chronologically by date", async () => {
+  const unsorted = [
+    { date: "2026-04-03", recoveryScore: 60 },
+    { date: "2026-04-01", recoveryScore: 80 },
+    { date: "2026-04-02", recoveryScore: 70 },
+  ];
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ payload: unsorted }), { status: 200 })) as any;
+  const c = new SuuntoClient(cfg);
+  const out = await c.listRecovery("2026-04-01", "2026-04-03");
+  assert.deepEqual(
+    out.payload.map((e: any) => e.date),
+    ["2026-04-01", "2026-04-02", "2026-04-03"],
+  );
+});
+
 test("api: daily-prefix override is applied", async () => {
   const prev = process.env.SUUNTO_DAILY_PREFIX;
   process.env.SUUNTO_DAILY_PREFIX = "/v3/daily";

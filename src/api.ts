@@ -137,9 +137,10 @@ export class SuuntoClient {
     return this.json<any>(`${this.dailyPrefix()}/activity/${date}`);
   }
 
-  listDailyActivity(from: string, to: string) {
+  async listDailyActivity(from: string, to: string) {
     const q = new URLSearchParams({ from, to });
-    return this.json<any>(`${this.dailyPrefix()}/activity?${q.toString()}`);
+    const res = await this.json<any>(`${this.dailyPrefix()}/activity?${q.toString()}`);
+    return sortByDate(res);
   }
 
   // ---------- Sleep ----------
@@ -148,9 +149,10 @@ export class SuuntoClient {
     return this.json<any>(`${this.dailyPrefix()}/sleep/${date}`);
   }
 
-  listSleep(from: string, to: string) {
+  async listSleep(from: string, to: string) {
     const q = new URLSearchParams({ from, to });
-    return this.json<any>(`${this.dailyPrefix()}/sleep?${q.toString()}`);
+    const res = await this.json<any>(`${this.dailyPrefix()}/sleep?${q.toString()}`);
+    return sortByDate(res);
   }
 
   // ---------- Recovery / HRV ----------
@@ -159,9 +161,10 @@ export class SuuntoClient {
     return this.json<any>(`${this.dailyPrefix()}/recovery/${date}`);
   }
 
-  listRecovery(from: string, to: string) {
+  async listRecovery(from: string, to: string) {
     const q = new URLSearchParams({ from, to });
-    return this.json<any>(`${this.dailyPrefix()}/recovery?${q.toString()}`);
+    const res = await this.json<any>(`${this.dailyPrefix()}/recovery?${q.toString()}`);
+    return sortByDate(res);
   }
 
   // ---------- Subscriptions / Webhooks ----------
@@ -169,6 +172,21 @@ export class SuuntoClient {
   subscriptions() {
     return this.json<any>(`/v2/subscriptions`);
   }
+}
+
+// Sort a list API response chronologically by the `date` field.
+// Handles both { payload: [...] } (Suunto's standard envelope) and plain arrays.
+// Items without a `date` field sort stably to the front (no-op on unknown shapes).
+function sortByDate(response: any): any {
+  const cmp = (a: any, b: any) =>
+    String(a?.date ?? "").localeCompare(String(b?.date ?? ""));
+  if (Array.isArray(response?.payload)) {
+    return { ...response, payload: [...response.payload].sort(cmp) };
+  }
+  if (Array.isArray(response)) {
+    return [...response].sort(cmp);
+  }
+  return response;
 }
 
 function backoffMs(attempt: number) {
