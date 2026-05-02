@@ -464,15 +464,6 @@ npm test
 
 CI runs on Node 20 and 22 on every push and PR.
 
-## Roadmap
-
-- [ ] Webhook subscription management tools (create / delete / renew)
-- [ ] Webhook signature verification
-- [ ] Cached workout index for faster "this month" queries
-- [ ] Workout Upload API (push third-party workouts back to Suunto)
-- [ ] HTTP / SSE transport (currently stdio only)
-- [ ] Recorded API fixture for end-to-end tests
-
 PRs welcome.
 
 ---
