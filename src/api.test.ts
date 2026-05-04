@@ -136,7 +136,7 @@ test("api: 429 after retries exhausted throws SuuntoRateLimitError with retryAft
   );
 });
 
-test("api: bytes() returns raw Uint8Array", async () => {
+test("api: bytes() returns raw Buffer", async () => {
   globalThis.fetch = (async () =>
     new Response(new Uint8Array([1, 2, 3, 4]).buffer, { status: 200 })) as any;
   const c = new SuuntoClient(cfg);

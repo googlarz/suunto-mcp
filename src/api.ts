@@ -73,9 +73,9 @@ export class SuuntoClient {
     return (await res.json()) as T;
   }
 
-  async bytes(path: string): Promise<Uint8Array> {
+  async bytes(path: string): Promise<Buffer> {
     const res = await this.request(path);
-    return new Uint8Array(await res.arrayBuffer());
+    return Buffer.from(await res.arrayBuffer());
   }
 
   // ---------- Workouts ----------

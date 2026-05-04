@@ -66,16 +66,23 @@ export async function refresh(c: Config, refreshToken: string): Promise<TokenBun
 // refresh tokens on use, so a parallel double-refresh would log the user out.
 let inFlightRefresh: Promise<TokenBundle> | null = null;
 
+// In-memory token cache: avoids a disk read on every API request.
+// Invalidated when a refresh occurs or the token expires.
+let cachedTokens: TokenBundle | null = null;
+
 export async function getValidAccessToken(c: Config): Promise<string> {
-  const tokens = await loadTokens(c.tokenPath);
-  if (!tokens) throw new SuuntoNotAuthenticatedError();
-  if (tokens.expiresAt > Date.now() + 60_000) return tokens.accessToken;
+  if (!cachedTokens) {
+    cachedTokens = await loadTokens(c.tokenPath);
+  }
+  if (!cachedTokens) throw new SuuntoNotAuthenticatedError();
+  if (cachedTokens.expiresAt > Date.now() + 60_000) return cachedTokens.accessToken;
 
   if (!inFlightRefresh) {
     inFlightRefresh = (async () => {
       try {
-        const fresh = await refresh(c, tokens.refreshToken);
+        const fresh = await refresh(c, cachedTokens!.refreshToken);
         await saveTokens(c.tokenPath, fresh);
+        cachedTokens = fresh;
         return fresh;
       } finally {
         inFlightRefresh = null;
@@ -83,12 +90,14 @@ export async function getValidAccessToken(c: Config): Promise<string> {
     })();
   }
   const fresh = await inFlightRefresh;
+  cachedTokens = fresh;
   return fresh.accessToken;
 }
 
-// Test-only: clear the shared refresh promise between tests.
+// Test-only: clear the shared refresh promise and token cache between tests.
 export function __resetRefreshSingleton(): void {
   inFlightRefresh = null;
+  cachedTokens = null;
 }
 
 function tryOpenBrowser(url: string): void {

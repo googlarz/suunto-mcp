@@ -89,7 +89,7 @@ function buildMinimalFit(dataSize = 0): Uint8Array {
 }
 
 test("fit: parseFit accepts a minimum-valid FIT byte stream", async () => {
-  const bytes = buildMinimalFit();
+  const bytes = Buffer.from(buildMinimalFit());
   const parsed = await parseFit(bytes);
   // No data records — sessions/records should be absent or empty.
   assert.ok(parsed);
@@ -99,10 +99,9 @@ test("fit: parseFit accepts a minimum-valid FIT byte stream", async () => {
 });
 
 test("fit: parseFit rejects obvious garbage", async () => {
-  const garbage = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
-  await assert.rejects(parseFit(garbage));
+  await assert.rejects(parseFit(Buffer.from([0xff, 0xff, 0xff, 0xff])));
 });
 
 test("fit: parseFit rejects empty input", async () => {
-  await assert.rejects(parseFit(new Uint8Array(0)));
+  await assert.rejects(parseFit(Buffer.alloc(0)));
 });

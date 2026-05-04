@@ -11,7 +11,7 @@ export interface ParsedFit {
   device_infos?: any[];
 }
 
-export async function parseFit(bytes: Uint8Array): Promise<ParsedFit> {
+export async function parseFit(bytes: Buffer): Promise<ParsedFit> {
   const parser = new FitParser({
     force: true,
     speedUnit: "km/h",
@@ -21,7 +21,7 @@ export async function parseFit(bytes: Uint8Array): Promise<ParsedFit> {
     mode: "list",
   });
   return new Promise((resolve, reject) => {
-    parser.parse(Buffer.from(bytes), (err: Error | null, data: ParsedFit) => {
+    parser.parse(bytes, (err: Error | null, data: ParsedFit) => {
       if (err) reject(err);
       else resolve(data);
     });

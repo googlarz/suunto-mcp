@@ -320,15 +320,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           until,
           limit: a.limit ?? 25,
         });
-        return text(JSON.stringify(data, null, 2));
+        return text(JSON.stringify(data));
       }
       case "get_workout": {
         const data = await suunto.getWorkout(a.workoutKey);
-        return text(JSON.stringify(data, null, 2));
+        return text(JSON.stringify(data));
       }
       case "get_workout_samples": {
         const data = await suunto.getWorkoutSamples(a.workoutKey);
-        return text(JSON.stringify(data, null, 2));
+        return text(JSON.stringify(data));
       }
       case "get_workout_fit": {
         const bytes = await suunto.getWorkoutFit(a.workoutKey);
@@ -356,7 +356,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await suunto.listRecovery(a.from, a.to), null, 2));
       case "list_subscriptions": {
         const data = await suunto.subscriptions();
-        return text(JSON.stringify(data, null, 2));
+        return text(JSON.stringify(data));
       }
       default:
         return text(`Unknown tool: ${name}`, true);
