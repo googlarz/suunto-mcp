@@ -2,5 +2,28 @@
   "$schema": "https://glama.ai/mcp/schemas/server.json",
   "maintainers": [
     "googlarz"
+  ],
+  "title": "Suunto MCP",
+  "description": "MCP server that bridges Suunto sports watch data to AI assistants. Exposes workouts, GPS tracks, time-series samples, FIT files, sleep, recovery, HRV, and 24/7 activity data via natural language queries.",
+  "homepage": "https://github.com/googlarz/suunto-mcp",
+  "repository": "https://github.com/googlarz/suunto-mcp",
+  "license": "MIT",
+  "language": "TypeScript",
+  "runtime": "node",
+  "tags": [
+    "suunto",
+    "fitness",
+    "sports",
+    "workout",
+    "health",
+    "sleep",
+    "recovery",
+    "hrv",
+    "gps",
+    "fit",
+    "gpx",
+    "wearable",
+    "running",
+    "cycling"
   ]
 }
