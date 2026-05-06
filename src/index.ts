@@ -35,7 +35,7 @@ function ensureReady() {
 }
 
 const server = new Server(
-  { name: "suunto-mcp", version: "0.9.2" },
+  { name: "suunto-mcp", version: "0.10.0" },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -53,7 +53,7 @@ const tools = [
   {
     name: "list_workouts",
     description:
-      "Returns the user's recent Suunto workouts ordered newest-first. Each item: workoutKey (string id), activityId, sport, startTime (epoch ms), totalTime (s), totalDistance (m), totalCalories, avgHeartRate, maxHeartRate, totalAscent (m), totalDescent (m). Auto-paginates across pages until limit is reached or no more workouts exist. Use get_workout for full detail (laps, HR zones, sport-specific metrics) on a single result. Read-only.",
+      "Returns the user's recent Suunto workouts ordered newest-first (Workout API v3). Each item: workoutKey (string id), activityId, sport, startTime (epoch ms), totalTime (s), totalDistance (m), totalCalories, avgHeartRate, maxHeartRate, totalAscent (m), totalDescent (m). Auto-paginates with offset-based pagination until limit is reached or no more workouts exist. Use get_workout for full detail (laps, HR zones, sport-specific metrics) on a single result. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -151,7 +151,7 @@ const tools = [
   {
     name: "get_daily_activity",
     description:
-      "Returns the 24/7 activity summary for one calendar day: { steps, activeCalories, totalCalories, avgHeartRate, minHeartRate, maxHeartRate, restingHeartRate }. Throws SuuntoNotFoundError if the watch did not sync data for that date. Use list_daily_activity to fetch a date range efficiently. Requires Activity API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns the 24/7 activity time-series samples for one calendar day from the /247samples API. Each sample includes a timestamp (ISO8601) and activity metrics such as steps and HR. Days without synced data return an empty payload. Use list_daily_activity to fetch a date range. Requires 24/7 Activity API subscription on apizone. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -171,7 +171,7 @@ const tools = [
   {
     name: "list_daily_activity",
     description:
-      "Returns 24/7 activity summaries for each day in [from, to] inclusive, ordered chronologically. Each entry: { date, steps, activeCalories, totalCalories, avgHeartRate, minHeartRate, maxHeartRate, restingHeartRate }. Days where the watch did not sync are omitted from the result. Use get_daily_activity for a single day. Requires Activity API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns 24/7 activity time-series samples from the /247samples API for the date range [from, to] inclusive, ordered chronologically by timestamp. Each sample: { timestamp (ISO8601), steps, HR, and other activity metrics }. Days without synced data are omitted. Use get_daily_activity for a single day or get_daily_activity_statistics for aggregated daily step/energy totals. Requires 24/7 Activity API subscription on apizone. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -200,7 +200,7 @@ const tools = [
   {
     name: "get_sleep",
     description:
-      "Returns the sleep summary for one night keyed by the morning wake-up date: { totalSleep (s), deepSleep (s), lightSleep (s), remSleep (s), awake (s), efficiency (%), sleepScore }. A session ending the morning of 2026-04-20 is keyed to 2026-04-20. Throws SuuntoNotFoundError if no sleep was recorded for that date. Use list_sleep for a date range. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns sleep time-series samples from the /247samples API for one calendar day: { timestamp (ISO8601), totalSleep (s), deepSleep (s), lightSleep (s), remSleep (s), awake (s), efficiency (%), sleepScore }. Days without recorded sleep return an empty payload. Use list_sleep for a date range. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -220,7 +220,7 @@ const tools = [
   {
     name: "list_sleep",
     description:
-      "Returns sleep summaries for each night in [from, to] inclusive, keyed by wake-up date, ordered chronologically. Each entry: { date, totalSleep (s), deepSleep (s), lightSleep (s), remSleep (s), awake (s), efficiency (%), sleepScore }. Nights where no sleep was recorded are omitted. Use get_sleep for a single night. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns sleep time-series samples from the /247samples API for the date range [from, to] inclusive, ordered chronologically by timestamp. Each entry: { timestamp (ISO8601), totalSleep (s), deepSleep (s), lightSleep (s), remSleep (s), awake (s), efficiency (%), sleepScore }. Nights without recorded sleep are omitted. Use get_sleep for a single night. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -249,7 +249,7 @@ const tools = [
   {
     name: "get_recovery",
     description:
-      "Returns the recovery and HRV summary for one date: { recoveryScore (0–100), hrv (ms, rMSSD), stressLevel, readiness }. Throws SuuntoNotFoundError if no recovery data exists for that date. Use list_recovery for a date range. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns recovery and HRV time-series samples from the /247samples API for one calendar day. Each sample: { timestamp (ISO8601), Balance (0.0–1.0 recovery balance), StressState (0=Invalid, 1=Relaxing, 2=Active, 3=Passive, 4=Stressful) }. Days without recovery data return an empty payload. Use list_recovery for a date range. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -269,7 +269,7 @@ const tools = [
   {
     name: "list_recovery",
     description:
-      "Returns recovery and HRV summaries for each day in [from, to] inclusive, ordered chronologically. Each entry: { date, recoveryScore (0–100), hrv (ms, rMSSD), stressLevel, readiness }. Days without recovery data are omitted. Use get_recovery for a single day. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns recovery and HRV time-series samples from the /247samples API for the date range [from, to] inclusive, ordered chronologically by timestamp. Each entry: { timestamp (ISO8601), Balance (0.0–1.0 recovery balance), StressState (0=Invalid, 1=Relaxing, 2=Active, 3=Passive, 4=Stressful) }. Days without recovery data are omitted. Use get_recovery for a single day. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -293,6 +293,29 @@ const tools = [
         },
       },
       required: ["from", "to"],
+    },
+  },
+  {
+    name: "get_daily_activity_statistics",
+    description:
+      "Returns aggregated daily step count and energy consumption (joules) from the /247 API for the given datetime range. Response is an array of AggregatedActivityData objects, each with a Name ('stepcount' or 'energyconsumption'), Aggregation ('sum'), and Sources array containing per-device Samples with TimeISO8601 and Value. Maximum fetch interval is 28 days. Samples with null Value indicate no data synced for that day. Prefer this tool over list_daily_activity when you need totals rather than intraday time-series. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        startdate: {
+          type: "string",
+          examples: ["2026-04-01T00:00:00"],
+          description:
+            "Start datetime in ISO-8601 format (e.g. 2026-04-01T00:00:00). Data is stored in UTC.",
+        },
+        enddate: {
+          type: "string",
+          examples: ["2026-04-30T23:59:59"],
+          description:
+            "End datetime in ISO-8601 format (e.g. 2026-04-30T23:59:59). Must be within 28 days of startdate.",
+        },
+      },
+      required: ["startdate", "enddate"],
     },
   },
   {
@@ -354,6 +377,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await suunto.getRecovery(a.date), null, 2));
       case "list_recovery":
         return text(JSON.stringify(await suunto.listRecovery(a.from, a.to), null, 2));
+      case "get_daily_activity_statistics": {
+        const data = await suunto.getDailyStats(a.startdate, a.enddate);
+        return text(JSON.stringify(data, null, 2));
+      }
       case "list_subscriptions": {
         const data = await suunto.subscriptions();
         return text(JSON.stringify(data));

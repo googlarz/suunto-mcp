@@ -78,20 +78,24 @@ export class SuuntoClient {
     return Buffer.from(await res.arrayBuffer());
   }
 
-  // ---------- Workouts ----------
+  // ---------- Workouts (v3) ----------
 
   async listWorkouts(opts: { since?: number; until?: number; limit?: number } = {}) {
     const limit = opts.limit ?? 25;
+    const PAGE = 50;
     const collected: any[] = [];
-    let until = opts.until;
+    let offset = 0;
 
     while (collected.length < limit) {
-      const q = new URLSearchParams();
-      if (opts.since) q.set("since", String(opts.since));
-      if (until) q.set("until", String(until));
-      const qs = q.toString();
+      const remaining = limit - collected.length;
+      const pageSize = Math.min(PAGE, remaining);
+      const q = new URLSearchParams({ "filter-by-modification-time": "false" });
+      if (opts.since !== undefined) q.set("since", String(opts.since));
+      if (opts.until !== undefined) q.set("until", String(opts.until));
+      q.set("limit", String(pageSize));
+      q.set("offset", String(offset));
       const page = await this.json<{ payload: any[]; metadata?: any }>(
-        `/v2/workouts${qs ? `?${qs}` : ""}`,
+        `/v3/workouts/?${q.toString()}`,
       );
       const items = page.payload ?? [];
       if (items.length === 0) break;
@@ -101,70 +105,97 @@ export class SuuntoClient {
         collected.push(w);
       }
 
-      if (items.length < 25) break;
-      const oldest = items[items.length - 1];
-      const t = Number(oldest?.startTime);
-      if (!Number.isFinite(t)) break;
-      until = t - 1;
+      if (items.length < pageSize) break;
+      offset += items.length;
     }
 
     return { payload: collected, metadata: { count: collected.length } };
   }
 
   getWorkout(workoutKey: string) {
-    return this.json<any>(`/v2/workout/${encodeURIComponent(workoutKey)}`);
+    return this.json<any>(`/v3/workouts/${encodeURIComponent(workoutKey)}`);
   }
 
+  // NOTE: not in v3 spec — kept at v2 (unverified, may break after Suunto deprecates v2)
   getWorkoutSamples(workoutKey: string) {
     return this.json<any>(`/v2/workout/samples/${encodeURIComponent(workoutKey)}`);
   }
 
   getWorkoutFit(workoutKey: string) {
-    return this.bytes(`/v2/workout/exportFit/${encodeURIComponent(workoutKey)}`);
+    return this.bytes(`/v3/workouts/${encodeURIComponent(workoutKey)}/fit`);
   }
 
+  // NOTE: not in v3 spec — kept at v2 (unverified, may break after Suunto deprecates v2)
   getWorkoutGpx(workoutKey: string) {
     return this.bytes(`/v2/workout/exportGpx/${encodeURIComponent(workoutKey)}`);
   }
 
-  // ---------- 24/7 Activity ----------
+  // ---------- 24/7 Activity (/247samples) ----------
 
   private dailyPrefix() {
-    return process.env.SUUNTO_DAILY_PREFIX ?? "/v2";
+    return process.env.SUUNTO_DAILY_PREFIX ?? "/247samples";
   }
 
   getDailyActivity(date: string) {
-    return this.json<any>(`${this.dailyPrefix()}/activity/${date}`);
+    const q = new URLSearchParams({
+      from: String(startOfDayMs(date)),
+      to: String(endOfDayMs(date)),
+    });
+    return this.json<any>(`${this.dailyPrefix()}/activity?${q.toString()}`);
   }
 
   async listDailyActivity(from: string, to: string) {
-    const q = new URLSearchParams({ from, to });
+    const q = new URLSearchParams({
+      from: String(startOfDayMs(from)),
+      to: String(endOfDayMs(to)),
+    });
     const res = await this.json<any>(`${this.dailyPrefix()}/activity?${q.toString()}`);
-    return sortByDate(res);
+    return sortByTimestamp(res);
   }
 
-  // ---------- Sleep ----------
+  // ---------- Sleep (/247samples) ----------
 
   getSleep(date: string) {
-    return this.json<any>(`${this.dailyPrefix()}/sleep/${date}`);
+    const q = new URLSearchParams({
+      from: String(startOfDayMs(date)),
+      to: String(endOfDayMs(date)),
+    });
+    return this.json<any>(`${this.dailyPrefix()}/sleep?${q.toString()}`);
   }
 
   async listSleep(from: string, to: string) {
-    const q = new URLSearchParams({ from, to });
+    const q = new URLSearchParams({
+      from: String(startOfDayMs(from)),
+      to: String(endOfDayMs(to)),
+    });
     const res = await this.json<any>(`${this.dailyPrefix()}/sleep?${q.toString()}`);
-    return sortByDate(res);
+    return sortByTimestamp(res);
   }
 
-  // ---------- Recovery / HRV ----------
+  // ---------- Recovery / HRV (/247samples) ----------
 
   getRecovery(date: string) {
-    return this.json<any>(`${this.dailyPrefix()}/recovery/${date}`);
+    const q = new URLSearchParams({
+      from: String(startOfDayMs(date)),
+      to: String(endOfDayMs(date)),
+    });
+    return this.json<any>(`${this.dailyPrefix()}/recovery?${q.toString()}`);
   }
 
   async listRecovery(from: string, to: string) {
-    const q = new URLSearchParams({ from, to });
+    const q = new URLSearchParams({
+      from: String(startOfDayMs(from)),
+      to: String(endOfDayMs(to)),
+    });
     const res = await this.json<any>(`${this.dailyPrefix()}/recovery?${q.toString()}`);
-    return sortByDate(res);
+    return sortByTimestamp(res);
+  }
+
+  // ---------- Daily Activity Statistics (/247) ----------
+
+  getDailyStats(startdate: string, enddate: string) {
+    const q = new URLSearchParams({ startdate, enddate });
+    return this.json<any>(`/247/daily-activity-statistics?${q.toString()}`);
   }
 
   // ---------- Subscriptions / Webhooks ----------
@@ -174,12 +205,12 @@ export class SuuntoClient {
   }
 }
 
-// Sort a list API response chronologically by the `date` field.
+// Sort a list API response chronologically by the `timestamp` ISO8601 field.
 // Handles both { payload: [...] } (Suunto's standard envelope) and plain arrays.
-// Items without a `date` field sort stably to the front (no-op on unknown shapes).
-function sortByDate(response: any): any {
+// Items without a `timestamp` field sort stably to the front.
+function sortByTimestamp(response: any): any {
   const cmp = (a: any, b: any) =>
-    String(a?.date ?? "").localeCompare(String(b?.date ?? ""));
+    String(a?.timestamp ?? "").localeCompare(String(b?.timestamp ?? ""));
   if (Array.isArray(response?.payload)) {
     return { ...response, payload: [...response.payload].sort(cmp) };
   }
@@ -187,6 +218,14 @@ function sortByDate(response: any): any {
     return [...response].sort(cmp);
   }
   return response;
+}
+
+function startOfDayMs(date: string): number {
+  return Date.parse(`${date}T00:00:00.000Z`);
+}
+
+function endOfDayMs(date: string): number {
+  return Date.parse(`${date}T23:59:59.999Z`);
 }
 
 function backoffMs(attempt: number) {

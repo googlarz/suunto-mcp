@@ -145,31 +145,35 @@ test("api: bytes() returns raw Buffer", async () => {
 });
 
 test("api: listWorkouts auto-paginates until limit reached", async () => {
-  const page = (count: number, latest: number) => ({
-    payload: Array.from({ length: count }, (_, i) => ({
-      workoutKey: `w${latest - i}`,
-      startTime: latest - i,
-    })),
-  });
   let call = 0;
-  let secondPageUntil: string | null = null;
+  let secondOffset: string | null = null;
   globalThis.fetch = (async (url: any) => {
     call++;
     const u = new URL(String(url));
     if (call === 1) {
-      assert.equal(u.searchParams.get("until"), null);
-      return new Response(JSON.stringify(page(25, 5000)), { status: 200 });
+      assert.equal(u.searchParams.get("offset"), "0");
+      assert.equal(u.searchParams.get("limit"), "50");
+      return new Response(
+        JSON.stringify({
+          payload: Array.from({ length: 50 }, (_, i) => ({ workoutKey: `w${i}` })),
+        }),
+        { status: 200 },
+      );
     }
-    secondPageUntil = u.searchParams.get("until");
-    return new Response(JSON.stringify(page(5, 4970)), { status: 200 });
+    secondOffset = u.searchParams.get("offset");
+    return new Response(
+      JSON.stringify({
+        payload: Array.from({ length: 5 }, (_, i) => ({ workoutKey: `w${50 + i}` })),
+      }),
+      { status: 200 },
+    );
   }) as any;
 
   const c = new SuuntoClient(cfg);
-  const out = await c.listWorkouts({ limit: 30 });
+  const out = await c.listWorkouts({ limit: 55 });
   assert.equal(call, 2);
-  assert.equal(out.payload.length, 30);
-  // page 1's oldest startTime is 5000 - 24 = 4976; next "until" should be 4975
-  assert.equal(secondPageUntil, "4975");
+  assert.equal(out.payload.length, 55);
+  assert.equal(secondOffset, "50");
 });
 
 test("api: listWorkouts stops when first page satisfies limit", async () => {
@@ -203,51 +207,51 @@ test("api: listWorkouts honors since parameter", async () => {
   assert.equal(captured, "1234");
 });
 
-test("api: listDailyActivity sorts payload chronologically by date", async () => {
+test("api: listDailyActivity sorts payload chronologically by timestamp", async () => {
   const unsorted = [
-    { date: "2026-04-03", steps: 3 },
-    { date: "2026-04-01", steps: 1 },
-    { date: "2026-04-02", steps: 2 },
+    { timestamp: "2026-04-03T00:00:00Z", steps: 3 },
+    { timestamp: "2026-04-01T00:00:00Z", steps: 1 },
+    { timestamp: "2026-04-02T00:00:00Z", steps: 2 },
   ];
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ payload: unsorted }), { status: 200 })) as any;
   const c = new SuuntoClient(cfg);
   const out = await c.listDailyActivity("2026-04-01", "2026-04-03");
   assert.deepEqual(
-    out.payload.map((e: any) => e.date),
-    ["2026-04-01", "2026-04-02", "2026-04-03"],
+    out.payload.map((e: any) => e.timestamp),
+    ["2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z", "2026-04-03T00:00:00Z"],
   );
 });
 
-test("api: listSleep sorts payload chronologically by date", async () => {
+test("api: listSleep sorts payload chronologically by timestamp", async () => {
   const unsorted = [
-    { date: "2026-04-03", sleepScore: 80 },
-    { date: "2026-04-01", sleepScore: 70 },
-    { date: "2026-04-02", sleepScore: 75 },
+    { timestamp: "2026-04-03T00:00:00Z", sleepScore: 80 },
+    { timestamp: "2026-04-01T00:00:00Z", sleepScore: 70 },
+    { timestamp: "2026-04-02T00:00:00Z", sleepScore: 75 },
   ];
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ payload: unsorted }), { status: 200 })) as any;
   const c = new SuuntoClient(cfg);
   const out = await c.listSleep("2026-04-01", "2026-04-03");
   assert.deepEqual(
-    out.payload.map((e: any) => e.date),
-    ["2026-04-01", "2026-04-02", "2026-04-03"],
+    out.payload.map((e: any) => e.timestamp),
+    ["2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z", "2026-04-03T00:00:00Z"],
   );
 });
 
-test("api: listRecovery sorts payload chronologically by date", async () => {
+test("api: listRecovery sorts payload chronologically by timestamp", async () => {
   const unsorted = [
-    { date: "2026-04-03", recoveryScore: 60 },
-    { date: "2026-04-01", recoveryScore: 80 },
-    { date: "2026-04-02", recoveryScore: 70 },
+    { timestamp: "2026-04-03T00:00:00Z", Balance: 0.6 },
+    { timestamp: "2026-04-01T00:00:00Z", Balance: 0.8 },
+    { timestamp: "2026-04-02T00:00:00Z", Balance: 0.7 },
   ];
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ payload: unsorted }), { status: 200 })) as any;
   const c = new SuuntoClient(cfg);
   const out = await c.listRecovery("2026-04-01", "2026-04-03");
   assert.deepEqual(
-    out.payload.map((e: any) => e.date),
-    ["2026-04-01", "2026-04-02", "2026-04-03"],
+    out.payload.map((e: any) => e.timestamp),
+    ["2026-04-01T00:00:00Z", "2026-04-02T00:00:00Z", "2026-04-03T00:00:00Z"],
   );
 });
 
@@ -255,16 +259,33 @@ test("api: daily-prefix override is applied", async () => {
   const prev = process.env.SUUNTO_DAILY_PREFIX;
   process.env.SUUNTO_DAILY_PREFIX = "/v3/daily";
   try {
-    let captured: string | null = null;
+    let capturedUrl = "";
     globalThis.fetch = (async (url: any) => {
-      captured = String(url);
+      capturedUrl = String(url);
       return new Response("{}", { status: 200 });
     }) as any;
     const c = new SuuntoClient(cfg);
     await c.getSleep("2026-04-20");
-    assert.equal(captured, "https://cloudapi.suunto.com/v3/daily/sleep/2026-04-20");
+    const u = new URL(capturedUrl);
+    assert.equal(u.pathname, "/v3/daily/sleep");
+    assert.equal(u.searchParams.get("from"), String(Date.parse("2026-04-20T00:00:00.000Z")));
+    assert.equal(u.searchParams.get("to"), String(Date.parse("2026-04-20T23:59:59.999Z")));
   } finally {
     if (prev === undefined) delete process.env.SUUNTO_DAILY_PREFIX;
     else process.env.SUUNTO_DAILY_PREFIX = prev;
   }
+});
+
+test("api: getDailyStats passes ISO-8601 params to /247/daily-activity-statistics", async () => {
+  let capturedUrl = "";
+  globalThis.fetch = (async (url: any) => {
+    capturedUrl = String(url);
+    return new Response(JSON.stringify([]), { status: 200 });
+  }) as any;
+  const c = new SuuntoClient(cfg);
+  await c.getDailyStats("2026-04-01T00:00:00", "2026-04-30T23:59:59");
+  const u = new URL(capturedUrl);
+  assert.equal(u.pathname, "/247/daily-activity-statistics");
+  assert.equal(u.searchParams.get("startdate"), "2026-04-01T00:00:00");
+  assert.equal(u.searchParams.get("enddate"), "2026-04-30T23:59:59");
 });
