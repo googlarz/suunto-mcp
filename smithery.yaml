@@ -1,0 +1,28 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - clientId
+      - clientSecret
+      - subscriptionKey
+    properties:
+      clientId:
+        type: string
+        description: Suunto API client ID — register at movescount.com/api or Suunto developer portal
+      clientSecret:
+        type: string
+        description: Suunto API client secret
+      subscriptionKey:
+        type: string
+        description: Suunto API subscription key
+  commandFunction: |-
+    (config) => ({
+      command: "node",
+      args: ["dist/index.js"],
+      env: {
+        SUUNTO_CLIENT_ID: config.clientId,
+        SUUNTO_CLIENT_SECRET: config.clientSecret,
+        SUUNTO_SUBSCRIPTION_KEY: config.subscriptionKey
+      }
+    })
