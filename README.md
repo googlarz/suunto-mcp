@@ -10,9 +10,23 @@
 
 **Bring your Suunto watch into the conversation.**
 
-> ⚠️ **Suunto's API is restricted to commercial partners only — personal use is not permitted, which makes this MCP useless for most people right now.**
->
-> **Please email Suunto at [partners@suunto.com](mailto:partners@suunto.com) and ask them to open their API for personal use — like Garmin, Polar, and Wahoo already do. The more people push, the faster it happens.**
+<div align="center">
+
+## 🚨 THIS MCP IS CURRENTLY USELESS — HERE'S WHY 🚨
+
+**Suunto's API is restricted to commercial partners only.**
+**Personal use is not permitted.**
+
+This will change only if users demand it.
+
+**📧 Email [partners@suunto.com](mailto:partners@suunto.com) and ask Suunto to open their API for personal use.**
+**Garmin does it. Polar does it. Wahoo does it. Suunto should too.**
+
+The more people push, the faster it happens.
+
+---
+
+</div>
 
 This is a small bridge that lets AI assistants like Claude read your Suunto
 training data — runs, hikes, sleep, recovery — so you can just *talk* to your
