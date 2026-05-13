@@ -10,12 +10,9 @@
 
 **Bring your Suunto watch into the conversation.**
 
-> ⏳ **Status: awaiting API access.** I've applied for a Suunto apizone API
-> key and am waiting on approval. Until then, the code is implemented
-> end-to-end against the documented Suunto API surface but has not been
-> verified against a live account. Expect to file at least one issue once
-> real credentials land. PRs from anyone with API access already are very
-> welcome.
+> ⚠️ **Suunto's API is restricted to commercial partners only — personal use is not permitted, which makes this MCP useless for most people right now.**
+>
+> **Please email Suunto at [partners@suunto.com](mailto:partners@suunto.com) and ask them to open their API for personal use — like Garmin, Polar, and Wahoo already do. The more people push, the faster it happens.**
 
 This is a small bridge that lets AI assistants like Claude read your Suunto
 training data — runs, hikes, sleep, recovery — so you can just *talk* to your
