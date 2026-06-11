@@ -8,115 +8,116 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![suunto-mcp MCP server](https://glama.ai/mcp/servers/googlarz/suunto-mcp/badges/score.svg)](https://glama.ai/mcp/servers/googlarz/suunto-mcp)
 
-**Bring your Suunto watch into the conversation.**
+**Ask Claude anything about your training.** Suunto MCP connects your Suunto watch data to Claude so you can just talk to your data instead of clicking through dashboards.
 
-<div align="center">
-
-## 🚨 THIS MCP IS CURRENTLY USELESS — HERE'S WHY 🚨
-
-**Suunto's API is restricted to commercial partners only.**
-**Personal use is not permitted.**
-
-This will change only if users demand it.
-
-**📧 Email [partners@suunto.com](mailto:partners@suunto.com) and ask Suunto to open their API for personal use.**
-**Garmin does it. Polar does it. Wahoo does it. Suunto should too.**
-
-The more people push, the faster it happens.
+> *Built by a Suunto user who wanted to ask "how was my last long run?" and get a real answer with numbers — and to feed live training data into a personal AI coach.*
 
 ---
 
-</div>
+## What you can do
 
-This is a small bridge that lets AI assistants like Claude read your Suunto
-training data — runs, hikes, sleep, recovery — so you can just *talk* to your
-watch.
-
-> _Built by a Suunto user (hi 👋) who wanted to ask his coach-shaped
-> chatbot "how was my last long run?" instead of clicking through
-> dashboards — and to plug live training data into a personal
-> [health-skill](https://github.com/googlarz/health-skill) for context-aware
-> health Q&A._
-
----
-
-## What can you do with it?
-
-Once it's set up, you can ask things like:
+Once it's set up, just ask:
 
 - *"How many kilometers did I run this month?"*
-- *"Compare my last three long runs — was my heart rate drift better?"*
-- *"Pull the GPX of yesterday's hike and write a short journal entry."*
-- *"What's my average resting HR trend over the last 2 weeks?"*
-- *"Find every workout above 160bpm average and show me the route."*
+- *"Compare my last three long runs — has my heart-rate drift improved?"*
+- *"Pull the GPX of yesterday's trail run and write a short journal entry."*
+- *"What's my average resting HR trend over the last two weeks?"*
 - *"Summarize my training week in the style of a coaching report."*
+- *"I've been feeling off — how do my recovery scores compare to last month?"*
+- *"Find every workout where I averaged above 160 bpm."*
+- *"Which of my runs this year had the most elevation?"*
 
-The AI does the work. You just ask.
-
-## Is this for me?
-
-**Yes, if** you own any modern Suunto watch (Race, Vertical, 9 Peak, 5 Peak,
-Ocean, etc.) and you sync it to the Suunto app on your phone.
-
-**No coding required to use it** — just follow the setup below. The hard part
-(parsing Suunto's API, refreshing tokens, decoding the binary FIT file format)
-is already done for you.
+Claude figures out what data to pull. You just ask.
 
 ---
 
-## How it works (in one picture)
+## What you need
 
-```
-Your Suunto watch ─► Suunto app ─► Suunto cloud ─► Suunto MCP ─► Claude (or any MCP client)
-```
+Before starting, make sure you have:
 
-This project is the second-to-last box. It speaks Suunto on one side and the
-Model Context Protocol on the other.
+- [ ] **A Suunto watch** synced to the Suunto app (any modern model — Race, Vertical, 9 Peak, 5 Peak, Ocean, etc.)
+- [ ] **Claude Desktop** (or another MCP-compatible AI app)
+- [ ] **Node.js** — free, [download here](https://nodejs.org), choose the "LTS" version
+- [ ] **Git** — free, [download here](https://git-scm.com/downloads)
+- [ ] **30–40 minutes** for first-time setup
+
+Once it's done, you never redo it.
 
 ---
-
-## Prerequisites
-
-- A Suunto watch synced to the Suunto app (your data must already be in
-  Suunto's cloud — this tool reads from there, not the watch directly)
-- **Node.js ≥ 20** ([nodejs.org](https://nodejs.org) — install if needed)
-- An MCP-capable client: Claude Desktop, Claude Code, Cursor, or any
-  MCP-compatible app
-- ~10 minutes if you already have an apizone account, ~25 minutes from scratch
 
 ## Setup
 
-### 1. Get a Suunto API key
+The setup has three parts:
 
-Suunto opened their platform to all developers in March 2026 — anyone can
-sign up. **Publishing to the Suunto store needs a partner agreement;
-personal use doesn't.**
+1. **Register with Suunto's developer portal** — tells Suunto your app is allowed to read your data
+2. **Install and configure** — gets the software running on your computer
+3. **Connect to Claude** — lets the AI find and use it
 
-1. Go to [apizone.suunto.com](https://apizone.suunto.com/) → **Sign up**.
-2. Once signed in, click **Apps** → **Create app**. Give it any name (e.g.
-   "Personal MCP"). For **redirect URI** use exactly:
-   ```
-   http://localhost:8421/callback
-   ```
-3. From the app overview page, copy the **Client ID** and **Client Secret**
-   (you may need to click *Regenerate* to reveal the secret once).
-4. Click **Subscribe to APIs** and subscribe your app to **all** of these
-   products — each is a separate subscription:
-   - **Workouts API** (required)
-   - **Activity API** — for steps, calories, daily HR
-   - **Sleep API** — for sleep stages and score
-   - **Recovery API** — for HRV / recovery score
-   - **Subscriptions API** — for webhook management
+---
 
-   Without a subscription, calls to that product return **403/404**.
-5. Go to your **user profile** → **Subscriptions** tab and copy the
-   **primary subscription key**. This is the `Ocp-Apim-Subscription-Key`
-   that Suunto's Azure API Management gateway requires on every call.
+### Part 1: Register with Suunto's developer portal (~15 min)
 
-> 🛟 If you can't find a value, run `npm run doctor` after step 3 below —
-> it will tell you exactly which one is missing or wrong.
+Suunto has a free developer portal called **apizone** where you register apps that can access your data. You'll create an account, subscribe to the data plan, and register a small "app" — don't worry, there's nothing to build, it's just a name and a password you make up.
 
-### 2. Install
+#### Step 1: Create your apizone account
+
+Go to [apizone.suunto.com](https://apizone.suunto.com) and sign up or sign in.
+
+**Use the same email you use for the Suunto app.** If you have a Sports Tracker account, that works too — it's the same login system.
+
+#### Step 2: Subscribe to the Developer API
+
+After signing in, follow the [How to start](https://apizone.suunto.com/how-to-start) guide — it walks you through subscribing to the **Developer API**. This is free and gives you access to your workout history.
+
+> **Heads up:** Suunto's website states that API access is only for commercial partners — ignore that. Private users do get access, it just takes **3–4 weeks** for the subscription to be approved. Submit it and wait. It will come through.
+
+> You may see other products like "Sleep API", "Recovery API", "Daily Activity API". Skip those for now — the Developer API is enough to get started. You can add the others later if you want sleep and recovery data in Claude.
+
+#### Step 3: Register your app
+
+You're going to tell Suunto: "I have a small program, here's its name and a secret password — please let it read my data."
+
+1. Go to your [apizone profile page](https://apizone.suunto.com/profile)
+2. Scroll down to **OAuth application settings**
+3. Fill in the form:
+
+   | Field | What to enter |
+   |-------|--------------|
+   | **App name** | `suunto-mcp` (or anything you like) |
+   | **Client secret** | Make up a password — e.g. `my-suunto-2026`. Write it down. |
+   | **Redirect URI** | `http://localhost:8421/callback` — copy this **exactly** |
+
+4. Click **Save**
+
+After saving, the form shows a **Client ID** — a long code that Suunto generated for you. Copy it.
+
+> **What are these three things?**
+> — **Client ID**: your app's username, generated by Suunto
+> — **Client Secret**: your app's password, chosen by you
+> — **Redirect URI**: where Suunto sends you back after you approve access — must match exactly, typos break it
+>
+> The Client Secret is never shown again after you save. If you forget it, just set a new one in the same form.
+
+#### Step 4: Get your subscription key
+
+The subscription key is a second passcode that goes on every data request. Here's how to find it:
+
+1. Still on the [apizone profile page](https://apizone.suunto.com/profile)
+2. Scroll to the **Subscriptions** section
+3. Your Developer API subscription is listed there. Next to it you'll see a **Primary Key** — click the button next to it to reveal it, then copy the key.
+
+**Save all three values** before continuing — you'll need them in Part 2:
+- Client ID (from the OAuth app form above)
+- Client Secret (the password you made up)
+- Subscription Key (from the Subscriptions section)
+
+---
+
+### Part 2: Install and configure (~10 min)
+
+#### Step 5: Download the code
+
+Open **Terminal** on Mac (press ⌘Space and type "Terminal") or **Command Prompt** on Windows. Then run these commands one at a time:
 
 ```bash
 git clone https://github.com/googlarz/suunto-mcp
@@ -125,99 +126,135 @@ npm install
 npm run build
 ```
 
-> A `Dockerfile` is also included for containerized deployments and for
-> [glama.ai](https://glama.ai/mcp/servers/googlarz/suunto-mcp)'s automated
-> introspection checks.
+This downloads the code, installs what it needs, and builds it. Takes 1–2 minutes. If you see any errors, check the [Troubleshooting](#troubleshooting) section.
 
-### 3. Configure
+#### Step 6: Add your credentials
 
+You'll create a file called `.env` in the suunto-mcp folder and put your three values in it.
+
+**On Mac:**
 ```bash
 cp .env.example .env
-$EDITOR .env   # paste the 3 values from step 1
+open -e .env
 ```
 
-### 4. Pair your Suunto account
+This copies the template and opens it in TextEdit. Replace each placeholder with your actual values, then save and close.
+
+**On Windows:**
+```bash
+copy .env.example .env
+notepad .env
+```
+
+The file looks like this — replace the parts after the `=` signs:
+
+```
+SUUNTO_CLIENT_ID=your-client-id-here
+SUUNTO_CLIENT_SECRET=your-client-secret-here
+SUUNTO_SUBSCRIPTION_KEY=your-subscription-key-here
+```
+
+Save and close the file.
+
+#### Step 7: Pair your Suunto account
 
 ```bash
 npm run auth
 ```
 
-Your browser opens automatically to Suunto's authorization page. Click
-**Authorize**. The page redirects back to a local success screen and tokens
-are saved to `~/.suunto-mcp/tokens.json` (mode `0600`). You only do this
-once — the server refreshes tokens automatically.
+Your browser opens to Suunto's login page. **Sign in with your Suunto app account** — the same one you use on your phone. Supports email/password, Sign in with Apple, or Facebook.
 
-> If the browser doesn't open, copy the URL from the terminal manually.
-> Set `SUUNTO_NO_BROWSER=1` to disable the auto-open behavior.
+After signing in, a screen asks you to **Authorize** suunto-mcp to access your data. Click Authorize.
 
-### 5. Verify it works
+Your browser shows "Suunto MCP connected" and the terminal prints "Paired successfully". Done — you won't need to do this again. The connection stays active and renews itself automatically.
+
+> **Browser didn't open automatically?** Copy the long URL from the terminal and paste it into your browser manually.
+
+#### Step 8: Check everything is working
 
 ```bash
 npm run doctor
 ```
 
-This runs an end-to-end health check: Node version, env vars, network
-reachability, token freshness, a live `list_workouts` probe, and which
-24/7 products you're subscribed to. Fix any `✗` lines before moving on.
+This runs a health check. You should see output like:
 
-### 6. Plug into Claude
+```
+Suunto MCP — health check
 
-#### Claude Desktop
-
-Edit (creating if missing):
-
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-#### Claude Code
-
-Edit `~/.claude/mcp_config.json` (or run `claude mcp add` if your version
-supports the CLI flow).
-
-#### Config (works for both)
-
-**Once published to npm** (no clone needed):
-
-```json
-{
-  "mcpServers": {
-    "suunto": {
-      "command": "npx",
-      "args": ["-y", "suunto-mcp"],
-      "env": {
-        "SUUNTO_CLIENT_ID": "...",
-        "SUUNTO_CLIENT_SECRET": "...",
-        "SUUNTO_SUBSCRIPTION_KEY": "..."
-      }
-    }
-  }
-}
+  ✓  Node version             20.18.0 (require ≥ 20)
+  ✓  Credentials              client_id, client_secret, subscription_key set
+  ✓  Network reachability     reachable
+  ✓  Pairing                  paired (user: your-username), token expires in 47 min
+  ✓  API probe (workouts)     received 1 workout
 ```
 
-**From a local clone:**
+If any line shows ✗, the message tells you exactly what to fix. Resolve any issues before moving on.
+
+---
+
+### Part 3: Connect to Claude Desktop (~5 min)
+
+Now you'll tell Claude Desktop where to find Suunto MCP.
+
+#### Step 9: Open the Claude config file
+
+Open this file in a text editor (create it if it doesn't exist yet):
+
+- **Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+**Quick way on Mac** — run this in Terminal:
+```bash
+mkdir -p ~/Library/Application\ Support/Claude && open -e ~/Library/Application\ Support/Claude/claude_desktop_config.json
+```
+
+**Quick way on Windows** — run this in Command Prompt:
+```
+notepad "%APPDATA%\Claude\claude_desktop_config.json"
+```
+(If it asks "file not found — create it?", click Yes.)
+
+#### Step 10: Add Suunto MCP
+
+First, find the actual path to the suunto-mcp folder. In Terminal, while inside the folder, run:
+
+```bash
+pwd
+```
+
+It'll print something like `/Users/yourname/suunto-mcp`. Copy that.
+
+Now paste the following into the config file. Replace `/Users/yourname/suunto-mcp` with the path you got from `pwd`, and replace the credential placeholders with your actual values.
+
+> **If the file already has other servers configured**, don't replace the whole file — just add the `"suunto"` section alongside them. The structure must be valid JSON, so keep all the curly braces balanced. When in doubt, compare your file to the example below.
+>
+> **If the file is empty**, paste the whole block as-is.
 
 ```json
 {
   "mcpServers": {
     "suunto": {
       "command": "node",
-      "args": ["/absolute/path/to/suunto-mcp/dist/index.js"],
+      "args": ["/Users/yourname/suunto-mcp/dist/index.js"],
       "env": {
-        "SUUNTO_CLIENT_ID": "...",
-        "SUUNTO_CLIENT_SECRET": "...",
-        "SUUNTO_SUBSCRIPTION_KEY": "..."
+        "SUUNTO_CLIENT_ID": "your-client-id",
+        "SUUNTO_CLIENT_SECRET": "your-client-secret",
+        "SUUNTO_SUBSCRIPTION_KEY": "your-subscription-key"
       }
     }
   }
 }
 ```
 
-Restart Claude. Quick sanity check — ask:
+Save the file.
+
+#### Step 11: Test it
+
+Quit Claude Desktop and reopen it. Then ask:
 
 > *"What was my most recent workout?"*
 
-If you get a real answer with sport, distance, and date, you're connected.
+If Claude answers with your actual sport, date, and distance — you're all set!
 
 ---
 
@@ -226,7 +263,7 @@ If you get a real answer with sport, distance, and date, you're connected.
 ```
 You:    Compare my last three long runs. Has my heart-rate drift improved?
 
-Claude: Pulling your recent workouts… (calls list_workouts)
+Claude: Looking up your workouts…
         Found 3 runs over 90 minutes in the last 6 weeks:
           • Apr 12 — 22.4 km, 2h09, avg HR 148, last-30min drift +6 bpm
           • Apr 19 — 24.0 km, 2h21, avg HR 144, last-30min drift +4 bpm
@@ -237,255 +274,178 @@ Claude: Pulling your recent workouts… (calls list_workouts)
 
 ---
 
-## Tools exposed to the AI
+## What data is available
 
-**Workouts**
+| Category | What you can ask about | Requires |
+|----------|----------------------|---------|
+| **Workouts** | Any recorded activity — runs, hikes, rides, swims, ski tours. Distance, time, heart rate, pace, elevation, GPS route, power. | Developer API *(already subscribed)* |
+| **Sleep** | Sleep duration, stages (light/deep/REM), sleep score. | Sleep API subscription on apizone |
+| **Recovery** | HRV, recovery status, stress balance. | Recovery API subscription on apizone |
+| **Daily activity** | Steps, calories, 24/7 heart rate. | Daily Activity API subscription on apizone |
 
-| Tool                  | What it does                                                  |
-|-----------------------|---------------------------------------------------------------|
-| `list_workouts`       | Recent workouts, filter by date range, auto-paginates         |
-| `get_workout`         | Full summary for one workout                                  |
-| `get_workout_samples` | Time-series HR / pace / altitude / power / GPS                |
-| `get_workout_fit`     | Downloads the FIT file and returns parsed, structured JSON    |
-| `export_workout_gpx`  | GPX track export — for maps, Strava, route planning           |
-
-**24/7 health data** (requires the Activity / Sleep / Recovery API products to be enabled on your apizone subscription)
-
-| Tool                  | What it does                                                  |
-|-----------------------|---------------------------------------------------------------|
-| `get_daily_activity`  | Steps, calories, daily HR for a single day                    |
-| `list_daily_activity` | Steps, calories, daily HR for a date range                    |
-| `get_sleep`           | Sleep stages, duration, score for a night                     |
-| `list_sleep`          | Sleep data over a date range                                  |
-| `get_recovery`        | Recovery / HRV / stress for a single day                      |
-| `list_recovery`       | Recovery data over a date range                               |
-
-**Webhooks**
-
-| Tool                  | What it does                                                  |
-|-----------------------|---------------------------------------------------------------|
-| `list_subscriptions`  | Active webhook subscriptions on the account                   |
-
-The AI picks the right one for your question. You don't need to know which.
-
----
-
-## Optional: CLI
-
-Query your Suunto data directly from the terminal — no AI client needed.
-Useful for scripting, quick checks, or piping into `jq`.
-
-```bash
-# After npm run build (or npm install -g suunto-mcp once published):
-
-suunto-mcp list-workouts --since 2026-04-01 --limit 10
-suunto-mcp get-workout <workoutKey>
-suunto-mcp get-sleep 2026-04-20
-suunto-mcp list-sleep --from 2026-04-01 --to 2026-04-30
-suunto-mcp list-recovery --from 2026-04-01 --to 2026-04-30
-suunto-mcp export-workout-gpx <workoutKey> > route.gpx
-```
-
-All commands output JSON to stdout:
-
-```bash
-# Most recent workout's sport and distance
-suunto-mcp list-workouts --limit 1 | jq '.payload[0] | {sport, km: (.totalDistance/1000)}'
-
-# Average sleep score over the last week
-suunto-mcp list-sleep --from 2026-04-14 --to 2026-04-20 \
-  | jq '[.payload[].sleepScore] | add/length'
-```
-
-Run `suunto-mcp --help` for the full command list.
-
----
-
-## Optional: webhooks
-
-Suunto can push notifications to you the moment a new workout finishes
-syncing — no polling.
-
-```bash
-npm run webhook
-```
-
-This starts a tiny HTTP receiver on port 8422 that logs every event to
-`~/.suunto-mcp/webhooks.ndjson`. Expose it to the public internet (cloudflared,
-ngrok, your own VPS) and register the URL in your Suunto app settings.
-
-For most personal setups, skip this. Polling on demand is simpler.
-
----
-
-## Pairs well with `health-skill`
-
-If you already use [googlarz/health-skill](https://github.com/googlarz/health-skill)
-— a Claude skill for symptom triage, lab interpretation, and lifestyle
-guidance — Suunto MCP gives it a live feed of your training, sleep, and
-recovery data. Together they answer questions like *"is my resting HR drift
-this week consistent with the cold I had?"* or *"given my recovery scores,
-should I keep this week's intervals?"* with real numbers instead of guesses.
-
-## Privacy
-
-As of v0.1:
-
-- All data flows **directly between your machine and Suunto's API**. No
-  third-party servers, no analytics.
-- Tokens are stored locally at `~/.suunto-mcp/tokens.json` (mode `0600`),
-  or in your OS keychain if you opted in.
-- Suunto sees that *an app called "Suunto MCP"* is authorized on your
-  account (visible in apizone → user profile → Authorized applications).
-- The AI only sees data it explicitly requests via tools or resources.
-
-If a future version offers a hosted-proxy option for non-tech users, this
-section will be updated explicitly. The default will always remain
-local-first.
+To add sleep, recovery, or daily activity: go back to [apizone.suunto.com](https://apizone.suunto.com), find each product, and subscribe. Then run `npm run doctor` to confirm they're active.
 
 ---
 
 ## Troubleshooting
 
-**Run `npm run doctor` first** — it pinpoints most issues automatically.
+**Always run `npm run doctor` first** — it pinpoints most problems automatically.
 
-| Symptom | Likely cause | Fix |
+| What you see | What it means | How to fix it |
 |---|---|---|
-| `Missing required env vars` | `.env` not loaded or not filled in | `cp .env.example .env`, fill it, retry |
-| `Not authenticated` / `SuuntoNotAuthenticatedError` | Tokens missing | Run `npm run auth` |
-| `Token request failed: 400` | Wrong client secret, or redirect URI doesn't match apizone exactly | Re-copy from apizone, ensure `http://localhost:8421/callback` is registered |
-| `SuuntoAuthError (401)` on every call | Subscription key wrong or expired | Re-copy primary key from apizone → user profile → Subscriptions |
-| `SuuntoForbiddenError (403)` on `list_workouts` | App not subscribed to the Workouts product | apizone → your app → Subscribe to APIs → Workouts |
-| `404` on `get_sleep` / `get_recovery` / `get_daily_activity` | App not subscribed to that 24/7 product | Subscribe in apizone (each product is separate) |
-| Empty workout list | Watch hasn't synced to the Suunto cloud | Open Suunto app on your phone, wait for sync |
-| `npm run auth` hangs / browser never opens | Port 8421 already in use, or running headless | `lsof -i :8421` to check; set `SUUNTO_NO_BROWSER=1` and copy URL manually |
-| OAuth callback page says "State mismatch" | Started a second auth flow before the first finished | Close all auth tabs and run `npm run auth` once |
-| Tokens "disappear" after switching to keychain | File-based tokens don't migrate automatically | Re-run `npm run auth` after enabling keychain |
-
-## Disconnecting / cleanup
-
-To remove access:
-
-1. **Revoke the OAuth grant on Suunto's side** — log in to apizone → user
-   profile → Authorized applications → remove your app. Suunto stops
-   honoring the tokens immediately.
-2. **Delete local tokens**:
-   ```bash
-   rm -f ~/.suunto-mcp/tokens.json
-   ```
-   If you were using the keychain backend, delete the entry named
-   `suunto-mcp / tokens` in your OS keychain (Keychain Access on macOS,
-   etc.).
-3. **Remove the MCP entry** from your Claude config and restart Claude.
-4. **Optional — delete your apizone app** if you no longer want it
-   listed as a registered application.
+| Claude returns an error or nothing | Something isn't connected yet | Run `npm run doctor` and fix any lines with ✗ |
+| Empty workout list | Watch hasn't synced recently | Open the Suunto app on your phone and wait for the sync to complete |
+| "Not authenticated" | The pairing step didn't finish | Run `npm run auth` again |
+| You logged in but nothing happened | The browser tab closed or timed out before Suunto confirmed | Close all Suunto tabs and run `npm run auth` again — click Authorize promptly |
+| "Token request failed" or "400 error" | Client Secret or Redirect URI don't match apizone | Go to apizone → profile → OAuth application settings and confirm both values match exactly |
+| "401" error on every request | Subscription key is wrong or incomplete | Go to apizone → profile → Subscriptions, reveal and re-copy the Primary Key |
+| "403 Forbidden" on workouts | Developer API subscription isn't active | Sign in to apizone and confirm it's listed as Active |
+| Sleep / recovery / activity returns "not found" | Those need separate subscriptions | Go to apizone and subscribe to the Sleep, Recovery, or Daily Activity API |
+| Got an SSL error after Apple sign-in | Known Suunto quirk with Apple login | Close the error tab, go back to the auth URL the terminal printed, and continue |
+| "State mismatch" error | A second auth flow started before the first finished | Close all auth-related tabs and run `npm run auth` fresh |
+| `npm run build` failed with an error | Node.js version too old or not installed | Run `node --version` — it must be 20 or higher. Reinstall from [nodejs.org](https://nodejs.org) |
+| Terminal says "EADDRINUSE" or port in use | Something else is using port 8421 | Restart your computer, or run `lsof -i :8421` to see what's using it |
 
 ---
 
-## MCP Resources (ambient context)
+## FAQ
 
-In addition to tools, the server exposes **resources** — passive data the
-client can pull without the model having to call a tool:
+**Is this safe? Will Suunto lock my account?**
+Suunto built this API specifically for people to connect their own tools — it's explicitly allowed. You're using it exactly as intended.
 
-| URI | What |
-|---|---|
-| `suunto://recent/workout` | Most recent workout summary |
-| `suunto://today/sleep` | Last night's sleep |
-| `suunto://today/recovery` | Today's recovery / HRV |
-| `suunto://today/activity` | Today's steps / calories / HR |
-| `suunto://this-week/summary` | Aggregated training totals for the current ISO week |
+**Is my data leaving my computer?**
+Your data travels directly between your computer and Suunto's servers. Suunto MCP is just the bridge. When Claude asks about your workouts, it goes: Claude → Suunto MCP (on your machine) → Suunto's servers → back. No third-party services see your data.
 
-Clients that surface MCP resources (Claude Desktop, Cursor) will let you
-attach these directly into a conversation — useful for "given my recovery
-today, should I…" style questions.
+**Which Suunto watches work?**
+Any watch that syncs to the Suunto app: Race, Vertical, 9 Peak Pro, 9 Peak, 5 Peak, Wing, Ocean, and older models. If it appears in your Suunto app, it works here.
 
-## Reliability
+**Do I need to do anything when I record a new workout?**
+No. Just ask Claude — it always pulls live data from Suunto.
 
-- **Automatic retries** with exponential backoff + jitter on `429`, `500`,
-  `502`, `503`, `504` (up to 4 attempts).
-- **`Retry-After` header is honored** when Suunto returns one.
-- **Auto-pagination** in `list_workouts` — keeps fetching pages until your
-  `limit` is met or there's nothing left.
-- **Token refresh is automatic** — the access token is silently re-issued
-  before each request if it's within 60 seconds of expiry.
-- **Concurrent-refresh deduplication** — multiple parallel calls share a
-  single in-flight refresh, so Suunto never sees a double `refresh_token`
-  grant (which would invalidate the older token and log you out).
-- **Structured error types** — `SuuntoAuthError`, `SuuntoForbiddenError`,
-  `SuuntoNotFoundError`, `SuuntoRateLimitError`, `SuuntoApiError`,
-  `SuuntoNotAuthenticatedError`, `SuuntoTokenError`. Lets clients
-  distinguish "re-authenticate" from "wait and retry" from "this resource
-  doesn't exist."
+**What if I want to disconnect and stop using this?**
+See [Disconnecting](#disconnecting) below. You can fully revoke access in under a minute.
 
-## Token storage
+**Can I use this with AI apps other than Claude?**
+Yes — anything that supports MCP: Claude Code, Cursor, Windsurf, and others.
 
-By default, tokens are written to `~/.suunto-mcp/tokens.json` with file
-mode `0600`. For stronger protection, opt into the OS keychain
-(macOS Keychain, Linux libsecret, Windows Credential Manager):
+**My Suunto app username is different from my email — which do I use?**
+Use your email address to sign in to apizone. Your username will appear once you're authenticated.
+
+---
+
+## Privacy
+
+- All data flows **directly between your computer and Suunto's servers**. No third-party servers, no analytics.
+- Your login credentials are stored locally at `~/.suunto-mcp/tokens.json` — not uploaded anywhere.
+- Suunto shows your connected app as "suunto-mcp" in apizone → profile → Authorized applications. You can revoke it there at any time.
+- The AI only sees data it explicitly requests for your question — not your entire history at once.
+
+---
+
+## Disconnecting
+
+To fully remove access:
+
+1. Log in to [apizone.suunto.com](https://apizone.suunto.com) → profile → **Authorized applications** → remove suunto-mcp. Suunto immediately stops honoring the connection.
+2. Delete local credentials:
+   ```bash
+   rm -f ~/.suunto-mcp/tokens.json
+   ```
+3. Remove the `"suunto"` block from your Claude config and restart Claude.
+
+---
+
+## Pairs well with health-skill
+
+If you use [googlarz/health-skill](https://github.com/googlarz/health-skill) — a Claude skill for symptom triage and health Q&A — Suunto MCP gives it a live feed of your training, sleep, and recovery data. Together they can answer questions like *"given my recovery scores this week, should I keep tomorrow's interval session?"* with real numbers.
+
+---
+
+## Advanced
+
+<details>
+<summary>Using with Claude Code instead of Claude Desktop</summary>
+
+Edit `~/.claude/mcp_config.json` and add the same `"suunto"` block from Step 10. Then run `claude mcp list` to verify it's loaded.
+
+</details>
+
+<details>
+<summary>CLI — query your data from the terminal</summary>
+
+After building, you can query Suunto data directly without Claude:
+
+```bash
+suunto-mcp list-workouts --limit 10
+suunto-mcp get-workout <workoutKey>
+suunto-mcp export-workout-gpx <workoutKey> > route.gpx
+suunto-mcp get-sleep 2026-04-20
+suunto-mcp list-recovery --from 2026-04-01 --to 2026-04-30
+```
+
+All output is JSON — pipe into `jq` for filtering.
+
+</details>
+
+<details>
+<summary>Webhooks — get notified the moment a workout syncs</summary>
+
+```bash
+npm run webhook
+```
+
+Starts an HTTP receiver on port 8422 that logs workout events as they arrive. Expose it to the internet (cloudflared, ngrok, your own server) and register the URL in apizone → webhooks.
+
+Most users can skip this — asking Claude on demand is simpler.
+
+</details>
+
+<details>
+<summary>Keychain — store credentials more securely</summary>
+
+To store your Suunto login tokens in your OS keychain (macOS Keychain, Windows Credential Manager) instead of a file:
 
 ```bash
 SUUNTO_TOKEN_STORAGE=keychain npm install @napi-rs/keyring
 SUUNTO_TOKEN_STORAGE=keychain npm run auth
 ```
 
-The keychain backend is an optional dependency — `npm install` will not
-fail if it can't be built on your platform; it just falls back to the
-file-based default.
+</details>
 
-## Health check
+<details>
+<summary>All available tools (reference)</summary>
 
-```bash
-npm run doctor
-```
+Claude picks the right tool automatically — you don't need to know these. For the curious:
 
-Output:
+**Workouts**
 
-```
-Suunto MCP — health check
+| Tool | What it does |
+|------|-------------|
+| `list_workouts` | Recent workouts, filter by date or sport |
+| `get_workout` | Full summary for one workout |
+| `get_workout_samples` | Time-series: HR, pace, altitude, power, GPS per second |
+| `get_workout_fit` | Raw FIT file decoded to structured data |
+| `export_workout_gpx` | GPX route export for maps, Strava, route planning |
 
-  ✓  Node version                     20.18.0 (require ≥ 20)
-  ✓  Credentials                      client_id, client_secret, subscription_key set
-  ✓  Network → cloudapi-oauth.suunto.com  reachable (HTTP 302)
-  ✓  Pairing                          paired (user: dawid), token expires in 47 min
-  ✓  API probe (list_workouts)        received 1 workout (latest: 1714137600000)
-  ✓  Daily activity product           subscribed
-  !  Sleep product                    not subscribed on apizone
-  ✓  Recovery product                 subscribed
-```
+**24/7 health** *(requires individual product subscriptions on apizone)*
 
-Run this whenever something feels off. It pinpoints the exact failing
-layer (Node, env, network, auth, API quota, missing product subscription).
+| Tool | What it does |
+|------|-------------|
+| `get_daily_activity` / `list_daily_activity` | Steps, calories, daily heart rate |
+| `get_sleep` / `list_sleep` | Sleep stages, duration, score |
+| `get_recovery` / `list_recovery` | Recovery score, HRV, stress balance |
+| `get_daily_activity_statistics` | Aggregated daily stats over a date range |
 
-## Tests
-
-```bash
-npm test
-```
-
-40 unit + integration tests cover:
-- OAuth URL building, code exchange, refresh, token-expiry refresh logic
-- Concurrent-refresh deduplication (4 parallel calls → 1 token request)
-- Token storage (round-trip, file permissions, missing-file fallback, parent-dir creation)
-- API client: bearer + subscription-key headers, retry on 429/500 with `Retry-After`, no retry on 4xx, byte-stream downloads
-- Structured error types (`SuuntoAuthError`, `SuuntoForbiddenError`, `SuuntoNotFoundError`, `SuuntoRateLimitError`)
-- `list_workouts` auto-pagination across multiple pages
-- FIT integration: parser accepts a minimum-valid byte stream, rejects garbage and empty input
-- FIT summary extraction, empty-FIT handling, record sampling
-- MCP resources: enumeration, dispatch, today's-date wiring, week aggregation
-- Config loading, env overrides, missing-credential errors
-
-CI runs on Node 20 and 22 on every push and PR.
-
-PRs welcome.
+</details>
 
 ---
 
 ## Credits
 
-- [Suunto APIzone](https://apizone.suunto.com/) — the people who opened the door
-- [Model Context Protocol](https://modelcontextprotocol.io) — the standard this server speaks
-- [`fit-file-parser`](https://www.npmjs.com/package/fit-file-parser) — for decoding FIT binaries
+- [Suunto APIzone](https://apizone.suunto.com/) — for opening their API to everyone
+- [Model Context Protocol](https://modelcontextprotocol.io) — the standard this speaks
+- [`fit-file-parser`](https://www.npmjs.com/package/fit-file-parser) — FIT binary decoding
 
 ## License
 
-MIT. Use it, fork it, improve it.
+MIT — use it, fork it, improve it.
