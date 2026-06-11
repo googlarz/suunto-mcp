@@ -55,7 +55,7 @@ Before starting, make sure you have:
 - [ ] **Claude Desktop** (or another MCP-compatible AI app)
 - [ ] **Node.js** — free, [download here](https://nodejs.org), choose the "LTS" version
 - [ ] **Git** — free, [download here](https://git-scm.com/downloads)
-- [ ] **30–40 minutes** for first-time setup
+- [ ] **~5 minutes** if you let Claude Code do it, ~30 min manually
 
 Once it's done, you never redo it.
 
