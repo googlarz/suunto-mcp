@@ -55,7 +55,7 @@ Before starting, make sure you have:
 - [ ] **Claude Desktop** (or another MCP-compatible AI app)
 - [ ] **Node.js** — free, [download here](https://nodejs.org), choose the "LTS" version
 - [ ] **Git** — free, [download here](https://git-scm.com/downloads)
-- [ ] **~5 minutes** if you let Claude Code do it, ~30 min manually
+- [ ] **~5 min to submit** + 3–4 week wait for Suunto approval + ~15 min to install
 
 Once it's done, you never redo it.
 
@@ -89,7 +89,13 @@ After signing in, follow the [How to start](https://apizone.suunto.com/how-to-st
 
 > You may see other products like "Sleep API", "Recovery API", "Daily Activity API". Skip those for now — the Developer API is enough to get started. You can add the others later if you want sleep and recovery data in Claude.
 
-#### Step 3: Register your app
+---
+
+> ⏳ **Stop here and wait.** Once you've subscribed, Suunto needs to approve your request. This takes **3–4 weeks**. You'll get an email when it's done. Come back to Steps 3–4 only after your subscription shows as **Active** in your apizone profile.
+
+---
+
+#### Step 3: Register your app *(do this after approval)*
 
 You're going to tell Suunto: "I have a small program, here's its name and a secret password — please let it read my data."
 
@@ -114,7 +120,7 @@ After saving, the form shows a **Client ID** — a long code that Suunto generat
 >
 > The Client Secret is never shown again after you save. If you forget it, just set a new one in the same form.
 
-#### Step 4: Get your subscription key
+#### Step 4: Get your subscription key *(do this after approval)*
 
 The subscription key is a second passcode that goes on every data request. Here's how to find it:
 
@@ -129,7 +135,7 @@ The subscription key is a second passcode that goes on every data request. Here'
 
 ---
 
-### Part 2: Install and configure (~10 min)
+### Part 2: Install and configure (~10 min, after Suunto approves you)
 
 #### Step 5: Download the code
 
