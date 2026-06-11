@@ -100,7 +100,7 @@ You're going to tell Suunto: "I have a small program, here's its name and a secr
    | Field | What to enter |
    |-------|--------------|
    | **App name** | `suunto-mcp` (or anything you like) |
-   | **Client secret** | Make up a password — e.g. `my-suunto-2026`. Write it down. |
+   | **Client secret** | Make up a unique password — something only you'd know, e.g. `alice-suunto-2026` with your own name. Write it down. Don't use this exact example. |
    | **Redirect URI** | `http://localhost:8421/callback` — copy this **exactly** |
 
 4. Click **Save**
