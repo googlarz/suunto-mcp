@@ -71,7 +71,7 @@ The setup has three parts:
 
 ---
 
-### Part 1: Register with Suunto's developer portal (~15 min)
+### Part 1: Register with Suunto's developer portal (~5 min to submit, then wait 3–4 weeks)
 
 Suunto has a free developer portal called **apizone** where you register apps that can access your data. You'll create an account, subscribe to the data plan, and register a small "app" — don't worry, there's nothing to build, it's just a name and a password you make up.
 
