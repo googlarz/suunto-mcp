@@ -12,7 +12,7 @@
 
 > *Built by a Suunto user who wanted to ask "how was my last long run?" and get a real answer with numbers — and to feed live training data into a personal AI coach.*
 
-> **Note for regular Suunto users:** Suunto's API documentation says access is reserved for commercial partners. That's not the full picture — **private users can get access too.** It just takes 3–4 weeks for approval after you apply. Don't let that disclaimer stop you.
+> 🏃 **For regular Suunto users:** Suunto's API docs say access is for commercial partners only — **that's not the full picture.** Private users get access too. It just takes **3–4 weeks** for approval after you apply. Submit, wait, enjoy. Don't let that disclaimer stop you. ✅
 
 ---
 
