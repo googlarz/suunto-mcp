@@ -4,6 +4,8 @@
 
 # Suunto MCP
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fgooglarz%2Fsuunto-mcp.svg)](https://mcptoplist.com/server/glama%2Fgooglarz%2Fsuunto-mcp)
+
 [![CI](https://github.com/googlarz/suunto-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/googlarz/suunto-mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![suunto-mcp MCP server](https://glama.ai/mcp/servers/googlarz/suunto-mcp/badges/score.svg)](https://glama.ai/mcp/servers/googlarz/suunto-mcp)
