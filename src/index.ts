@@ -35,7 +35,7 @@ function ensureReady() {
 }
 
 const server = new Server(
-  { name: "suunto-mcp", version: "0.10.0" },
+  { name: "suunto-mcp", version: "0.11.0" },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -324,6 +324,74 @@ const tools = [
       "Returns all active webhook subscriptions on this Suunto account as an array of { id, eventType, callbackUrl, createdAt }. Returns an empty array if no webhooks are registered. Use to audit which event types are already wired before adding new subscriptions. Requires Subscriptions API product on apizone. Read-only.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "list_routes",
+    description:
+      "Returns all routes saved in the user's Suunto account. Each route: id, description, visibility, distance (m), start/end coordinates, waypoint count. Use export_route to get the GPX track for navigation. Read-only.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "export_route",
+    description:
+      "Exports a saved Suunto route as a GPX 1.1 XML string. Suitable for import into navigation apps (Komoot, Strava, Garmin Connect, etc.). Use list_routes to discover valid route IDs. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        routeId: {
+          type: "string",
+          minLength: 1,
+          description: "Route ID returned by list_routes.",
+        },
+      },
+      required: ["routeId"],
+    },
+  },
+  {
+    name: "upload_workout",
+    description:
+      "Uploads a FIT or GPX workout file to the user's Suunto account. Provide the absolute path to the file on disk. The file is pushed to Suunto and appears in the app after processing (usually a few seconds). Returns an uploadId you can poll with get_upload_status. Supported formats: .fit (binary) or .gpx (XML). Write operation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          minLength: 1,
+          description: "Absolute path to the .fit or .gpx file on disk.",
+        },
+        description: {
+          type: "string",
+          description: "Short workout title shown in the Suunto app. Optional.",
+        },
+        comment: {
+          type: "string",
+          description: "Longer notes for the workout. Optional.",
+        },
+        privacy: {
+          type: "string",
+          enum: ["DEFAULT", "PRIVATE", "FOLLOWERS", "PUBLIC"],
+          default: "DEFAULT",
+          description: "Visibility. DEFAULT uses the account's default setting.",
+        },
+      },
+      required: ["filePath"],
+    },
+  },
+  {
+    name: "get_upload_status",
+    description:
+      "Polls the processing status of a workout upload initiated by upload_workout. Returns status (e.g. 'Queued', 'Processing', 'Processed', 'Error') and the workoutKey once processing completes. Use the returned workoutKey with get_workout for full detail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        uploadId: {
+          type: "string",
+          minLength: 1,
+          description: "Upload ID returned by upload_workout.",
+        },
+      },
+      required: ["uploadId"],
+    },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
@@ -383,6 +451,33 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "list_subscriptions": {
         const data = await suunto.subscriptions();
+        return text(JSON.stringify(data));
+      }
+      case "list_routes": {
+        const data = await suunto.listRoutes();
+        return text(JSON.stringify(data));
+      }
+      case "export_route": {
+        const bytes = await suunto.exportRoute(a.routeId);
+        return text(new TextDecoder().decode(bytes));
+      }
+      case "upload_workout": {
+        const { readFile } = await import("node:fs/promises");
+        const filePath: string = a.filePath;
+        const ext = filePath.split(".").pop()?.toLowerCase();
+        const contentType = ext === "gpx" ? "application/gpx+xml" : "application/octet-stream";
+        const fileBytes = await readFile(filePath);
+        const { uploadId, uploadUrl } = await suunto.initiateUpload({
+          description: a.description,
+          comment: a.comment,
+          notifyUser: false,
+          privacy: a.privacy ?? "DEFAULT",
+        });
+        await suunto.uploadFile(uploadUrl, fileBytes, contentType);
+        return text(JSON.stringify({ uploadId, message: "Upload initiated. Use get_upload_status to check processing." }));
+      }
+      case "get_upload_status": {
+        const data = await suunto.getUploadStatus(a.uploadId);
         return text(JSON.stringify(data));
       }
       default:

@@ -198,6 +198,63 @@ export class SuuntoClient {
     return this.json<any>(`/247/daily-activity-statistics?${q.toString()}`);
   }
 
+  // ---------- Routes ----------
+
+  listRoutes() {
+    return this.json<any>(`/v2/route`);
+  }
+
+  async exportRoute(routeId: string): Promise<Buffer> {
+    return this.bytes(`/v2/route/${encodeURIComponent(routeId)}/export`);
+  }
+
+  // ---------- Workout Upload ----------
+
+  async initiateUpload(opts: {
+    description?: string;
+    comment?: string;
+    notifyUser?: boolean;
+    privacy?: "DEFAULT" | "PRIVATE" | "FOLLOWERS" | "PUBLIC";
+  }): Promise<{ uploadId: string; uploadUrl: string }> {
+    const token = await getValidAccessToken(this.cfg);
+    const res = await fetch(`${API_BASE}/v2/upload`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Ocp-Apim-Subscription-Key": this.cfg.subscriptionKey,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        description: opts.description ?? "",
+        comment: opts.comment ?? "",
+        notifyUser: opts.notifyUser ?? false,
+        privacy: opts.privacy ?? "DEFAULT",
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw errorFor(res.status, "/v2/upload", body);
+    }
+    return (await res.json()) as { uploadId: string; uploadUrl: string };
+  }
+
+  async uploadFile(uploadUrl: string, fileBytes: Buffer, contentType: string): Promise<void> {
+    const res = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: fileBytes.buffer as ArrayBuffer,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new SuuntoApiError(res.status, uploadUrl, body);
+    }
+  }
+
+  getUploadStatus(uploadId: string) {
+    return this.json<any>(`/v2/upload/${encodeURIComponent(uploadId)}`);
+  }
+
   // ---------- Subscriptions / Webhooks ----------
 
   subscriptions() {
