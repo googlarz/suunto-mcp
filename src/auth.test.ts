@@ -19,6 +19,7 @@ const baseCfg = {
   subscriptionKey: "sub",
   redirectUri: "http://localhost:8421/callback",
   tokenPath: "",
+  appName: "test-app",
 };
 
 const origFetch = globalThis.fetch;

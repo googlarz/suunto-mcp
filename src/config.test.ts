@@ -50,6 +50,7 @@ test("config: assertCredentials lists every missing var", () => {
       subscriptionKey: "",
       redirectUri: "x",
       tokenPath: "x",
+      appName: "",
     });
     assert.fail("expected throw");
   } catch (err: any) {
@@ -67,6 +68,7 @@ test("config: assertCredentials passes when all present", () => {
       subscriptionKey: "c",
       redirectUri: "x",
       tokenPath: "x",
+      appName: "a",
     }),
   );
 });
