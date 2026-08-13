@@ -36,7 +36,7 @@ function ensureReady() {
 }
 
 const server = new Server(
-  { name: "suunto-mcp", version: "0.12.0" },
+  { name: "suunto-mcp", version: "0.13.0" },
   { capabilities: { tools: {}, resources: {} } },
 );
 
