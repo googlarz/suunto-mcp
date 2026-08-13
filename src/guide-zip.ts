@@ -139,10 +139,16 @@ export interface GuidePlan {
   exercises: GuideExercise[];
 }
 
-// One text step per exercise, advanced by lap-button press (manualLap).
-// Matches the confirmed Guide schema: sequence of steps with a text field
-// and a manualLap trigger condition.
+// One text step per exercise, advanced by lap-button press.
+// Confirmed against apizone.suunto.com/suuntoplus-guide-description: a step
+// advances via its own "transitions" array — { condition: { type: "manualLap" } }
+// jumps to the next step in the list when the lap button is pressed during
+// that step. createManualLap is a DIFFERENT, unrelated property (it only
+// logs a lap marker for HR-window averaging) — it does not advance anything,
+// which is why an earlier version of this file registered a lap but never
+// moved to the next exercise.
 export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
+  const last = plan.exercises.length - 1;
   return {
     type: "sequence",
     name: plan.title,
@@ -151,13 +157,25 @@ export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
     localDate: plan.date,
     usage: "workout",
     owner: ownerAppName,
-    steps: plan.exercises.map((ex, i) => ({
-      type: "fields",
-      title: `${i + 1}/${plan.exercises.length}`,
-      fields: [{ type: "text", value: `${ex.name} — ${ex.detail}` }],
-      createManualLap: true,
-    })),
+    steps: plan.exercises.map((ex, i) => {
+      const step: Record<string, unknown> = {
+        type: "fields",
+        title: `${i + 1}/${plan.exercises.length}`,
+        fields: [{ type: "text", value: stepText(ex) }],
+      };
+      if (i < last) {
+        step.transitions = [{ condition: { type: "manualLap" } }];
+      }
+      return step;
+    }),
   };
+}
+
+// Step text field is capped at 54 characters (confirmed). Two lines via \n
+// reads better than one long truncated line.
+function stepText(ex: GuideExercise): string {
+  const text = `${ex.name}\n${ex.detail}`;
+  return text.length > 54 ? text.slice(0, 54) : text;
 }
 
 export function buildGuideZip(plan: GuidePlan, ownerAppName: string): Buffer {
