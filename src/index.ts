@@ -380,7 +380,7 @@ const tools = [
   {
     name: "push_workout_guide",
     description:
-      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. After this call the user must open the Suunto mobile app, find the guide under SuuntoPlus Guides for their watch, tap 'Pin to watch', then 'Sync now' — there is no fully automatic delivery to the watch. Write operation.",
+      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. There is no live push to the watch itself — delivery depends on the phone's normal Suunto app sync. In testing it showed up on the watch after the next ordinary sync with no manual pinning needed; if it doesn't appear, check the Suunto app under SuuntoPlus Guides and pin it there. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -533,7 +533,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           JSON.stringify({
             ...data,
             nextStep:
-              "Open the Suunto mobile app > your watch > SuuntoPlus Guides, find this guide, tap 'Pin to watch', then 'Sync now'.",
+              "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
           }),
         );
       }
