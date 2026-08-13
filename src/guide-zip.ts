@@ -87,7 +87,7 @@ export function buildZip(files: { name: string; data: Buffer }[]): Buffer {
 // Minimal 8x8 solid-gray PNG — Guide API requires an icon.png but doesn't
 // need it to look like anything; watch UI doesn't render a per-guide icon.
 function buildIconPng(): Buffer {
-  const size = 8;
+  const size = 300; // Guide API requires exactly 300x300
   const rowBytes = 1 + size * 3; // filter byte + RGB
   const raw = Buffer.alloc(rowBytes * size, 0);
   for (let y = 0; y < size; y++) {
@@ -142,7 +142,7 @@ export interface GuidePlan {
 // One text step per exercise, advanced by lap-button press (manualLap).
 // Matches the confirmed Guide schema: sequence of steps with a text field
 // and a manualLap trigger condition.
-export function buildGuideJson(plan: GuidePlan) {
+export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
   return {
     type: "sequence",
     name: plan.title,
@@ -150,11 +150,12 @@ export function buildGuideJson(plan: GuidePlan) {
     shortDescription: plan.title,
     localDate: plan.date,
     usage: "workout",
+    owner: ownerAppName,
     steps: plan.exercises.map((ex, i) => ({
-      type: "notification",
-      text: `${i + 1}/${plan.exercises.length} ${ex.name} — ${ex.detail}`,
+      type: "fields",
+      title: `${i + 1}/${plan.exercises.length}`,
+      fields: [{ type: "text", value: `${ex.name} — ${ex.detail}` }],
       createManualLap: true,
-      trigger: { condition: "manualLap" },
     })),
   };
 }
@@ -166,7 +167,7 @@ export function buildGuideZip(plan: GuidePlan, ownerAppName: string): Buffer {
     owner: ownerAppName,
     description: `Gym Coach plan for ${plan.date}`,
   };
-  const guide = buildGuideJson(plan);
+  const guide = buildGuideJson(plan, ownerAppName);
 
   return buildZip([
     { name: "manifest.json", data: Buffer.from(JSON.stringify(manifest), "utf8") },
