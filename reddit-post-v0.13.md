@@ -9,7 +9,7 @@ Screenshots below are from my Vertical 2.
 1. You talk to Claude about your training — goals, equipment, injuries, current lifts. It also pulls your actual HRV/sleep from the watch, so it won't program a heavy session the day after bad recovery.
 2. Claude writes the real session — exercises, weights, sets/reps, progression — and pushes it directly into your Suunto account via the official Cloud API (as a SuuntoPlus Guide).
 3. One tap in the Suunto app — "Pin to watch" → "Sync now" — and it's on your wrist. That's the only manual step; Suunto has no live push API, so nothing skips your phone's normal sync.
-4. On the watch: exercise name + weight/reps on screen, lap button advances to the next one, rest timer counts down automatically between exercises (skippable with another lap), vibrate + "up next" notification when a new exercise starts.
+4. On the watch: exercise name + weight/reps on screen, lap button advances to the next one. Between exercises there's a rest screen — a stopwatch (counts up, no forced target) plus a preview of what's next, and you lap when you're ready. Vibrate + "up next" notification when a new exercise starts.
 5. After the session, Claude reads back what you actually did (from the workout log) and adjusts next week.
 
 ## Setup
