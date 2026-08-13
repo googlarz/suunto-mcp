@@ -299,6 +299,12 @@ export class SuuntoClient {
     return this.json<any>(`/v2/guides/items`);
   }
 
+  async deleteGuide(guideId: string): Promise<void> {
+    await this.request(`/v2/guides/files/${encodeURIComponent(guideId)}`, {
+      method: "DELETE",
+    });
+  }
+
   // ---------- Subscriptions / Webhooks ----------
 
   subscriptions() {
