@@ -128,12 +128,9 @@ function buildIconPng(): Buffer {
   ]);
 }
 
-const DEFAULT_REST_SECONDS = 90;
-
 export interface GuideExercise {
   name: string;
   detail: string;
-  restSeconds?: number; // rest after this exercise, before the next one. Default 90.
 }
 
 export interface GuidePlan {
@@ -151,8 +148,10 @@ export interface GuidePlan {
 // - "notification" is an optional per-step object (title/text) shown with a
 //   vibrate/sound when that step starts — used here to confirm "next up" so
 //   the lap press's effect is felt, not just seen.
-// - rest steps auto-advance via a stepDuration condition, OR'd with manualLap
-//   so the user can skip the rest early.
+// - rest steps have no target duration — a "duration" field with window:"step"
+//   is a stopwatch (counts up from step start), plus a text field previewing
+//   the next exercise. User decides when they're ready and laps to advance,
+//   same as every other step — no auto-timeout.
 export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
   const exercises = plan.exercises;
   const steps: Record<string, unknown>[] = [];
@@ -168,22 +167,15 @@ export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
     });
 
     if (!isLast) {
-      const rest = ex.restSeconds ?? DEFAULT_REST_SECONDS;
+      const next = exercises[i + 1];
       steps.push({
         type: "fields",
         title: "REST",
-        fields: [{ type: "stepDurationCountdown", value: rest }],
-        transitions: [
-          {
-            condition: {
-              type: "or",
-              conditions: [
-                { type: "stepDuration", value: rest },
-                { type: "manualLap" },
-              ],
-            },
-          },
+        fields: [
+          { type: "duration", window: "step" },
+          { type: "text", value: truncate(`Next: ${next.name}\n${next.detail}`, 54) },
         ],
+        transitions: [{ condition: { type: "manualLap" } }],
       });
     }
   });
