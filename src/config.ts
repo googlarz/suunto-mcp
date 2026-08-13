@@ -7,6 +7,7 @@ export interface Config {
   subscriptionKey: string;
   redirectUri: string;
   tokenPath: string;
+  appName: string;
 }
 
 export function loadConfig(): Config {
@@ -17,8 +18,11 @@ export function loadConfig(): Config {
     process.env.SUUNTO_REDIRECT_URI ?? "http://localhost:8421/callback";
   const tokenPath =
     process.env.SUUNTO_TOKEN_PATH ?? join(homedir(), ".suunto-mcp", "tokens.json");
+  // Must exactly match the app name registered on apizone.suunto.com — the
+  // Guide Cloud API rejects uploads where manifest.json's "owner" doesn't match.
+  const appName = process.env.SUUNTO_APP_NAME ?? "";
 
-  return { clientId, clientSecret, subscriptionKey, redirectUri, tokenPath };
+  return { clientId, clientSecret, subscriptionKey, redirectUri, tokenPath, appName };
 }
 
 export function assertCredentials(c: Config): void {

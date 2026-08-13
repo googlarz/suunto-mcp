@@ -22,6 +22,7 @@ import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
+import { buildGuideZip } from "./guide-zip.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -35,7 +36,7 @@ function ensureReady() {
 }
 
 const server = new Server(
-  { name: "suunto-mcp", version: "0.11.0" },
+  { name: "suunto-mcp", version: "0.12.0" },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -377,6 +378,44 @@ const tools = [
     },
   },
   {
+    name: "push_workout_guide",
+    description:
+      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. After this call the user must open the Suunto mobile app, find the guide under SuuntoPlus Guides for their watch, tap 'Pin to watch', then 'Sync now' — there is no fully automatic delivery to the watch. Write operation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          minLength: 1,
+          description: "Short session name shown in the Suunto app, e.g. 'Push A'.",
+        },
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          description: "Session date YYYY-MM-DD.",
+        },
+        exercises: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1, description: "Exercise name, e.g. 'Bench Press 15°'." },
+              detail: { type: "string", minLength: 1, description: "Sets/reps/weight as one display string, e.g. '60kg 3x10'." },
+            },
+            required: ["name", "detail"],
+          },
+        },
+        guideId: {
+          type: "string",
+          description: "If provided, updates this existing guide instead of creating a new one.",
+        },
+      },
+      required: ["title", "date", "exercises"],
+    },
+  },
+  {
     name: "get_upload_status",
     description:
       "Polls the processing status of a workout upload initiated by upload_workout. Returns status (e.g. 'Queued', 'Processing', 'Processed', 'Error') and the workoutKey once processing completes. Use the returned workoutKey with get_workout for full detail.",
@@ -475,6 +514,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         });
         await suunto.uploadFile(uploadUrl, fileBytes, contentType);
         return text(JSON.stringify({ uploadId, message: "Upload initiated. Use get_upload_status to check processing." }));
+      }
+      case "push_workout_guide": {
+        if (!cfg.appName) {
+          return text(
+            "Error: SUUNTO_APP_NAME is not set. Add it to .env with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
+            true,
+          );
+        }
+        const zip = buildGuideZip(
+          { title: a.title, date: a.date, exercises: a.exercises },
+          cfg.appName,
+        );
+        const data = a.guideId
+          ? await suunto.updateGuide(a.guideId, zip)
+          : await suunto.createGuide(zip);
+        return text(
+          JSON.stringify({
+            ...data,
+            nextStep:
+              "Open the Suunto mobile app > your watch > SuuntoPlus Guides, find this guide, tap 'Pin to watch', then 'Sync now'.",
+          }),
+        );
       }
       case "get_upload_status": {
         const data = await suunto.getUploadStatus(a.uploadId);

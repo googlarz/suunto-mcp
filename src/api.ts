@@ -255,6 +255,50 @@ export class SuuntoClient {
     return this.json<any>(`/v2/upload/${encodeURIComponent(uploadId)}`);
   }
 
+  // ---------- SuuntoPlus Guides ----------
+
+  async createGuide(zip: Buffer): Promise<any> {
+    const token = await getValidAccessToken(this.cfg);
+    const res = await fetch(`${API_BASE}/v2/guides/files`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Ocp-Apim-Subscription-Key": this.cfg.subscriptionKey,
+        "Content-Type": "application/zip",
+        Accept: "application/json",
+      },
+      body: new Uint8Array(zip),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw errorFor(res.status, "/v2/guides/files", body);
+    }
+    return res.json();
+  }
+
+  async updateGuide(guideId: string, zip: Buffer): Promise<any> {
+    const token = await getValidAccessToken(this.cfg);
+    const res = await fetch(`${API_BASE}/v2/guides/files/${encodeURIComponent(guideId)}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Ocp-Apim-Subscription-Key": this.cfg.subscriptionKey,
+        "Content-Type": "application/zip",
+        Accept: "application/json",
+      },
+      body: new Uint8Array(zip),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw errorFor(res.status, `/v2/guides/files/${guideId}`, body);
+    }
+    return res.json();
+  }
+
+  listGuides() {
+    return this.json<any>(`/v2/guides/items`);
+  }
+
   // ---------- Subscriptions / Webhooks ----------
 
   subscriptions() {
