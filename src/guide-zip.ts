@@ -161,7 +161,15 @@ export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
     steps.push({
       type: "fields",
       title: `${i + 1}/${exercises.length}`,
-      fields: [{ type: "text", value: stepText(ex) }],
+      // Two separate fields, not one \n-joined string — field order is
+      // priority order per the schema ("prioritize the most important
+      // value as first field... watch gives best location/biggest size"),
+      // so the name and detail each get their own sizing/placement instead
+      // of being crammed into one small text block.
+      fields: [
+        { type: "text", value: truncate(ex.name, 54) },
+        { type: "text", value: truncate(ex.detail, 54) },
+      ],
       notification: { title: "NEXT", text: truncate(ex.name, 54) },
       transitions: [{ condition: { type: "manualLap" } }],
     });
@@ -173,7 +181,8 @@ export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
         title: "REST",
         fields: [
           { type: "duration", window: "step" },
-          { type: "text", value: truncate(`Next: ${next.name}\n${next.detail}`, 54) },
+          { type: "text", value: truncate(`Next: ${next.name}`, 54) },
+          { type: "text", value: truncate(next.detail, 54) },
         ],
         transitions: [{ condition: { type: "manualLap" } }],
       });
@@ -198,12 +207,7 @@ export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
   };
 }
 
-// Step text field is capped at 54 characters (confirmed). Two lines via \n
-// reads better than one long truncated line.
-function stepText(ex: GuideExercise): string {
-  return truncate(`${ex.name}\n${ex.detail}`, 54);
-}
-
+// Text fields are capped at 54 characters (confirmed).
 function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) : text;
 }
