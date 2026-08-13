@@ -31,6 +31,14 @@ Once it's set up, just ask:
 
 Claude figures out what data to pull. You just ask.
 
+It's not just read-only either — Claude can push things to your watch too:
+
+- *"Plan tonight's gym session and send it to my watch."*
+- *"Upload yesterday's Garmin export as a Suunto workout."*
+- *"Export my last route as GPX so I can share it."*
+
+See [What you can push to your watch](#what-you-can-push-to-your-watch) below.
+
 ---
 
 ## 🤖 Don't want to do this yourself? Let Claude Code install it
@@ -178,6 +186,8 @@ SUUNTO_SUBSCRIPTION_KEY=your-subscription-key-here
 
 Save and close the file.
 
+> **Only if you want to push guided workouts to your watch** (see [What you can push](#what-you-can-push-to-your-watch)), add one more line: `SUUNTO_APP_NAME=your-app-name-here` — it must exactly match the app name you registered on apizone.suunto.com in Step 3, or the watch will reject the upload. Not needed for anything else.
+
 #### Step 7: Pair your Suunto account
 
 ```bash
@@ -269,12 +279,15 @@ Now paste the following into the config file. Replace `/Users/yourname/suunto-mc
       "env": {
         "SUUNTO_CLIENT_ID": "your-client-id",
         "SUUNTO_CLIENT_SECRET": "your-client-secret",
-        "SUUNTO_SUBSCRIPTION_KEY": "your-subscription-key"
+        "SUUNTO_SUBSCRIPTION_KEY": "your-subscription-key",
+        "SUUNTO_APP_NAME": "your-app-name"
       }
     }
   }
 }
 ```
+
+`SUUNTO_APP_NAME` is only needed if you want to push guided workouts to your watch — leave it out (or delete that line) if you're only asking Claude about your data.
 
 Save the file.
 
@@ -317,6 +330,22 @@ To add sleep, recovery, or daily activity: go back to [apizone.suunto.com](https
 
 ---
 
+## What you can push to your watch
+
+Suunto MCP isn't read-only. Claude can also send things back to your account:
+
+| You want to | Ask Claude | Requires |
+|---|---|---|
+| Get a gym plan on your wrist | *"Plan today's workout and send it to my watch"* | `SUUNTO_APP_NAME` set (see Step 6) |
+| Upload a workout from another device | *"Upload this FIT file as a Suunto workout"* | — |
+| Grab a saved route as GPX | *"Export my Sunday route as GPX"* | — |
+
+**Guided workouts** show up as a SuuntoPlus Guide: exercise name and weight/reps on screen, lap button advances to the next one, a stopwatch (not a countdown) between exercises with a preview of what's next, a vibrate when a new exercise starts, and a "session complete" screen at the end. There's no live push to the watch itself — it appears after your phone's next normal Suunto app sync, same as any other watch data.
+
+This pairs naturally with a coaching workflow: describe your goals, equipment, and current lifts to Claude, and it can write a real progressive program and push each session directly — see [Pairs well with health-skill](#pairs-well-with-health-skill) below for recovery-aware programming.
+
+---
+
 ## Troubleshooting
 
 **Always run `npm run doctor` first** — it pinpoints most problems automatically.
@@ -335,6 +364,8 @@ To add sleep, recovery, or daily activity: go back to [apizone.suunto.com](https
 | "State mismatch" error | A second auth flow started before the first finished | Close all auth-related tabs and run `npm run auth` fresh |
 | `npm run build` failed with an error | Node.js version too old or not installed | Run `node --version` — it must be 20 or higher. Reinstall from [nodejs.org](https://nodejs.org) |
 | Terminal says "EADDRINUSE" or port in use | Something else is using port 8421 | Restart your computer, or run `lsof -i :8421` to see what's using it |
+| Guide upload fails with an "owner" error | `SUUNTO_APP_NAME` doesn't exactly match your registered app name | Check apizone → your app → confirm the exact name, fix the env var, restart Claude |
+| Pushed a guide but it's not on the watch | Watch hasn't synced with your phone yet | Open the Suunto app and let it sync; it should appear without any extra steps |
 
 ---
 
@@ -388,6 +419,8 @@ To fully remove access:
 ## Pairs well with health-skill
 
 If you use [googlarz/health-skill](https://github.com/googlarz/health-skill) — a Claude skill for symptom triage and health Q&A — Suunto MCP gives it a live feed of your training, sleep, and recovery data. Together they can answer questions like *"given my recovery scores this week, should I keep tomorrow's interval session?"* with real numbers.
+
+The same combination works for planning, not just Q&A: Claude can check your actual HRV and sleep before writing a session, scale it back on a bad recovery day instead of a generic one, and push the result straight to your watch with `push_workout_guide`. Ask for it directly — *"check my recovery and plan today's gym session"* — no extra setup beyond having both connected.
 
 ---
 
@@ -465,6 +498,21 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `get_sleep` / `list_sleep` | Sleep stages, duration, score |
 | `get_recovery` / `list_recovery` | Recovery score, HRV, stress balance |
 | `get_daily_activity_statistics` | Aggregated daily stats over a date range |
+
+**Routes**
+
+| Tool | What it does |
+|------|-------------|
+| `list_routes` | Saved routes on your account |
+| `export_route` | Export a route as GPX |
+
+**Uploads & guided workouts** *(write — send data back to your account)*
+
+| Tool | What it does |
+|------|-------------|
+| `upload_workout` | Upload a FIT/GPX file as a new workout |
+| `get_upload_status` | Check whether an upload finished processing |
+| `push_workout_guide` | Push a structured workout (exercises, weights, rest, notifications) as a SuuntoPlus Guide — requires `SUUNTO_APP_NAME` |
 
 </details>
 
