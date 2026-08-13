@@ -128,9 +128,12 @@ function buildIconPng(): Buffer {
   ]);
 }
 
+const DEFAULT_REST_SECONDS = 90;
+
 export interface GuideExercise {
   name: string;
   detail: string;
+  restSeconds?: number; // rest after this exercise, before the next one. Default 90.
 }
 
 export interface GuidePlan {
@@ -139,43 +142,78 @@ export interface GuidePlan {
   exercises: GuideExercise[];
 }
 
-// One text step per exercise, advanced by lap-button press.
-// Confirmed against apizone.suunto.com/suuntoplus-guide-description: a step
-// advances via its own "transitions" array — { condition: { type: "manualLap" } }
-// jumps to the next step in the list when the lap button is pressed during
-// that step. createManualLap is a DIFFERENT, unrelated property (it only
-// logs a lap marker for HR-window averaging) — it does not advance anything,
-// which is why an earlier version of this file registered a lap but never
-// moved to the next exercise.
+// One text step per exercise + one rest step between exercises + a closing
+// "done" step. Confirmed against apizone.suunto.com/suuntoplus-guide-description:
+// - a step advances via its own "transitions" array — { condition: { type:
+//   "manualLap" } } jumps to the next step on lap press. createManualLap is
+//   a DIFFERENT, unrelated property (only logs a lap marker for HR-window
+//   averaging) — it does not advance anything.
+// - "notification" is an optional per-step object (title/text) shown with a
+//   vibrate/sound when that step starts — used here to confirm "next up" so
+//   the lap press's effect is felt, not just seen.
+// - rest steps auto-advance via a stepDuration condition, OR'd with manualLap
+//   so the user can skip the rest early.
 export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
-  const last = plan.exercises.length - 1;
+  const exercises = plan.exercises;
+  const steps: Record<string, unknown>[] = [];
+
+  exercises.forEach((ex, i) => {
+    const isLast = i === exercises.length - 1;
+    steps.push({
+      type: "fields",
+      title: `${i + 1}/${exercises.length}`,
+      fields: [{ type: "text", value: stepText(ex) }],
+      notification: { title: "NEXT", text: truncate(ex.name, 54) },
+      transitions: [{ condition: { type: "manualLap" } }],
+    });
+
+    if (!isLast) {
+      const rest = ex.restSeconds ?? DEFAULT_REST_SECONDS;
+      steps.push({
+        type: "fields",
+        title: "REST",
+        fields: [{ type: "stepDurationCountdown", value: rest }],
+        transitions: [
+          {
+            condition: {
+              type: "or",
+              conditions: [
+                { type: "stepDuration", value: rest },
+                { type: "manualLap" },
+              ],
+            },
+          },
+        ],
+      });
+    }
+  });
+
+  steps.push({
+    type: "fields",
+    title: "DONE",
+    fields: [{ type: "text", value: "Session complete" }],
+  });
+
   return {
     type: "sequence",
     name: plan.title,
-    description: `${plan.exercises.length} exercises`,
+    description: `${exercises.length} exercises`,
     shortDescription: plan.title,
     localDate: plan.date,
     usage: "workout",
     owner: ownerAppName,
-    steps: plan.exercises.map((ex, i) => {
-      const step: Record<string, unknown> = {
-        type: "fields",
-        title: `${i + 1}/${plan.exercises.length}`,
-        fields: [{ type: "text", value: stepText(ex) }],
-      };
-      if (i < last) {
-        step.transitions = [{ condition: { type: "manualLap" } }];
-      }
-      return step;
-    }),
+    steps,
   };
 }
 
 // Step text field is capped at 54 characters (confirmed). Two lines via \n
 // reads better than one long truncated line.
 function stepText(ex: GuideExercise): string {
-  const text = `${ex.name}\n${ex.detail}`;
-  return text.length > 54 ? text.slice(0, 54) : text;
+  return truncate(`${ex.name}\n${ex.detail}`, 54);
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max) : text;
 }
 
 export function buildGuideZip(plan: GuidePlan, ownerAppName: string): Buffer {
