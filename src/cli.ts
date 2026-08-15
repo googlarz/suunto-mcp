@@ -32,6 +32,11 @@ Workout commands:
 
 Other:
   list-subscriptions
+  sync-to-health-skill --health-root <path> [--person-id ID] [--since YYYY-MM-DD]
+                        Exports step data as a health-skill-compatible CSV and
+                        imports it via care_workspace.py. Steps only — HRV/RHR/
+                        VO2max/SpO2 have no genuine match in Suunto's API and
+                        aren't force-mapped.
 
 All commands output JSON to stdout. Pipe to jq for filtering:
   suunto-mcp list-workouts --limit 5 | jq '.payload[].sport'
@@ -161,6 +166,33 @@ export async function runCli(argv: string[]) {
 
       case "list-subscriptions": {
         out(await suunto.subscriptions());
+        break;
+      }
+
+      case "sync-to-health-skill": {
+        const { values } = parseArgs({
+          args: rest,
+          options: {
+            "health-root": { type: "string" },
+            "person-id": { type: "string" },
+            since: { type: "string" },
+          },
+        });
+        const healthRoot = values["health-root"] ?? die("Usage: sync-to-health-skill --health-root <path> [--person-id ID] [--since YYYY-MM-DD]");
+        const { exportHealthCsv, importIntoHealthSkill } = await import("./export-health.js");
+        const result = await exportHealthCsv(cfg, {
+          healthRoot,
+          personId: values["person-id"],
+          since: values.since,
+        });
+        if (result.skippedNote) console.error(result.skippedNote);
+        if (result.rowCount === 0) {
+          console.log("No new days to sync.");
+          break;
+        }
+        const importOutput = importIntoHealthSkill(result.csvPath, healthRoot, values["person-id"]);
+        console.log(`Exported ${result.rowCount} day(s) to ${result.csvPath}`);
+        console.log(importOutput);
         break;
       }
 
