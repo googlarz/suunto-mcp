@@ -25,6 +25,20 @@ function errorFor(status: number, path: string, body: string, retryAfter?: numbe
   return new SuuntoApiError(status, path, body);
 }
 
+// The Guide API's 400 for an owner mismatch is a bare {"error":{"description":
+// "..."}} with no error code — the only way to recognize it is the wording.
+// Surface the actual fix (SUUNTO_APP_NAME) instead of a raw API error.
+function guideErrorFor(status: number, path: string, body: string): Error {
+  if (status === 400 && /owner/i.test(body)) {
+    return new SuuntoApiError(
+      status,
+      path,
+      `${body}\n\nThis usually means SUUNTO_APP_NAME doesn't exactly match the app name registered on apizone.suunto.com. Check apizone → your app → confirm the exact name, fix the env var, and restart Claude.`,
+    );
+  }
+  return errorFor(status, path, body);
+}
+
 export class SuuntoClient {
   constructor(private readonly cfg: Config) {}
 
@@ -258,6 +272,7 @@ export class SuuntoClient {
   // ---------- SuuntoPlus Guides ----------
 
   async createGuide(zip: Buffer): Promise<any> {
+    this.assertAppName();
     const token = await getValidAccessToken(this.cfg);
     const res = await fetch(`${API_BASE}/v2/guides/files`, {
       method: "POST",
@@ -271,12 +286,13 @@ export class SuuntoClient {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw errorFor(res.status, "/v2/guides/files", body);
+      throw guideErrorFor(res.status, "/v2/guides/files", body);
     }
     return res.json();
   }
 
   async updateGuide(guideId: string, zip: Buffer): Promise<any> {
+    this.assertAppName();
     const token = await getValidAccessToken(this.cfg);
     const res = await fetch(`${API_BASE}/v2/guides/files/${encodeURIComponent(guideId)}`, {
       method: "PUT",
@@ -290,9 +306,19 @@ export class SuuntoClient {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw errorFor(res.status, `/v2/guides/files/${guideId}`, body);
+      throw guideErrorFor(res.status, `/v2/guides/files/${guideId}`, body);
     }
     return res.json();
+  }
+
+  private assertAppName(): void {
+    if (!this.cfg.appName) {
+      throw new Error(
+        "SUUNTO_APP_NAME is not set. Guide push needs it to exactly match the app name " +
+          "registered on apizone.suunto.com — add SUUNTO_APP_NAME=your-app-name to your .env " +
+          "(or the MCP config's env block) and restart Claude.",
+      );
+    }
   }
 
   listGuides() {
