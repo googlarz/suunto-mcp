@@ -22,7 +22,7 @@ import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
-import { buildGuideZip } from "./guide-zip.js";
+import { buildGuideZip, buildIntervalGuideZip } from "./guide-zip.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -416,6 +416,66 @@ const tools = [
     },
   },
   {
+    name: "push_interval_guide",
+    description:
+      "Pushes an interval/cardio guide (warmup, timed or distance-based work intervals, recoveries, optional repeats) to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide (manual lap-per-exercise), interval segments auto-advance by elapsed time or distance — hands-off during a run or ride. Each segment can show a target heart-rate range alongside live HR. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          minLength: 1,
+          description: "Short session name shown in the Suunto app, e.g. '4x4 VO2max'.",
+        },
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          description: "Session date YYYY-MM-DD.",
+        },
+        blocks: {
+          type: "array",
+          minItems: 1,
+          description:
+            "Ordered list of blocks. A block with times>1 repeats its segments as a unit (e.g. 4x[interval,recovery]) — put only the segments that repeat inside it; warmup/cooldown go in their own times=1 blocks before/after.",
+          items: {
+            type: "object",
+            properties: {
+              times: {
+                type: "integer",
+                minimum: 1,
+                default: 1,
+                description: "Repeat count for this block's segments. Omit or 1 for a non-repeating block.",
+              },
+              segments: {
+                type: "array",
+                minItems: 1,
+                items: {
+                  type: "object",
+                  properties: {
+                    label: { type: "string", minLength: 1, description: "Segment name, e.g. 'Warmup', 'Interval', 'Recovery'. Shown as the step title (truncated to 13 chars)." },
+                    durationSec: { type: "integer", minimum: 1, description: "Auto-advance after this many seconds. Mutually exclusive with distanceM — provide exactly one." },
+                    distanceM: { type: "number", minimum: 1, description: "Auto-advance after this many meters. Mutually exclusive with durationSec." },
+                    targetHrMin: { type: "integer", description: "Lower bound of target heart-rate range (bpm). Provide with targetHrMax, or omit both." },
+                    targetHrMax: { type: "integer", description: "Upper bound of target heart-rate range (bpm)." },
+                    notifyText: { type: "string", description: "Optional vibrate + popup text shown when this segment starts, e.g. 'Push to 170bpm'." },
+                  },
+                  required: ["label"],
+                },
+              },
+            },
+            required: ["segments"],
+          },
+        },
+        guideId: {
+          type: "string",
+          description: "If provided, updates this existing guide instead of creating a new one.",
+        },
+      },
+      required: ["title", "date", "blocks"],
+    },
+  },
+  {
     name: "get_upload_status",
     description:
       "Polls the processing status of a workout upload initiated by upload_workout. Returns status (e.g. 'Queued', 'Processing', 'Processed', 'Error') and the workoutKey once processing completes. Use the returned workoutKey with get_workout for full detail.",
@@ -524,6 +584,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
         const zip = buildGuideZip(
           { title: a.title, date: a.date, exercises: a.exercises },
+          cfg.appName,
+        );
+        const data = a.guideId
+          ? await suunto.updateGuide(a.guideId, zip)
+          : await suunto.createGuide(zip);
+        return text(
+          JSON.stringify({
+            ...data,
+            nextStep:
+              "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
+          }),
+        );
+      }
+      case "push_interval_guide": {
+        if (!cfg.appName) {
+          return text(
+            "Error: SUUNTO_APP_NAME is not set. Add it to .env with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
+            true,
+          );
+        }
+        const zip = buildIntervalGuideZip(
+          { title: a.title, date: a.date, blocks: a.blocks },
           cfg.appName,
         );
         const data = a.guideId

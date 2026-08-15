@@ -227,3 +227,110 @@ export function buildGuideZip(plan: GuidePlan, ownerAppName: string): Buffer {
     { name: "icon.png", data: buildIconPng() },
   ]);
 }
+
+// ---------- Interval (cardio) guides ----------
+
+export interface IntervalSegment {
+  label: string; // step title, truncated to 13 chars
+  durationSec?: number; // time-based auto-advance (mutually exclusive with distanceM)
+  distanceM?: number; // distance-based auto-advance
+  targetHrMin?: number;
+  targetHrMax?: number;
+  notifyText?: string; // optional vibrate + popup shown when this segment starts
+}
+
+export interface IntervalBlock {
+  times?: number; // >1 wraps segments in a RepeatStep
+  segments: IntervalSegment[];
+}
+
+export interface IntervalPlan {
+  title: string;
+  date: string; // YYYY-MM-DD
+  blocks: IntervalBlock[];
+}
+
+// Auto-advancing interval steps — no lap press needed mid-run. Each segment
+// is a FieldsStep with a "transitions" condition on stepDuration or
+// stepDistance (the same confirmed mechanism as gym guides' manualLap
+// condition, just a different condition type — both live under the same
+// Transition object per the schema). RepeatStep wraps a block's segments
+// when block.times > 1, matching Suunto's own Pyramid interval sample.
+function buildIntervalStep(seg: IntervalSegment): Record<string, unknown> {
+  const fields: Record<string, unknown>[] = [];
+  if (seg.targetHrMin !== undefined && seg.targetHrMax !== undefined) {
+    fields.push({
+      type: "targetHeartRate",
+      value: Math.round((seg.targetHrMin + seg.targetHrMax) / 2),
+      min: seg.targetHrMin,
+      max: seg.targetHrMax,
+    });
+  }
+  fields.push({ type: "heartRate" });
+  if (seg.durationSec !== undefined) {
+    fields.push({ type: "stepDurationCountdown", value: seg.durationSec });
+  } else if (seg.distanceM !== undefined) {
+    fields.push({ type: "stepDistanceCountdown", value: seg.distanceM });
+  }
+
+  const step: Record<string, unknown> = {
+    type: "fields",
+    title: truncate(seg.label, 13),
+    fields,
+  };
+  if (seg.notifyText) {
+    step.notification = { title: truncate(seg.label, 13), text: truncate(seg.notifyText, 54) };
+  }
+  if (seg.durationSec !== undefined) {
+    step.transitions = [{ condition: { type: "stepDuration", value: seg.durationSec } }];
+  } else if (seg.distanceM !== undefined) {
+    step.transitions = [{ condition: { type: "stepDistance", value: seg.distanceM } }];
+  }
+  return step;
+}
+
+export function buildIntervalGuideJson(plan: IntervalPlan, ownerAppName: string) {
+  const steps: Record<string, unknown>[] = [];
+
+  for (const block of plan.blocks) {
+    const segSteps = block.segments.map(buildIntervalStep);
+    if (block.times && block.times > 1) {
+      steps.push({ type: "repeat", times: block.times, steps: segSteps });
+    } else {
+      steps.push(...segSteps);
+    }
+  }
+
+  steps.push({
+    type: "fields",
+    title: "DONE",
+    fields: [{ type: "text", value: "Session complete" }],
+  });
+
+  return {
+    type: "sequence",
+    name: plan.title,
+    description: `Interval session`,
+    shortDescription: plan.title,
+    localDate: plan.date,
+    usage: "workout",
+    owner: ownerAppName,
+    steps,
+  };
+}
+
+export function buildIntervalGuideZip(plan: IntervalPlan, ownerAppName: string): Buffer {
+  const manifest = {
+    name: plan.title,
+    type: "sequence",
+    owner: ownerAppName,
+    description: `Interval plan for ${plan.date}`,
+  };
+  const guide = buildIntervalGuideJson(plan, ownerAppName);
+
+  return buildZip([
+    { name: "manifest.json", data: Buffer.from(JSON.stringify(manifest), "utf8") },
+    { name: "guide.json", data: Buffer.from(JSON.stringify(guide), "utf8") },
+    { name: "icon.png", data: buildIconPng() },
+  ]);
+}
