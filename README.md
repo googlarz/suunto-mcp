@@ -422,6 +422,8 @@ If you use [googlarz/health-skill](https://github.com/googlarz/health-skill) —
 
 The same combination works for planning, not just Q&A: Claude can check your actual HRV and sleep before writing a session, scale it back on a bad recovery day instead of a generic one, and push the result straight to your watch with `push_workout_guide`. Ask for it directly — *"check my recovery and plan today's gym session"* — no extra setup beyond having both connected.
 
+For the full version — real progressive-overload programming that persists week to week instead of a one-off ask — install [googlarz/gym-skill](https://github.com/googlarz/gym-skill): `/gym setup` once, then `/gym plan`/`/gym today`/`/gym log`/`/gym review` going forward.
+
 ---
 
 ## Advanced
