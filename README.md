@@ -47,9 +47,14 @@ If you already have [Claude Code](https://claude.ai/code), you don't need to run
 
 > *"Please install and set up suunto-mcp from https://github.com/googlarz/suunto-mcp"*
 
-Claude Code will clone the repo, run all the install commands, walk you through the apizone signup step by step, and add everything to your Claude Desktop config — on its own. That's exactly how this project's author set it up: no manual terminal work.
+Claude Code will clone the repo, run all the install commands, and add everything to your Claude Desktop config — on its own. That's exactly how this project's author set it up: no manual terminal work.
 
-You'll still need to create the apizone account and click Authorize yourself (Claude can't enter your passwords), but it'll tell you exactly what to do and when.
+Three things stay yours no matter what, by design, not because of missing tooling:
+1. **Creating the apizone.suunto.com account** — Claude can't create accounts on your behalf.
+2. **The apizone web form** (naming your app, revealing your subscription key) — it's your account session; Claude tells you exactly where to click, but can't click there for you.
+3. **Clicking "Authorize"** during login — that's OAuth working as intended. An app that could approve its own access wouldn't be secure.
+
+Claude will tell you exactly what to do and when for each of these.
 
 **If you want to do it manually, keep reading.**
 
@@ -150,6 +155,10 @@ The subscription key is a second passcode that goes on every data request. Here'
 
 ### Part 2: Install and configure (~10 min, after Suunto approves you)
 
+> **Used the "Let Claude Code install it" option above?** Claude already ran
+> every command below — skip to [Part 3](#part-3-connect-to-claude-desktop-5-min).
+> These steps are for anyone doing it by hand.
+
 #### Step 5: Download the code
 
 Open **Terminal** on Mac (press ⌘Space and type "Terminal") or **Command Prompt** on Windows. Then run these commands one at a time:
@@ -165,7 +174,7 @@ This downloads the code, installs what it needs, and builds it. Takes 1–2 minu
 
 #### Step 6: Add your credentials
 
-You'll create a file called `.env` in the suunto-mcp folder and put your three values in it.
+You'll create a file called `.env` in the suunto-mcp folder and put your three values in it. Even if Claude is doing the rest of this for you, type these three values in yourself rather than pasting them into the chat — keeps them out of your conversation history.
 
 **On Mac:**
 ```bash
@@ -238,6 +247,10 @@ If any line shows ✗, the message tells you exactly what to fix. Resolve any is
 ---
 
 ### Part 3: Connect to Claude Desktop (~5 min)
+
+> **Used the "Let Claude Code install it" option?** This part is done too —
+> Claude edited your config directly. Restart Claude Desktop and jump to
+> [Step 11](#step-11-test-it).
 
 Now you'll tell Claude Desktop where to find Suunto MCP.
 
