@@ -182,11 +182,17 @@ Get the real path with `pwd` while inside the suunto-mcp folder. If the file
 already has other servers, add the `"suunto"` block alongside them — don't
 replace the whole file.
 
-Restart Claude Desktop, then ask:
+**This last part is the same whether you did everything above by hand or
+had Claude do it for you — it's the one thing nothing can do on your
+behalf:**
 
-> *"What was my most recent workout?"*
+1. **Quit Claude Desktop completely** — ⌘Q on Mac, not just closing the
+   window. Config changes only load on a fresh start.
+2. **Reopen it.**
+3. **Ask:** *"What was my most recent workout?"*
 
-Real sport, date, distance back → done.
+Real sport, date, distance back → done. If not, see the main
+[README's Troubleshooting](README.md#troubleshooting).
 
 ---
 
@@ -260,9 +266,10 @@ If a user asks you to install and configure suunto-mcp for them, follow
 this procedure rather than diving straight into commands:
 
 1. **Ask their pace preference first** — do they want you to just handle it
-   end-to-end and only interrupt them for the two steps you can't do
-   (creating the apizone account, clicking Authorize), or do they want you
-   to explain each step as you go? Match your narration to their answer.
+   end-to-end and only interrupt them for the three things you genuinely
+   can't do (creating the apizone account, the apizone web form, clicking
+   Authorize), or do they want you to explain each step as you go? Match
+   your narration to their answer.
 2. Check whether they already have Suunto API access approved. If not, walk
    them through Part 1 registration, then **stop and tell them plainly**
    that the 3–4 week wait is real and there's nothing to do until they get
@@ -272,8 +279,15 @@ this procedure rather than diving straight into commands:
    credential values into the chat — tell them which file to edit and what
    to put in it, let them do that part themselves.
 4. Wire up Part 3 (Claude config) for them, using the real path from `pwd`.
-5. Verify with the test question before declaring it done.
-6. **Only after it's confirmed working**, mention the optional daily
+5. **End with an explicit, numbered instruction — don't just say "you're
+   all set" and stop.** State plainly: (1) quit Claude Desktop completely
+   (⌘Q, not just closing the window — config changes need a fresh start),
+   (2) reopen it, (3) ask it the test question. This is the one step that
+   stays theirs regardless of how you did everything else, and it's easy
+   to bury in a wall of "done!" text — give it its own clearly marked line
+   so it can't be missed.
+6. Verify with the test question before declaring it done.
+7. **Only after it's confirmed working**, mention the optional daily
    automation from this guide — offer it, don't assume they want it, and if
    they say yes, include the stale-data caveat sentence in the scheduled
    prompt verbatim.

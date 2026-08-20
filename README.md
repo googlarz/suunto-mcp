@@ -311,11 +311,17 @@ Save the file.
 
 #### Step 11: Test it
 
-Quit Claude Desktop and reopen it. Then ask:
+**Three things, in order — this is the only part of setup nothing can do for you:**
 
-> *"What was my most recent workout?"*
+1. **Quit Claude Desktop completely.** Not just closing the window —
+   ⌘Q on Mac, or right-click the icon in the taskbar → Quit on Windows.
+   Config changes only load on a fresh start.
+2. **Reopen Claude Desktop.**
+3. **Ask it:**
+   > *"What was my most recent workout?"*
 
-If Claude answers with your actual sport, date, and distance — you're all set!
+If Claude answers with your actual sport, date, and distance — you're done.
+If it doesn't, don't guess — go to [Troubleshooting](#troubleshooting).
 
 ---
 
