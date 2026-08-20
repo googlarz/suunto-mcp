@@ -18,10 +18,27 @@ morning without being asked.
 
 > *"Please install and set up suunto-mcp from https://github.com/googlarz/suunto-mcp"*
 
-Claude does the terminal work for you and tells you exactly when it needs
-you (creating the apizone account, clicking Authorize — it can't do those
-two for you). Skip the rest of this file; come back to
+Claude handles every terminal command below — cloning, installing,
+building, running the auth flow and health check, wiring up your Claude
+config. The one thing it deliberately leaves to you: typing your three
+credential values into the `.env` file yourself, rather than pasting them
+into the chat for Claude to write — keeps those values out of your
+conversation history. Claude opens the file and tells you exactly what goes
+where; you type three lines, save, done. Skip straight to
 [How syncing actually works](#how-syncing-actually-works) once it's running.
+
+**What's left for you no matter what — three things, by design, not because
+of missing tooling:**
+1. **Creating the apizone.suunto.com account** — Claude isn't allowed to
+   create accounts on your behalf.
+2. **The apizone web form** (naming your app, revealing your subscription
+   key) — it's your account session; Claude can tell you exactly where to
+   click but can't click for you there.
+3. **Clicking "Authorize"** during login — this is the entire point of
+   OAuth. An app that could approve its own access wouldn't be secure. No
+   amount of automation removes this step; it's supposed to require you.
+
+Everything else is genuinely automatable, and Claude does it.
 
 **Want to understand each step as you go, or do it by hand?** Keep reading —
 same steps, explained.
@@ -84,6 +101,10 @@ the next part, never into this chat or anywhere public.
 
 ## Part 2: Install suunto-mcp
 
+> **Used the fast path above?** Claude already did everything in this part —
+> skip to [Part 3](#part-3-connect-to-claude). These commands are here for
+> people doing it by hand, or who just want to see exactly what ran.
+
 ```bash
 git clone https://github.com/googlarz/suunto-mcp
 cd suunto-mcp
@@ -131,6 +152,10 @@ what to fix.
 ---
 
 ## Part 3: Connect to Claude
+
+> **Used the fast path?** This is done too — Claude edits your Claude
+> Desktop config directly. Restart Claude Desktop and skip to the test
+> question at the end of this part.
 
 Add suunto-mcp to your Claude config
 (`~/Library/Application Support/Claude/claude_desktop_config.json` on Mac,
