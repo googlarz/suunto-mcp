@@ -71,6 +71,11 @@ Once it's done, you never redo it.
 
 ## Setup
 
+> **Prefer one guided walkthrough with a pacing choice up front** (fast path
+> vs. explained-step-by-step) and a proper explanation of how syncing works?
+> See [GETTING_STARTED.md](GETTING_STARTED.md). What follows here is the same
+> steps in reference form.
+
 The setup has three parts:
 
 1. **Register with Suunto's developer portal** — tells Suunto your app is allowed to read your data
