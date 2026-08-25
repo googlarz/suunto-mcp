@@ -370,6 +370,23 @@ This pairs naturally with a coaching workflow: describe your goals, equipment, a
 
 ---
 
+## Daily health digest
+
+Ask Claude *"generate my daily digest for yesterday"* and it writes a color-coded markdown summary — steps, sleep, recovery balance, HRV, and a training-load model (Fitness/Fatigue/Form) — appended to `SUUNTO_HISTORY.md`.
+
+**Fitness (CTL), Fatigue (ATL), and Form (TSB) aren't Suunto API fields** — there's no endpoint for them. They're computed here from each workout's real `tss.trainingStressScore` using standard 42-day/7-day exponential decay, the same math training-load tools like TrainingPeaks use. The running values persist in `~/.suunto-mcp/averages.json` (override with `SUUNTO_DIGEST_AVERAGES_PATH`) since there's nowhere else to keep them.
+
+A few things worth knowing before you rely on it:
+- **CTL/ATL start at 0** on first use and take 4–6 weeks to converge to a realistic number — there's no API to seed them from your watch's own displayed Fitness value, so early digests understate it. The digest says so explicitly until enough history builds up.
+- **TSB colors match your watch's own legend** (🔵 Optimal >+10, 🟢 Balanced 0 to +10, 🟡 Compromised −10 to 0, 🔴 Strained <−10) — not an invented scale.
+- **Rolling 28-day baselines** track each metric separately, with a separate bucket for "party nights" (>20,000 steps) so an outlier day doesn't skew your normal-day average.
+- **Run dates in chronological order.** Baselines are "as of whenever this ran," not "as of the calendar date" — backfilling an old missed date after a later one will make that day's baseline comparison slightly off. Fine for the normal daily-scheduled use; worth knowing if you're catching up on missed days.
+- Requires Sleep and Recovery API subscriptions on apizone for those sections to populate — without them, the digest still generates, those sections just say "no data" instead of erroring.
+
+CLI: `suunto-mcp daily-digest 2026-04-20`. MCP tool: `generate_daily_digest`.
+
+---
+
 ## Troubleshooting
 
 **Always run `npm run doctor` first** — it pinpoints most problems automatically.

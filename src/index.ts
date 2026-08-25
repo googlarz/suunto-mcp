@@ -23,6 +23,7 @@ import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
 import { buildGuideZip, buildIntervalGuideZip } from "./guide-zip.js";
+import { generateDigest } from "./daily-digest.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -491,6 +492,23 @@ const tools = [
       required: ["uploadId"],
     },
   },
+  {
+    name: "generate_daily_digest",
+    description:
+      "Builds a color-coded daily health digest (steps, sleep, recovery balance, HRV, and a training-load model) for one date and appends it as markdown to a history file. Suunto's API has no fitness/fatigue endpoints, so this computes CTL (42-day fitness), ATL (7-day fatigue), and TSB (form) from each workout's tss.trainingStressScore using standard exponential time constants, persisting the running values in a local sidecar file (SUUNTO_DIGEST_AVERAGES_PATH env var, default ~/.suunto-mcp/averages.json) since there's nowhere else to store them. Rolling 28-day baselines per metric are also tracked there, with a separate baseline bucket for 'party nights' (>20,000 steps) so those don't skew the normal-day average. Requires Sleep and Recovery API subscriptions on apizone for the sleep/recovery sections to populate — falls back to 'no data' text for sections without a subscription rather than erroring. Write operation (updates the sidecar file and appends to the history file).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          description: "Calendar date YYYY-MM-DD to summarize. Use yesterday or earlier — Suunto syncs once daily, so today's data is usually incomplete.",
+        },
+      },
+      required: ["date"],
+    },
+  },
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
@@ -622,6 +640,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "get_upload_status": {
         const data = await suunto.getUploadStatus(a.uploadId);
         return text(JSON.stringify(data));
+      }
+      case "generate_daily_digest": {
+        const result = await generateDigest({
+          suunto,
+          averagesPath: cfg.digestAveragesPath,
+          historyPath: cfg.digestHistoryPath,
+          date: a.date,
+        });
+        return text(result.markdown);
       }
       default:
         return text(`Unknown tool: ${name}`, true);

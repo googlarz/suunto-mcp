@@ -37,6 +37,15 @@ Other:
                         imports it via care_workspace.py. Steps only — HRV/RHR/
                         VO2max/SpO2 have no genuine match in Suunto's API and
                         aren't force-mapped.
+  daily-digest          <YYYY-MM-DD>
+                        Builds a color-coded health digest (steps, sleep,
+                        recovery, HRV, CTL/ATL/TSB training load) for one
+                        date and appends it to SUUNTO_HISTORY.md (override
+                        with SUUNTO_DIGEST_HISTORY_PATH). Running totals are
+                        persisted in ~/.suunto-mcp/averages.json (override
+                        with SUUNTO_DIGEST_AVERAGES_PATH) — Suunto's API has
+                        no fitness/fatigue endpoint, so this is computed and
+                        stored locally.
 
 All commands output JSON to stdout. Pipe to jq for filtering:
   suunto-mcp list-workouts --limit 5 | jq '.payload[].sport'
@@ -193,6 +202,20 @@ export async function runCli(argv: string[]) {
         const importOutput = importIntoHealthSkill(result.csvPath, healthRoot, values["person-id"]);
         console.log(`Exported ${result.rowCount} day(s) to ${result.csvPath}`);
         console.log(importOutput);
+        break;
+      }
+
+      case "daily-digest": {
+        const date = rest[0] ?? die("Usage: daily-digest <YYYY-MM-DD>");
+        const { generateDigest } = await import("./daily-digest.js");
+        const result = await generateDigest({
+          suunto,
+          averagesPath: cfg.digestAveragesPath,
+          historyPath: cfg.digestHistoryPath,
+          date,
+        });
+        console.log(result.markdown);
+        console.log(`Appended to ${cfg.digestHistoryPath}`);
         break;
       }
 

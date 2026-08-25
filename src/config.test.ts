@@ -51,6 +51,8 @@ test("config: assertCredentials lists every missing var", () => {
       redirectUri: "x",
       tokenPath: "x",
       appName: "",
+      digestAveragesPath: "x",
+      digestHistoryPath: "x",
     });
     assert.fail("expected throw");
   } catch (err: any) {
@@ -69,6 +71,8 @@ test("config: assertCredentials passes when all present", () => {
       redirectUri: "x",
       tokenPath: "x",
       appName: "a",
+      digestAveragesPath: "x",
+      digestHistoryPath: "x",
     }),
   );
 });

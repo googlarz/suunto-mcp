@@ -8,6 +8,8 @@ export interface Config {
   redirectUri: string;
   tokenPath: string;
   appName: string;
+  digestAveragesPath: string;
+  digestHistoryPath: string;
 }
 
 export function loadConfig(): Config {
@@ -21,8 +23,22 @@ export function loadConfig(): Config {
   // Must exactly match the app name registered on apizone.suunto.com — the
   // Guide Cloud API rejects uploads where manifest.json's "owner" doesn't match.
   const appName = process.env.SUUNTO_APP_NAME ?? "";
+  // CTL/ATL/baselines sidecar — Suunto's API has no endpoint for these, so
+  // they're computed and persisted locally.
+  const digestAveragesPath =
+    process.env.SUUNTO_DIGEST_AVERAGES_PATH ?? join(homedir(), ".suunto-mcp", "averages.json");
+  const digestHistoryPath = process.env.SUUNTO_DIGEST_HISTORY_PATH ?? "SUUNTO_HISTORY.md";
 
-  return { clientId, clientSecret, subscriptionKey, redirectUri, tokenPath, appName };
+  return {
+    clientId,
+    clientSecret,
+    subscriptionKey,
+    redirectUri,
+    tokenPath,
+    appName,
+    digestAveragesPath,
+    digestHistoryPath,
+  };
 }
 
 export function assertCredentials(c: Config): void {

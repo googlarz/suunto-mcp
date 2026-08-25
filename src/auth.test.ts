@@ -20,6 +20,8 @@ const baseCfg = {
   redirectUri: "http://localhost:8421/callback",
   tokenPath: "",
   appName: "test-app",
+  digestAveragesPath: "",
+  digestHistoryPath: "",
 };
 
 const origFetch = globalThis.fetch;
