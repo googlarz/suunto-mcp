@@ -505,6 +505,14 @@ const tools = [
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
           description: "Calendar date YYYY-MM-DD to summarize. Use yesterday or earlier — Suunto syncs once daily, so today's data is usually incomplete.",
         },
+        seedCtl: {
+          type: "number",
+          description: "Only used on the very first digest ever run (no prior sidecar file). Anchors the starting Fitness (CTL) value to the number shown on the user's watch instead of cold-starting at 0. Ask the user for their watch's displayed Fitness value if this is their first digest.",
+        },
+        seedAtl: {
+          type: "number",
+          description: "Same as seedCtl but for Fatigue (ATL). Only used on the very first digest ever run.",
+        },
       },
       required: ["date"],
     },
@@ -647,6 +655,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           averagesPath: cfg.digestAveragesPath,
           historyPath: cfg.digestHistoryPath,
           date: a.date,
+          seedCtl: a.seedCtl,
+          seedAtl: a.seedAtl,
         });
         return text(result.markdown);
       }

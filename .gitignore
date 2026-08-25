@@ -5,3 +5,4 @@ dist-test
 .env
 .env.local
 tokens.json
+SUUNTO_HISTORY.md

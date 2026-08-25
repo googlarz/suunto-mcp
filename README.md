@@ -377,13 +377,16 @@ Ask Claude *"generate my daily digest for yesterday"* and it writes a color-code
 **Fitness (CTL), Fatigue (ATL), and Form (TSB) aren't Suunto API fields** — there's no endpoint for them. They're computed here from each workout's real `tss.trainingStressScore` using standard 42-day/7-day exponential decay, the same math training-load tools like TrainingPeaks use. The running values persist in `~/.suunto-mcp/averages.json` (override with `SUUNTO_DIGEST_AVERAGES_PATH`) since there's nowhere else to keep them.
 
 A few things worth knowing before you rely on it:
-- **CTL/ATL start at 0** on first use and take 4–6 weeks to converge to a realistic number — there's no API to seed them from your watch's own displayed Fitness value, so early digests understate it. The digest says so explicitly until enough history builds up.
+- **CTL/ATL start at 0** on first use and take 4–6 weeks to converge to a realistic number — there's no API to read your watch's own displayed Fitness/Fatigue. To skip the cold-start, tell Claude the numbers off your watch on your very first digest (*"my watch shows Fitness 42, Fatigue 38, seed the digest with those"*) — or pass `--seed-ctl 42 --seed-atl 38` on the CLI. Only works on the first-ever digest; ignored after that.
 - **TSB colors match your watch's own legend** (🔵 Optimal >+10, 🟢 Balanced 0 to +10, 🟡 Compromised −10 to 0, 🔴 Strained <−10) — not an invented scale.
-- **Rolling 28-day baselines** track each metric separately, with a separate bucket for "party nights" (>20,000 steps) so an outlier day doesn't skew your normal-day average.
+- **Ramp rate** (this week's CTL vs. 7 days ago) has its own scale: 🔴 above +8/week means you're loading too fast — real injury risk, not just "good progress." 🟢 +3 to +8 is building well, 🟡 −2 to +2 is holding steady, 🟠 below −2 means fitness is slipping.
+- **Recovery Balance** is reported as morning (the lowest point overnight) vs. peak (the highest point that day) — they use different color scales, since peak is naturally higher than the overnight low.
+- **HRV** below your normal range for 2+ days in a row, or morning recovery below 65% for 2+ days in a row, adds a note to check your blood pressure — sustained low HRV/recovery is a real physiological signal worth a second data point on.
+- **Rolling baselines** track each metric separately, with a separate bucket for "party nights" (>20,000 steps) so an outlier day doesn't skew your normal-day average.
 - **Run dates in chronological order.** Baselines are "as of whenever this ran," not "as of the calendar date" — backfilling an old missed date after a later one will make that day's baseline comparison slightly off. Fine for the normal daily-scheduled use; worth knowing if you're catching up on missed days.
 - Requires Sleep and Recovery API subscriptions on apizone for those sections to populate — without them, the digest still generates, those sections just say "no data" instead of erroring.
 
-CLI: `suunto-mcp daily-digest 2026-04-20`. MCP tool: `generate_daily_digest`.
+CLI: `suunto-mcp daily-digest 2026-04-20 [--seed-ctl 42 --seed-atl 38]`. MCP tool: `generate_daily_digest`.
 
 ---
 

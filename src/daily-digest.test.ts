@@ -5,14 +5,18 @@ import {
   pickMainSleep,
   rollCtlAtl,
   updateBaseline,
+  pruneHistory,
   stepsColor,
   sleepHoursColor,
   sleepScoreColor,
-  recoveryColor,
+  recoveryMorningColor,
+  recoveryPeakColor,
   tsbColor,
   tsbLabel,
   rampRateColor,
+  rampRateLabel,
   hrvColor,
+  hrvLabel,
   soWhat,
 } from "./daily-digest.js";
 
@@ -70,6 +74,12 @@ test("updateBaseline: incremental mean matches a plain average", () => {
   assert.equal(b.avg, 20);
 });
 
+test("pruneHistory: keeps only the most recent N dates", () => {
+  const history = { "2026-01-01": 1, "2026-01-02": 2, "2026-01-03": 3, "2026-01-04": 4 };
+  const pruned = pruneHistory(history, 2);
+  assert.deepEqual(Object.keys(pruned).sort(), ["2026-01-03", "2026-01-04"]);
+});
+
 test("color thresholds: boundaries match the spec table", () => {
   assert.equal(stepsColor(12000), "🟢");
   assert.equal(stepsColor(11999), "🟡");
@@ -82,8 +92,14 @@ test("color thresholds: boundaries match the spec table", () => {
   assert.equal(sleepScoreColor(75), "🟢");
   assert.equal(sleepScoreColor(44), "🔴");
 
-  assert.equal(recoveryColor(80), "🟢");
-  assert.equal(recoveryColor(49), "🔴");
+  assert.equal(recoveryMorningColor(80), "🟢");
+  assert.equal(recoveryMorningColor(65), "🟡");
+  assert.equal(recoveryMorningColor(49), "🔴");
+
+  assert.equal(recoveryPeakColor(90), "🟢");
+  assert.equal(recoveryPeakColor(75), "🟡");
+  assert.equal(recoveryPeakColor(74), "🟠");
+  assert.notEqual(recoveryPeakColor(10), "🔴"); // no red band for peak
 
   assert.equal(tsbColor(11), "🔵");
   assert.equal(tsbColor(0), "🟢");
@@ -95,13 +111,20 @@ test("color thresholds: boundaries match the spec table", () => {
   assert.equal(tsbLabel(-5), "Compromised");
   assert.equal(tsbLabel(-11), "Strained");
 
+  assert.equal(rampRateColor(9), "🔴");
+  assert.equal(rampRateLabel(9), "Overreaching — injury risk");
   assert.equal(rampRateColor(5), "🟢");
+  assert.equal(rampRateLabel(5), "Building well");
   assert.equal(rampRateColor(0), "🟡");
+  assert.equal(rampRateLabel(0), "Holding fitness");
   assert.equal(rampRateColor(-5), "🟠");
+  assert.equal(rampRateLabel(-5), "Losing fitness");
 
   assert.equal(hrvColor(30), "🟢");
   assert.equal(hrvColor(22), "🟡");
   assert.equal(hrvColor(10), "🟠");
+  assert.equal(hrvLabel(10), "Recovery");
+  assert.equal(hrvLabel(30), "");
 });
 
 test("soWhat: good recovery + fresh form -> train verdict", () => {
@@ -109,12 +132,15 @@ test("soWhat: good recovery + fresh form -> train verdict", () => {
     tsb: 1.8,
     recoveryMorningPct: 84,
     hrv: 22,
-    hrvBelowRangeStreak: 1,
+    hrvWellBelowStreak: 0,
+    recoveryMorningBelowStreak: 0,
     rampRate: -4.9,
     isPartyNight: false,
+    hadWorkout: true,
+    projectedTomorrowCtl: null,
   });
   assert.match(msg, /Good day to train/);
-  assert.match(msg, /CTL is declining/);
+  assert.match(msg, /CTL declining/);
 });
 
 test("soWhat: poor recovery + Strained TSB (below -10) -> rest verdict", () => {
@@ -122,23 +148,29 @@ test("soWhat: poor recovery + Strained TSB (below -10) -> rest verdict", () => {
     tsb: -12,
     recoveryMorningPct: 40,
     hrv: 30,
-    hrvBelowRangeStreak: 0,
+    hrvWellBelowStreak: 0,
+    recoveryMorningBelowStreak: 0,
     rampRate: 1,
     isPartyNight: false,
+    hadWorkout: true,
+    projectedTomorrowCtl: null,
   });
-  assert.match(msg, /Rest day/);
+  assert.match(msg, /Clear fatigue/);
 });
 
-test("soWhat: Compromised TSB (-8, above the -10 Strained cutoff) is not a rest day on its own", () => {
+test("soWhat: Compromised TSB + poor recovery -> explicit rest day", () => {
   const msg = soWhat({
     tsb: -8,
     recoveryMorningPct: 40,
     hrv: 30,
-    hrvBelowRangeStreak: 0,
+    hrvWellBelowStreak: 0,
+    recoveryMorningBelowStreak: 0,
     rampRate: 1,
     isPartyNight: false,
+    hadWorkout: true,
+    projectedTomorrowCtl: null,
   });
-  assert.match(msg, /Moderate day/);
+  assert.match(msg, /Rest day/);
 });
 
 test("soWhat: null rampRate (not enough history) doesn't crash or trigger the declining-CTL note", () => {
@@ -146,12 +178,15 @@ test("soWhat: null rampRate (not enough history) doesn't crash or trigger the de
     tsb: 2,
     recoveryMorningPct: 85,
     hrv: 30,
-    hrvBelowRangeStreak: 0,
+    hrvWellBelowStreak: 0,
+    recoveryMorningBelowStreak: 0,
     rampRate: null,
     isPartyNight: false,
+    hadWorkout: true,
+    projectedTomorrowCtl: null,
   });
   assert.match(msg, /Good day to train/);
-  assert.doesNotMatch(msg, /CTL is declining/);
+  assert.doesNotMatch(msg, /CTL declining/);
 });
 
 test("soWhat: party night flag surfaces even with a neutral verdict", () => {
@@ -159,9 +194,72 @@ test("soWhat: party night flag surfaces even with a neutral verdict", () => {
     tsb: -2,
     recoveryMorningPct: 70,
     hrv: null,
-    hrvBelowRangeStreak: 0,
+    hrvWellBelowStreak: 0,
+    recoveryMorningBelowStreak: 0,
     rampRate: 0,
     isPartyNight: true,
+    hadWorkout: true,
+    projectedTomorrowCtl: null,
   });
   assert.match(msg, /Post-party baseline/);
+});
+
+test("soWhat: 2+ day well-below HRV streak triggers a BP-check note", () => {
+  const msg = soWhat({
+    tsb: 5,
+    recoveryMorningPct: 80,
+    hrv: 18,
+    hrvWellBelowStreak: 2,
+    recoveryMorningBelowStreak: 0,
+    rampRate: 0,
+    isPartyNight: false,
+    hadWorkout: true,
+    projectedTomorrowCtl: null,
+  });
+  assert.match(msg, /Check blood pressure/);
+});
+
+test("soWhat: 2+ day low-morning-recovery streak also triggers the BP-check note", () => {
+  const msg = soWhat({
+    tsb: 5,
+    recoveryMorningPct: 60,
+    hrv: 30,
+    hrvWellBelowStreak: 0,
+    recoveryMorningBelowStreak: 2,
+    rampRate: 0,
+    isPartyNight: false,
+    hadWorkout: true,
+    projectedTomorrowCtl: null,
+  });
+  assert.match(msg, /Check blood pressure/);
+});
+
+test("soWhat: ramp rate over +8/week flags overreaching injury risk", () => {
+  const msg = soWhat({
+    tsb: 5,
+    recoveryMorningPct: 80,
+    hrv: 30,
+    hrvWellBelowStreak: 0,
+    recoveryMorningBelowStreak: 0,
+    rampRate: 9,
+    isPartyNight: false,
+    hadWorkout: true,
+    projectedTomorrowCtl: null,
+  });
+  assert.match(msg, /injury risk/);
+});
+
+test("soWhat: no workout + declining ramp projects tomorrow's CTL", () => {
+  const msg = soWhat({
+    tsb: 2,
+    recoveryMorningPct: 80,
+    hrv: 30,
+    hrvWellBelowStreak: 0,
+    recoveryMorningBelowStreak: 0,
+    rampRate: -3,
+    isPartyNight: false,
+    hadWorkout: false,
+    projectedTomorrowCtl: 41.2,
+  });
+  assert.match(msg, /drops to ~41\.2 tomorrow/);
 });

@@ -37,7 +37,7 @@ Other:
                         imports it via care_workspace.py. Steps only — HRV/RHR/
                         VO2max/SpO2 have no genuine match in Suunto's API and
                         aren't force-mapped.
-  daily-digest          <YYYY-MM-DD>
+  daily-digest          <YYYY-MM-DD> [--seed-ctl N --seed-atl N]
                         Builds a color-coded health digest (steps, sleep,
                         recovery, HRV, CTL/ATL/TSB training load) for one
                         date and appends it to SUUNTO_HISTORY.md (override
@@ -45,7 +45,9 @@ Other:
                         persisted in ~/.suunto-mcp/averages.json (override
                         with SUUNTO_DIGEST_AVERAGES_PATH) — Suunto's API has
                         no fitness/fatigue endpoint, so this is computed and
-                        stored locally.
+                        stored locally. --seed-ctl/--seed-atl only apply on
+                        the very first run: pass the Fitness/Fatigue values
+                        shown on your watch to skip the ~4-6 week cold-start.
 
 All commands output JSON to stdout. Pipe to jq for filtering:
   suunto-mcp list-workouts --limit 5 | jq '.payload[].sport'
@@ -206,13 +208,23 @@ export async function runCli(argv: string[]) {
       }
 
       case "daily-digest": {
-        const date = rest[0] ?? die("Usage: daily-digest <YYYY-MM-DD>");
+        const { values, positionals } = parseArgs({
+          args: rest,
+          options: {
+            "seed-ctl": { type: "string" },
+            "seed-atl": { type: "string" },
+          },
+          allowPositionals: true,
+        });
+        const date = positionals[0] ?? die("Usage: daily-digest <YYYY-MM-DD> [--seed-ctl N --seed-atl N]");
         const { generateDigest } = await import("./daily-digest.js");
         const result = await generateDigest({
           suunto,
           averagesPath: cfg.digestAveragesPath,
           historyPath: cfg.digestHistoryPath,
           date,
+          seedCtl: values["seed-ctl"] ? Number(values["seed-ctl"]) : undefined,
+          seedAtl: values["seed-atl"] ? Number(values["seed-atl"]) : undefined,
         });
         console.log(result.markdown);
         console.log(`Appended to ${cfg.digestHistoryPath}`);
