@@ -559,6 +559,13 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `upload_workout` | Upload a FIT/GPX file as a new workout |
 | `get_upload_status` | Check whether an upload finished processing |
 | `push_workout_guide` | Push a structured workout (exercises, weights, rest, notifications) as a SuuntoPlus Guide — requires `SUUNTO_APP_NAME` |
+| `push_interval_guide` | Push an auto-advancing interval/cardio guide (timed or distance-based segments, target HR ranges) — requires `SUUNTO_APP_NAME` |
+
+**Other**
+
+| Tool | What it does |
+|------|-------------|
+| `list_subscriptions` | Active webhook subscriptions on your account |
 
 </details>
 

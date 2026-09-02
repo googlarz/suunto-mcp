@@ -54,8 +54,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "dotenv": "^16.4.5",
-    "fit-file-parser": "^1.21.0",
-    "zod": "^3.23.8"
+    "fit-file-parser": "^1.21.0"
   },
   "optionalDependencies": {
     "@napi-rs/keyring": "^1.1.6"

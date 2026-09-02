@@ -25,7 +25,7 @@ test("resources: readResource(recent/workout) returns first listed workout", asy
   assert.equal(parsed.workoutKey, "abc");
 });
 
-test("resources: readResource(today/sleep) calls getSleep with today's date", async () => {
+test("resources: readResource(today/sleep) calls getSleep with yesterday's date, not today's", async () => {
   let receivedDate: string | undefined;
   const fakeClient: any = {
     getSleep: async (date: string) => {
@@ -34,7 +34,9 @@ test("resources: readResource(today/sleep) calls getSleep with today's date", as
     },
   };
   const out = await readResource("suunto://today/sleep", fakeClient);
+  const todayStr = new Date().toISOString().slice(0, 10);
   assert.match(receivedDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
+  assert.notEqual(receivedDate, todayStr, "last night's sleep started yesterday, not today");
   assert.deepEqual(JSON.parse(out.text), { score: 88 });
 });
 

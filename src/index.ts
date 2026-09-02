@@ -18,6 +18,7 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { readFileSync } from "node:fs";
 import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
@@ -28,6 +29,13 @@ import { generateDigest } from "./daily-digest.js";
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
 
+// Read the version from package.json instead of hardcoding it here — a
+// hardcoded string silently drifts from the real published version on
+// every release (found stale at 0.13.1 while package.json was 0.14.0).
+const pkgVersion: string = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
+
 // Credential check runs lazily — at the moment a tool or resource actually
 // tries to hit the API. This lets MCP introspection (ListTools,
 // ListResources) succeed without credentials, which catalogs like
@@ -37,7 +45,7 @@ function ensureReady() {
 }
 
 const server = new Server(
-  { name: "suunto-mcp", version: "0.13.1" },
+  { name: "suunto-mcp", version: pkgVersion },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -116,7 +124,7 @@ const tools = [
   {
     name: "get_workout_fit",
     description:
-      "Downloads the workout's binary FIT file from Suunto and returns it parsed to JSON. Default (full=false): compact summary { sport, total_distance_km, avg_heart_rate, training_effect, laps, records_sample (first 5 / middle 5 / last 5 records) }. Set full=true to receive every parsed FIT record — responses are often >100 KB for long workouts. Use the default for analysis and summaries; full=true only when raw record-level data is required. Read-only.",
+      "Downloads the workout's binary FIT file from Suunto and returns it parsed to JSON. Default (full=false): compact summary { sport, total_distance_km, avg_heart_rate, training_effect, laps, records_sample: { first, middle, last (one record each), count } }. Set full=true to receive every parsed FIT record — responses are often >100 KB for long workouts. Use the default for analysis and summaries; full=true only when raw record-level data is required. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -213,7 +221,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-20"],
-          description: "Wake-up date YYYY-MM-DD. Keyed to the morning the session ended, not when it started. Suunto syncs once daily — use yesterday or earlier for reliable results.",
+          description: "Date YYYY-MM-DD the person went to bed (bedtime), NOT the wake-up date — a bedtime shortly after midnight still counts as the previous date. To get 'last night's sleep' as of right now, use yesterday's date, not today's. Suunto syncs once daily — use yesterday or earlier for reliable results.",
         },
       },
       required: ["date"],
@@ -233,7 +241,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-01"],
-          description: "First wake-up date YYYY-MM-DD, inclusive. Must be ≤ to. Nights without recorded sleep are silently omitted, not 404.",
+          description: "First bedtime date YYYY-MM-DD, inclusive (the date the person went to bed, not woke up — see get_sleep). Must be ≤ to. Nights without recorded sleep are silently omitted, not 404.",
         },
         to: {
           type: "string",
@@ -242,7 +250,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-30"],
-          description: "Last wake-up date YYYY-MM-DD, inclusive. Future dates are accepted but produce no entries. Prefer ranges ≤ 30 days for responsiveness.",
+          description: "Last bedtime date YYYY-MM-DD, inclusive (the date the person went to bed, not woke up — see get_sleep). Future dates are accepted but produce no entries. Prefer ranges ≤ 30 days for responsiveness.",
         },
       },
       required: ["from", "to"],

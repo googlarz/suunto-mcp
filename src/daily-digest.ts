@@ -411,8 +411,11 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   const hadWorkout = todaysWorkouts.length > 0;
 
   // --- Party night detection (before baseline updates, so the sample goes
-  // into the right bucket) ---
-  const isPartyNight = stepsValue > 20000 && (mainSleep ? mainSleep.duration < 6 * 3600 : false);
+  // into the right bucket). Steps alone, not gated on sleep data existing —
+  // a genuine high-step day with no sleep record (e.g. activity ran past
+  // dawn with no distinct bedtime) must still route to the party baseline,
+  // not silently fall back to "false" and skew the regular-day average. ---
+  const isPartyNight = stepsValue > 20000;
 
   // --- CTL/ATL/TSB/ramp rate ---
   // Note: without a seed, CTL/ATL start at 0 and converge over ~4-6 weeks —

@@ -36,6 +36,15 @@ export const RESOURCES = [
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Suunto keys a sleep session by the date the person went to bed (even a
+// bedtime shortly after midnight still counts as the previous date) — so
+// "last night's sleep" as of right now is filed under yesterday, not today.
+const yesterday = () => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+};
+
 function startOfIsoWeekMs(): number {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);
@@ -58,7 +67,7 @@ export async function readResource(
       break;
     }
     case "suunto://today/sleep":
-      payload = await client.getSleep(today());
+      payload = await client.getSleep(yesterday());
       break;
     case "suunto://today/recovery":
       payload = await client.getRecovery(today());
