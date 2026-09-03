@@ -63,7 +63,7 @@ const tools = [
   {
     name: "list_workouts",
     description:
-      "Returns the user's recent Suunto workouts ordered newest-first (Workout API v3). Each item: workoutKey (string id), activityId, sport, startTime (epoch ms), totalTime (s), totalDistance (m), totalCalories, avgHeartRate, maxHeartRate, totalAscent (m), totalDescent (m). Auto-paginates with offset-based pagination until limit is reached or no more workouts exist. Use get_workout for full detail (laps, HR zones, sport-specific metrics) on a single result. Read-only.",
+      "Returns the user's recent Suunto workouts ordered newest-first (Workout API v3). Each item: workoutKey (string id), activityId (numeric activity code — there is no separate plain-language 'sport' field; use get_workout_fit for the parsed FIT file's session.sport if a sport name is needed), startTime (epoch ms), totalTime (s), totalDistance (m), totalAscent (m), totalDescent (m), energyConsumption (joules, not 'totalCalories'), hrdata: { avg, max } (workout heart rate — hrdata.max is the account's overall max HR, use hrdata.workoutMaxHR for this specific workout's peak). Auto-paginates with offset-based pagination until limit is reached or no more workouts exist. Use get_workout for full detail (laps, HR zones, sport-specific metrics) on a single result. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -172,7 +172,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-20"],
-          description: "Calendar date YYYY-MM-DD. Suunto syncs once daily — today or future dates typically return SuuntoNotFoundError; use yesterday or earlier for reliable results.",
+          description: "Calendar date YYYY-MM-DD. Suunto syncs once daily, so today's data is usually incomplete — but the API responds 200 with an empty or partial payload for today/future dates, it does not throw SuuntoNotFoundError (confirmed live). Use yesterday or earlier for complete results.",
         },
       },
       required: ["date"],
@@ -270,7 +270,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-20"],
-          description: "Calendar date YYYY-MM-DD. Suunto syncs once daily — today or future dates typically return SuuntoNotFoundError; use yesterday or earlier for reliable results.",
+          description: "Calendar date YYYY-MM-DD. Suunto syncs once daily, so today's data is usually incomplete — but the API responds 200 with an empty or partial payload for today/future dates, it does not throw SuuntoNotFoundError (confirmed live). Use yesterday or earlier for complete results.",
         },
       },
       required: ["date"],

@@ -98,7 +98,14 @@ export async function exportHealthCsv(
   const stats = await client.getDailyStats(`${start}T00:00:00`, `${end}T23:59:59`);
   const stepsByDate = extractStepsByDate(stats.payload ?? stats ?? []);
 
-  const lastExported = loadLastExportedDate();
+  // The persisted watermark, always loaded (used as a floor for the final
+  // save below so an explicit --since can never regress it). The dedupe
+  // *filter*, though, only applies on the normal incremental path — an
+  // explicit --since means the caller wants that window re-exported
+  // regardless of what was already synced, so skipping dates against the
+  // watermark here would silently drop every date they asked for.
+  const savedWatermark = loadLastExportedDate();
+  const lastExported = opts.since ? undefined : savedWatermark;
   const rows: string[] = ["date,metric,value,unit"];
   let maxDate = lastExported ?? start;
   for (const [date, steps] of [...stepsByDate.entries()].sort()) {
@@ -106,6 +113,7 @@ export async function exportHealthCsv(
     rows.push(`${date},steps,${Math.round(steps)},`);
     if (date > maxDate) maxDate = date;
   }
+  if (savedWatermark && savedWatermark > maxDate) maxDate = savedWatermark;
 
   const inboxDir = opts.personId
     ? join(opts.healthRoot, "people", opts.personId, "inbox", "wearable")

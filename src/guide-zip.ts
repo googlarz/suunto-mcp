@@ -198,7 +198,7 @@ export function buildGuideJson(plan: GuidePlan, ownerAppName: string) {
   return {
     type: "sequence",
     name: plan.title,
-    description: `${exercises.length} exercises`,
+    description: `${exercises.length} exercise${exercises.length === 1 ? "" : "s"}`,
     shortDescription: plan.title,
     localDate: plan.date,
     usage: "workout",

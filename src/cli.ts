@@ -217,14 +217,25 @@ export async function runCli(argv: string[]) {
           allowPositionals: true,
         });
         const date = positionals[0] ?? die("Usage: daily-digest <YYYY-MM-DD> [--seed-ctl N --seed-atl N]");
+        // Number("abc") is NaN, not an error — validate explicitly so a typo
+        // doesn't silently poison the CTL/ATL sidecar (JSON.stringify(NaN)
+        // becomes null, corrupting every digest run after this one).
+        const parseSeed = (raw: string | undefined, flag: string): number | undefined => {
+          if (raw === undefined) return undefined;
+          const n = Number(raw);
+          if (!Number.isFinite(n)) die(`${flag} must be a number, got "${raw}"`);
+          return n;
+        };
+        const seedCtl = parseSeed(values["seed-ctl"], "--seed-ctl");
+        const seedAtl = parseSeed(values["seed-atl"], "--seed-atl");
         const { generateDigest } = await import("./daily-digest.js");
         const result = await generateDigest({
           suunto,
           averagesPath: cfg.digestAveragesPath,
           historyPath: cfg.digestHistoryPath,
           date,
-          seedCtl: values["seed-ctl"] ? Number(values["seed-ctl"]) : undefined,
-          seedAtl: values["seed-atl"] ? Number(values["seed-atl"]) : undefined,
+          seedCtl,
+          seedAtl,
         });
         console.log(result.markdown);
         console.log(`Appended to ${cfg.digestHistoryPath}`);

@@ -385,9 +385,19 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   ]);
 
   // --- Steps ---
+  // Sum across ALL sources, not just Sources[0] — a second paired device
+  // (or a resynced/revised source entry) would otherwise silently drop
+  // steps. Matches export-health.ts's extractStepsByDate, which already
+  // handles this correctly.
   const stepsMetric = (stepsStats ?? []).find((m: any) => m.Name === "stepcount");
-  const stepsValue: number =
-    stepsMetric?.Sources?.[0]?.Samples?.find((s: any) => s.TimeISO8601?.startsWith(date))?.Value ?? 0;
+  const stepsValue: number = (stepsMetric?.Sources ?? []).reduce(
+    (sum: number, source: any) =>
+      sum +
+      ((source.Samples ?? []) as any[])
+        .filter((s) => s.TimeISO8601?.startsWith(date) && s.Value !== null && s.Value !== undefined)
+        .reduce((sSum: number, s: any) => sSum + s.Value, 0),
+    0,
+  );
 
   // --- Sleep (main overnight sleep, keyed to the wake-up date) ---
   const sleepEntries = parseSleepEntries(rawSleep as any[]);
@@ -519,7 +529,10 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
       const minutes = Math.round((w.totalTime ?? 0) / 60);
       const avgHr = w?.hrdata?.avg ?? "?";
       const tss = (w?.tss?.trainingStressScore ?? 0).toFixed(1);
-      lines.push(`Workout: ${w.sport ?? "unknown"} ${minutes}min, avg HR ${avgHr}bpm, TSS ${tss}`);
+      // No workout endpoint ever returns a "sport" field (confirmed live) —
+      // only activityId, a numeric code with no documented name mapping.
+      // Show it honestly rather than silently reading undefined as "unknown".
+      lines.push(`Workout: activity #${w.activityId ?? "?"} ${minutes}min, avg HR ${avgHr}bpm, TSS ${tss}`);
     }
   } else {
     lines.push("No recorded workout.");
