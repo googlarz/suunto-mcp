@@ -558,7 +558,7 @@ Claude picks the right tool automatically — you don't need to know these. For 
 
 | Tool | What it does |
 |------|-------------|
-| `upload_workout` | Upload a FIT/GPX file as a new workout |
+| `upload_workout` | Upload a FIT file as a new workout — Suunto's own docs say only FIT is currently supported for this endpoint, despite what you might read elsewhere |
 | `get_upload_status` | Check whether an upload finished processing |
 | `push_workout_guide` | Push a structured workout (exercises, weights, rest, notifications) as a SuuntoPlus Guide — requires `SUUNTO_APP_NAME` |
 | `push_interval_guide` | Push an auto-advancing interval/cardio guide (timed or distance-based segments, target HR ranges) — requires `SUUNTO_APP_NAME` |
