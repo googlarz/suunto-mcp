@@ -264,6 +264,24 @@ export function hrvLabel(hrv: number): string {
   return hrv < HRV_WELL_BELOW ? "Recovery" : "";
 }
 
+// The color thresholds and BP-check trigger above stay fixed — but the
+// *displayed* "normal range" text shouldn't claim a universal 26-34ms is
+// everyone's personal range when this module already tracks each user's
+// own baseline. Once there's enough history, show that instead.
+const HRV_RANGE_HALF_WIDTH = 4; // matches the fixed range's own width (34-26)/2
+const HRV_SUFFICIENT_HISTORY_N = 14;
+
+export function hrvDisplayRange(baseline: Baseline): { low: number; high: number; personalized: boolean } {
+  if (baseline.n >= HRV_SUFFICIENT_HISTORY_N) {
+    return {
+      low: Math.round(baseline.avg - HRV_RANGE_HALF_WIDTH),
+      high: Math.round(baseline.avg + HRV_RANGE_HALF_WIDTH),
+      personalized: true,
+    };
+  }
+  return { low: HRV_LOW, high: HRV_LOW + 2 * HRV_RANGE_HALF_WIDTH, personalized: false };
+}
+
 // ---------- "So what" decision (must be a decision, not a description) ----------
 
 export interface SoWhatInput {
@@ -362,6 +380,18 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   const { suunto, date } = cfg;
   const averages = await loadAverages(cfg.averagesPath);
   const isFirstRun = averages.lastUpdated === "";
+  // CTL/ATL roll forward unconditionally below — re-running the same date,
+  // or running dates out of order, would reapply that day's TSS on top of
+  // an already-advanced chain and corrupt it. This module only supports
+  // moving strictly forward one day at a time; refuse anything else rather
+  // than silently producing wrong numbers.
+  if (!isFirstRun && date <= averages.lastUpdated) {
+    throw new Error(
+      `Digest for ${date} was already processed (lastUpdated=${averages.lastUpdated}). ` +
+        `Re-running the same date or an earlier one would corrupt the CTL/ATL chain — ` +
+        `this only supports moving strictly forward one day at a time.`,
+    );
+  }
   if (isFirstRun && (cfg.seedCtl !== undefined || cfg.seedAtl !== undefined)) {
     // Anchor to the watch's own displayed Fitness/Fatigue on first use —
     // there's no API to read those, so this only works if the caller
@@ -371,12 +401,17 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   }
 
   // Fetch everything in parallel — these are 4 independent network calls.
+  // Daily activity / sleep / recovery each need their own optional apizone
+  // subscription — a missing one throws (403/404), and this module
+  // promises to fall back to "no data" for that section rather than
+  // failing the whole digest. Workouts use the base Developer API, always
+  // assumed present, so its failure is treated as a genuine error.
   const startOfDay = `${date}T00:00:00`;
   const endOfDay = `${date}T23:59:59`;
   const [stepsStats, rawSleep, rawRecovery, workouts] = await Promise.all([
-    suunto.getDailyStats(startOfDay, endOfDay),
-    suunto.getSleep(date),
-    suunto.getRecovery(date),
+    suunto.getDailyStats(startOfDay, endOfDay).catch(() => []),
+    suunto.getSleep(date).catch(() => []),
+    suunto.getRecovery(date).catch(() => []),
     suunto.listWorkouts({
       since: Date.parse(`${date}T00:00:00Z`),
       until: Date.parse(`${date}T23:59:59Z`),
@@ -405,12 +440,21 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
 
   // --- Recovery: morning = the overnight nadir (lowest value), not simply
   // the first chronological sample — Balance typically dips before dawn
-  // and climbs through the day, so "first sample" and "nadir" can differ. ---
-  const recoveryValues = ((rawRecovery ?? []) as any[])
-    .map((r) => r.entryData?.Balance as number)
-    .filter((v) => typeof v === "number");
+  // and climbs through the day, so "first sample" and "nadir" can differ.
+  // Peak (max) and morning (min) are summary stats and can't tell whether
+  // the day trended up or down — max is never below min by construction,
+  // and "morning" (the min) is never above the day's last reading either,
+  // so even last-vs-morning can't go negative. For an actual trend, sort
+  // by timestamp and compare the first chronological reading to the last. ---
+  const recoverySamples = ((rawRecovery ?? []) as any[])
+    .map((r) => ({ ts: String(r.timestamp ?? ""), balance: r.entryData?.Balance as number }))
+    .filter((s) => typeof s.balance === "number" && s.ts)
+    .sort((a, b) => a.ts.localeCompare(b.ts));
+  const recoveryValues = recoverySamples.map((s) => s.balance);
   const morningRecovery = recoveryValues.length ? Math.min(...recoveryValues) : null;
   const peakRecovery = recoveryValues.length ? Math.max(...recoveryValues) : null;
+  const firstRecovery = recoverySamples.length ? recoverySamples[0].balance : null;
+  const lastRecovery = recoverySamples.length ? recoverySamples[recoverySamples.length - 1].balance : null;
 
   // --- Workouts / TSS for the day ---
   const todaysWorkouts = (workouts.payload ?? []) as any[];
@@ -482,6 +526,8 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   const hrv = mainSleep?.avgHrv ?? null;
   const morningPct = morningRecovery !== null ? morningRecovery * 100 : null;
   const peakPct = peakRecovery !== null ? peakRecovery * 100 : null;
+  const firstPct = firstRecovery !== null ? firstRecovery * 100 : null;
+  const lastPct = lastRecovery !== null ? lastRecovery * 100 : null;
 
   averages.hrvWellBelowStreak = hrv !== null && hrv < HRV_WELL_BELOW ? averages.hrvWellBelowStreak + 1 : 0;
   averages.recoveryMorningBelowStreak =
@@ -561,7 +607,11 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
       `Morning: ${recoveryMorningColor(morningPct)} ${Math.round(morningPct)}% → Peak: ${recoveryPeakColor(peakPct)} ${Math.round(peakPct)}%` +
         ` *(baseline: ${fmtBaseline(recoveryMorningBaselineBefore, (v) => `${Math.round(v)}%`)} → ${fmtBaseline(recoveryPeakBaselineBefore, (v) => `${Math.round(v)}%`)})*`,
     );
-    const delta = peakPct - morningPct;
+    // Neither peak-morning (max-min) nor last-morning can go negative by
+    // construction — "morning" IS the day's minimum, so nothing is ever
+    // below it, including the last reading. The only pair that can
+    // actually go either way is the true chronological first vs last.
+    const delta = firstPct !== null && lastPct !== null ? lastPct - firstPct : 0;
     lines.push(
       delta > 10
         ? "Recovered well as the day went on."
@@ -577,7 +627,11 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   lines.push("**❤️ HRV** *(from sleep data — watch's own 7-day average is more accurate)*");
   if (hrv !== null) {
     const label = hrvLabel(hrv);
-    lines.push(`${hrvColor(hrv)}${label ? ` ${label} —` : ""} ${hrv}ms *(normal range: 26–34ms)*`);
+    const range = hrvDisplayRange(hrvBaselineBefore);
+    const rangeText = range.personalized
+      ? `your baseline: ${range.low}–${range.high}ms`
+      : `typical range: ${range.low}–${range.high}ms — not enough history yet for your own baseline`;
+    lines.push(`${hrvColor(hrv)}${label ? ` ${label} —` : ""} ${hrv}ms *(${rangeText})*`);
     lines.push(
       `7-day avg (from sleep API, not the watch's own figure): ${hrv7dAvg !== null ? `${Math.round(hrv7dAvg)}ms` : "n/a"} | Last night: ${hrv}ms`,
     );

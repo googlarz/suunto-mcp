@@ -11,25 +11,31 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Config } from "./config.js";
 import { SuuntoClient } from "./api.js";
 
-const STATE_PATH = join(homedir(), ".suunto-mcp", "health-export-state.json");
+// Evaluated per-call, not cached at module load, so tests can override it
+// via env var without touching the real user's state file.
+function statePath(): string {
+  return process.env.SUUNTO_HEALTH_EXPORT_STATE_PATH ?? join(homedir(), ".suunto-mcp", "health-export-state.json");
+}
 const MAX_WINDOW_DAYS = 28; // Suunto daily-stats API limit
 
 function loadLastExportedDate(): string | undefined {
-  if (!existsSync(STATE_PATH)) return undefined;
+  const path = statePath();
+  if (!existsSync(path)) return undefined;
   try {
-    return JSON.parse(readFileSync(STATE_PATH, "utf8")).lastDate;
+    return JSON.parse(readFileSync(path, "utf8")).lastDate;
   } catch {
     return undefined;
   }
 }
 
-function saveLastExportedDate(date: string): void {
-  mkdirSync(join(homedir(), ".suunto-mcp"), { recursive: true });
-  writeFileSync(STATE_PATH, JSON.stringify({ lastDate: date }, null, 2));
+export function saveLastExportedDate(date: string): void {
+  const path = statePath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ lastDate: date }, null, 2));
 }
 
 function addDays(isoDate: string, days: number): string {
@@ -81,7 +87,7 @@ export interface ExportHealthOptions {
 export async function exportHealthCsv(
   cfg: Config,
   opts: ExportHealthOptions,
-): Promise<{ csvPath: string; rowCount: number; skippedNote?: string }> {
+): Promise<{ csvPath: string; rowCount: number; skippedNote?: string; maxDate?: string }> {
   const client = new SuuntoClient(cfg);
   const end = today();
   let start = opts.since ?? loadLastExportedDate() ?? addDays(end, -MAX_WINDOW_DAYS);
@@ -98,21 +104,29 @@ export async function exportHealthCsv(
   const stats = await client.getDailyStats(`${start}T00:00:00`, `${end}T23:59:59`);
   const stepsByDate = extractStepsByDate(stats.payload ?? stats ?? []);
 
-  // The persisted watermark, always loaded (used as a floor for the final
-  // save below so an explicit --since can never regress it). The dedupe
-  // *filter*, though, only applies on the normal incremental path — an
-  // explicit --since means the caller wants that window re-exported
-  // regardless of what was already synced, so skipping dates against the
-  // watermark here would silently drop every date they asked for.
+  // The persisted watermark, always loaded (used as a floor below so an
+  // explicit --since can never regress it). The dedupe *filter*, though,
+  // only applies on the normal incremental path — an explicit --since
+  // means the caller wants that window re-exported regardless of what was
+  // already synced, so skipping dates against the watermark here would
+  // silently drop every date they asked for.
   const savedWatermark = loadLastExportedDate();
   const lastExported = opts.since ? undefined : savedWatermark;
   const rows: string[] = ["date,metric,value,unit"];
-  let maxDate = lastExported ?? start;
+  let observedMaxDate = lastExported ?? start;
   for (const [date, steps] of [...stepsByDate.entries()].sort()) {
     if (lastExported && date <= lastExported) continue; // avoid re-import (no dedupe on health-skill's side)
     rows.push(`${date},steps,${Math.round(steps)},`);
-    if (date > maxDate) maxDate = date;
+    if (date > observedMaxDate) observedMaxDate = date;
   }
+
+  // Never let the watermark reach today — today's total is still
+  // accumulating, so treating it as "done" would freeze whatever partial
+  // count happened to exist at export time and never re-sync it. Cap to
+  // yesterday; today keeps getting re-exported on every run until it's
+  // genuinely a past day, at which point the next run locks it in for real.
+  const watermarkCeiling = addDays(end, -1);
+  let maxDate = observedMaxDate > watermarkCeiling ? watermarkCeiling : observedMaxDate;
   if (savedWatermark && savedWatermark > maxDate) maxDate = savedWatermark;
 
   const inboxDir = opts.personId
@@ -122,9 +136,10 @@ export async function exportHealthCsv(
   const csvPath = join(inboxDir, `suunto-steps-${end}.csv`);
   writeFileSync(csvPath, rows.join("\n") + "\n");
 
-  if (rows.length > 1) saveLastExportedDate(maxDate);
-
-  return { csvPath, rowCount: rows.length - 1, skippedNote };
+  // Watermark is NOT saved here — the caller must only commit it after the
+  // downstream health-skill import actually succeeds (see cli.ts). Saving
+  // it here would mark dates as synced even when the import step fails.
+  return { csvPath, rowCount: rows.length - 1, skippedNote, maxDate: rows.length > 1 ? maxDate : undefined };
 }
 
 // Runs the export, then invokes health-skill's own import-wearable command

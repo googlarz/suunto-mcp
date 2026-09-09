@@ -190,7 +190,7 @@ export async function runCli(argv: string[]) {
           },
         });
         const healthRoot = values["health-root"] ?? die("Usage: sync-to-health-skill --health-root <path> [--person-id ID] [--since YYYY-MM-DD]");
-        const { exportHealthCsv, importIntoHealthSkill } = await import("./export-health.js");
+        const { exportHealthCsv, importIntoHealthSkill, saveLastExportedDate } = await import("./export-health.js");
         const result = await exportHealthCsv(cfg, {
           healthRoot,
           personId: values["person-id"],
@@ -201,7 +201,11 @@ export async function runCli(argv: string[]) {
           console.log("No new days to sync.");
           break;
         }
+        // Commit the watermark only after the import actually succeeds — if
+        // it throws, runCli's outer catch reports the error and the next
+        // run retries this same window instead of silently skipping it.
         const importOutput = importIntoHealthSkill(result.csvPath, healthRoot, values["person-id"]);
+        if (result.maxDate) saveLastExportedDate(result.maxDate);
         console.log(`Exported ${result.rowCount} day(s) to ${result.csvPath}`);
         console.log(importOutput);
         break;

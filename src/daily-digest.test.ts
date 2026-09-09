@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   parseSleepEntries,
   pickMainSleep,
@@ -17,7 +20,9 @@ import {
   rampRateLabel,
   hrvColor,
   hrvLabel,
+  hrvDisplayRange,
   soWhat,
+  generateDigest,
 } from "./daily-digest.js";
 
 test("parseSleepEntries: dedupes repeated SleepId, keeps longest Duration", () => {
@@ -262,4 +267,102 @@ test("soWhat: no workout + declining ramp projects tomorrow's CTL", () => {
     projectedTomorrowCtl: 41.2,
   });
   assert.match(msg, /drops to ~41\.2 tomorrow/);
+});
+
+test("hrvDisplayRange: falls back to the generic range with under 14 days of history", () => {
+  const range = hrvDisplayRange({ avg: 40, n: 5 });
+  assert.equal(range.personalized, false);
+  assert.equal(range.low, 26);
+  assert.equal(range.high, 34);
+});
+
+test("hrvDisplayRange: uses the personal baseline once there's enough history", () => {
+  const range = hrvDisplayRange({ avg: 40, n: 14 });
+  assert.equal(range.personalized, true);
+  assert.equal(range.low, 36);
+  assert.equal(range.high, 44);
+});
+
+// ---------- generateDigest orchestration ----------
+
+function fakeSuunto(overrides: Partial<{ stats: any; sleep: any; recovery: any; workouts: any }> = {}) {
+  return {
+    getDailyStats: async () => overrides.stats ?? [],
+    getSleep: async () => overrides.sleep ?? [],
+    getRecovery: async () => overrides.recovery ?? [],
+    listWorkouts: async () => overrides.workouts ?? { payload: [] },
+  } as any;
+}
+
+async function withTempDigestPaths(fn: (paths: { averagesPath: string; historyPath: string }) => Promise<void>) {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-digest-"));
+  try {
+    await fn({ averagesPath: join(dir, "averages.json"), historyPath: join(dir, "history.md") });
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+}
+
+test("generateDigest: refuses to re-run an already-processed date (would corrupt CTL/ATL)", async () => {
+  await withTempDigestPaths(async (paths) => {
+    const suunto = fakeSuunto({ workouts: { payload: [{ tss: { trainingStressScore: 100 } }] } });
+    await generateDigest({ suunto, ...paths, date: "2026-01-01" });
+    await assert.rejects(
+      () => generateDigest({ suunto, ...paths, date: "2026-01-01" }),
+      /already processed/,
+    );
+    await assert.rejects(
+      () => generateDigest({ suunto, ...paths, date: "2025-12-31" }),
+      /already processed/,
+    );
+  });
+});
+
+test("generateDigest: a missing optional subscription (sleep/recovery/stats throwing) degrades to 'no data' instead of failing the whole digest", async () => {
+  await withTempDigestPaths(async (paths) => {
+    const suunto = {
+      getDailyStats: async () => {
+        throw new Error("403 not subscribed");
+      },
+      getSleep: async () => {
+        throw new Error("403 not subscribed");
+      },
+      getRecovery: async () => {
+        throw new Error("403 not subscribed");
+      },
+      listWorkouts: async () => ({ payload: [] }),
+    } as any;
+    const result = await generateDigest({ suunto, ...paths, date: "2026-01-01" });
+    assert.match(result.markdown, /No sleep data for this date\./);
+    assert.match(result.markdown, /No recovery data for this date\./);
+    assert.match(result.markdown, /No HRV data for this date\./);
+  });
+});
+
+test("generateDigest: a hard failure fetching workouts (not an optional subscription) still throws", async () => {
+  await withTempDigestPaths(async (paths) => {
+    const suunto = fakeSuunto();
+    suunto.listWorkouts = async () => {
+      throw new Error("network error");
+    };
+    await assert.rejects(() => generateDigest({ suunto, ...paths, date: "2026-01-01" }), /network error/);
+  });
+});
+
+test("generateDigest: recovery narrative reflects the actual first-to-last trend, not min-vs-max", async () => {
+  await withTempDigestPaths(async (paths) => {
+    // Monotonic decline through the day: 90% -> 70% -> 40%. Old code
+    // compared peak(90) to morning/min(40) and always reported "recovered
+    // well" since max >= min by construction — the day actually declined.
+    const suunto = fakeSuunto({
+      recovery: [
+        { timestamp: "2026-01-01T08:00:00Z", entryData: { Balance: 0.9 } },
+        { timestamp: "2026-01-01T14:00:00Z", entryData: { Balance: 0.7 } },
+        { timestamp: "2026-01-01T20:00:00Z", entryData: { Balance: 0.4 } },
+      ],
+    });
+    const result = await generateDigest({ suunto, ...paths, date: "2026-01-01" });
+    assert.match(result.markdown, /Recovery declined through the day/);
+    assert.doesNotMatch(result.markdown, /Recovered well as the day went on/);
+  });
 });
