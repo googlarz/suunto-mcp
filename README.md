@@ -505,7 +505,9 @@ npm run webhook
 
 Starts an HTTP receiver on port 8422 that logs workout events as they arrive. Expose it to the internet (cloudflared, ngrok, your own server) and register the URL in apizone → webhooks.
 
-Most users can skip this — asking Claude on demand is simpler.
+**Set `SUUNTO_WEBHOOK_SECRET`** to the notification secret you configure in apizone's OAuth application settings. Without it, the receiver accepts *any* POST to its URL as genuine — since this endpoint is exposed to the internet, anyone who finds it could inject forged events. With it set, every request is verified against Suunto's `X-HMAC-SHA256-Signature` header and rejected with 401 if it doesn't match.
+
+Most users can skip this whole section — asking Claude on demand is simpler.
 
 </details>
 

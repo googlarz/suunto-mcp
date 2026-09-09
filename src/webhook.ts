@@ -9,9 +9,14 @@ import { createServer } from "node:http";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { verifySignature } from "./webhook-verify.js";
 
 const port = Number(process.env.PORT ?? 8422);
 const logPath = process.env.SUUNTO_WEBHOOK_LOG ?? join(homedir(), ".suunto-mcp", "webhooks.ndjson");
+// The "notification secret" you set in apizone's OAuth application settings
+// (Webhook notifications docs) — without it, anyone who finds this
+// receiver's URL could POST forged workout/sleep/recovery events into it.
+const webhookSecret = process.env.SUUNTO_WEBHOOK_SECRET;
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB — Suunto payloads are small JSON; bound it anyway
 
@@ -34,7 +39,24 @@ const server = createServer(async (req, res) => {
       }
       chunks.push(c as Buffer);
     }
-    const body = Buffer.concat(chunks).toString("utf8");
+    const rawBody = Buffer.concat(chunks);
+    if (webhookSecret) {
+      const signatureHeader = req.headers["x-hmac-sha256-signature"];
+      const header = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+      if (!verifySignature(rawBody, header, webhookSecret)) {
+        console.error("Webhook request rejected: missing or invalid X-HMAC-SHA256-Signature");
+        res.writeHead(401);
+        res.end();
+        return;
+      }
+    } else {
+      console.error(
+        "SUUNTO_WEBHOOK_SECRET not set — accepting this request WITHOUT verifying its signature. " +
+          "Anyone who finds this URL can post forged events. Set the notification secret from " +
+          "apizone's OAuth application settings as SUUNTO_WEBHOOK_SECRET to enable verification.",
+      );
+    }
+    const body = rawBody.toString("utf8");
     let parsed: unknown = body;
     try {
       parsed = JSON.parse(body);
