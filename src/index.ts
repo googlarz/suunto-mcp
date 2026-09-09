@@ -25,6 +25,7 @@ import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
 import { buildGuideZip, buildIntervalGuideZip } from "./guide-zip.js";
 import { generateDigest } from "./daily-digest.js";
+import { validateAgainstSchema } from "./schema-validate.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -534,6 +535,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const a = args as Record<string, any>;
 
   try {
+    // Each tool declares a full inputSchema, but the MCP SDK doesn't
+    // enforce it — a call could otherwise pass e.g. limit: -1 straight
+    // through to the API layer instead of being rejected up front.
+    const tool = tools.find((t) => t.name === name);
+    if (tool) {
+      const errors = validateAgainstSchema(tool.inputSchema, a);
+      if (errors.length) return text(`Invalid arguments for ${name}: ${errors.join("; ")}`, true);
+    }
     ensureReady();
     switch (name) {
       case "list_workouts": {

@@ -77,6 +77,23 @@ export async function getValidAccessToken(c: Config): Promise<string> {
   if (!cachedTokens) throw new SuuntoNotAuthenticatedError();
   if (cachedTokens.expiresAt > Date.now() + 60_000) return cachedTokens.accessToken;
 
+  // Our in-memory cache only ever updates from refreshes THIS process runs
+  // — if another process (a second MCP server instance, a fresh `npm run
+  // auth`) already rotated the token file on disk, our cachedTokens still
+  // holds the now-invalidated refresh token. Suunto invalidates a refresh
+  // token on use, so refreshing with a stale one would fail. Re-check disk
+  // first and adopt whatever's freshest before ever attempting a refresh.
+  if (!inFlightRefresh) {
+    const onDisk = await loadTokens(c.tokenPath);
+    if (onDisk && onDisk.expiresAt > Date.now() + 60_000) {
+      cachedTokens = onDisk;
+      return onDisk.accessToken;
+    }
+    if (onDisk) cachedTokens = onDisk;
+  }
+
+  // Re-check after the await above — a concurrent caller may have already
+  // started (or even finished) a refresh while we were reading the disk.
   if (!inFlightRefresh) {
     inFlightRefresh = (async () => {
       try {
@@ -98,6 +115,14 @@ export async function getValidAccessToken(c: Config): Promise<string> {
 export function __resetRefreshSingleton(): void {
   inFlightRefresh = null;
   cachedTokens = null;
+}
+
+// Test-only: seed the in-memory cache directly, to simulate "this process
+// already had a token cached before another process rotated the file" —
+// not reachable through the public API on a fresh test run, since the
+// first call always loads straight from (already-current) disk.
+export function __setCachedTokensForTest(bundle: TokenBundle | null): void {
+  cachedTokens = bundle;
 }
 
 function tryOpenBrowser(url: string): void {

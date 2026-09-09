@@ -257,6 +257,18 @@ export interface IntervalPlan {
 // Transition object per the schema). RepeatStep wraps a block's segments
 // when block.times > 1, matching Suunto's own Pyramid interval sample.
 function buildIntervalStep(seg: IntervalSegment): Record<string, unknown> {
+  const hasDuration = seg.durationSec !== undefined;
+  const hasDistance = seg.distanceM !== undefined;
+  if (hasDuration === hasDistance) {
+    // Both optional in the type, but exactly one is required — otherwise
+    // the step gets no transitions object at all and never auto-advances,
+    // contradicting the "auto-advancing interval guide" this builds.
+    throw new Error(
+      `Interval segment "${seg.label}" must have exactly one of durationSec or distanceM (got ${
+        hasDuration && hasDistance ? "both" : "neither"
+      }).`,
+    );
+  }
   const fields: Record<string, unknown>[] = [];
   if (seg.targetHrMin !== undefined && seg.targetHrMax !== undefined) {
     fields.push({

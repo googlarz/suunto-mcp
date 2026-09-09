@@ -53,8 +53,11 @@ export function summarizeFit(parsed: ParsedFit) {
     max_speed_kmh: session.max_speed,
     avg_power: session.avg_power,
     max_power: session.max_power,
-    total_ascent_m: session.total_ascent,
-    total_descent_m: session.total_descent,
+    // The parser is configured with lengthUnit: "km" — total_ascent/descent
+    // are lengths too, so they come out in km despite the field name here
+    // claiming meters. Convert, don't just relabel.
+    total_ascent_m: session.total_ascent !== undefined ? session.total_ascent * 1000 : undefined,
+    total_descent_m: session.total_descent !== undefined ? session.total_descent * 1000 : undefined,
     training_effect: session.total_training_effect,
     laps: parsed.laps?.length ?? 0,
     records_sample: sample,

@@ -9,6 +9,7 @@ import {
   refresh,
   getValidAccessToken,
   __resetRefreshSingleton,
+  __setCachedTokensForTest,
 } from "./auth.js";
 import { loadTokens, saveTokens } from "./storage.js";
 import { SuuntoNotAuthenticatedError, SuuntoTokenError } from "./errors.js";
@@ -123,6 +124,35 @@ test("auth: getValidAccessToken returns existing token if not expired", async ()
   const token = await getValidAccessToken({ ...baseCfg, tokenPath: path });
   assert.equal(token, "still-good");
   assert.equal(called, false);
+});
+
+test("auth: getValidAccessToken adopts a fresher token another process already wrote to disk, instead of refreshing with a stale refresh token", async () => {
+  const path = join(tmp, "tokens.json");
+  // Simulate: this process already had a near-expiry token cached in
+  // memory from earlier (not reachable via a fresh disk load, since a
+  // brand-new process always loads whatever's currently on disk).
+  __setCachedTokensForTest({
+    accessToken: "about-to-expire",
+    refreshToken: "old-refresh-token",
+    expiresAt: Date.now() + 30_000, // within the 60s refresh window
+  });
+  // Meanwhile, another process (a second MCP server instance, or a fresh
+  // `npm run auth`) already rotated the token file on disk.
+  await saveTokens(path, {
+    accessToken: "rotated-by-another-process",
+    refreshToken: "new-refresh-token",
+    expiresAt: Date.now() + 3_600_000,
+  });
+  let refreshCalled = false;
+  globalThis.fetch = (async () => {
+    refreshCalled = true;
+    // If this fires, the fix failed — it means we tried to use the stale
+    // refresh token instead of noticing the fresher one already on disk.
+    return new Response("invalid_grant", { status: 400 });
+  }) as any;
+  const token = await getValidAccessToken({ ...baseCfg, tokenPath: path });
+  assert.equal(token, "rotated-by-another-process");
+  assert.equal(refreshCalled, false, "must not attempt a refresh when disk already has a fresh token");
 });
 
 test("auth: getValidAccessToken refreshes when expiring within 60s", async () => {

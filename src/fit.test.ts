@@ -19,8 +19,8 @@ test("fit: summarizeFit pulls session totals", () => {
         max_speed: 16.2,
         avg_power: 240,
         max_power: 410,
-        total_ascent: 220,
-        total_descent: 215,
+        total_ascent: 0.22, // parser is configured with lengthUnit: "km" — this is 220m
+        total_descent: 0.215, // 215m
         total_training_effect: 3.5,
       },
     ],
@@ -38,6 +38,8 @@ test("fit: summarizeFit pulls session totals", () => {
   assert.equal(s.avg_heart_rate, 152);
   assert.equal(s.max_heart_rate, 178);
   assert.equal(s.avg_power, 240);
+  assert.equal(s.total_ascent_m, 220);
+  assert.equal(s.total_descent_m, 215);
   assert.equal(s.training_effect, 3.5);
   assert.equal(s.laps, 3);
   assert.equal(s.records_sample?.count, 3);
