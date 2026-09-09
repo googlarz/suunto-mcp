@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { exec } from "node:child_process";
 import { URL } from "node:url";
+import { mkdirSync, rmdirSync, statSync } from "node:fs";
 import type { Config } from "./config.js";
 import { loadTokens, saveTokens, type TokenBundle } from "./storage.js";
 import { SuuntoNotAuthenticatedError, SuuntoTokenError } from "./errors.js";
@@ -70,6 +71,55 @@ let inFlightRefresh: Promise<TokenBundle> | null = null;
 // Invalidated when a refresh occurs or the token expires.
 let cachedTokens: TokenBundle | null = null;
 
+const LOCK_STALE_MS = 15_000; // far longer than any real refresh round-trip
+const LOCK_MAX_WAIT_MS = 10_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// Cross-process mutex via mkdir's atomicity (fails with EEXIST if the
+// directory already exists — a portable, dependency-free test-and-set).
+// Reloading tokens from disk before refreshing only helps once another
+// process's rotation has already completed — two processes reading the
+// SAME near-expiry token at the same instant would both submit the same
+// refresh_token grant, and Suunto invalidates it after the first use,
+// failing the second. This serializes the whole reload-then-refresh
+// sequence across processes, not just within this one.
+export async function withTokenLock<T>(tokenPath: string, fn: () => Promise<T>): Promise<T> {
+  const lockPath = `${tokenPath}.lock`;
+  const start = Date.now();
+  while (true) {
+    try {
+      mkdirSync(lockPath);
+      break;
+    } catch (err: any) {
+      if (err.code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+          rmdirSync(lockPath); // previous holder likely crashed — reclaim
+          continue;
+        }
+      } catch {
+        continue; // lock vanished between our check and stat — retry now
+      }
+      if (Date.now() - start > LOCK_MAX_WAIT_MS) {
+        throw new Error(`Timed out waiting for the token refresh lock at ${lockPath}`);
+      }
+      await sleep(50 + Math.random() * 100);
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    try {
+      rmdirSync(lockPath);
+    } catch {
+      /* already gone — nothing to clean up */
+    }
+  }
+}
+
 export async function getValidAccessToken(c: Config): Promise<string> {
   if (!cachedTokens) {
     cachedTokens = await loadTokens(c.tokenPath);
@@ -77,30 +127,25 @@ export async function getValidAccessToken(c: Config): Promise<string> {
   if (!cachedTokens) throw new SuuntoNotAuthenticatedError();
   if (cachedTokens.expiresAt > Date.now() + 60_000) return cachedTokens.accessToken;
 
-  // Our in-memory cache only ever updates from refreshes THIS process runs
-  // — if another process (a second MCP server instance, a fresh `npm run
-  // auth`) already rotated the token file on disk, our cachedTokens still
-  // holds the now-invalidated refresh token. Suunto invalidates a refresh
-  // token on use, so refreshing with a stale one would fail. Re-check disk
-  // first and adopt whatever's freshest before ever attempting a refresh.
-  if (!inFlightRefresh) {
-    const onDisk = await loadTokens(c.tokenPath);
-    if (onDisk && onDisk.expiresAt > Date.now() + 60_000) {
-      cachedTokens = onDisk;
-      return onDisk.accessToken;
-    }
-    if (onDisk) cachedTokens = onDisk;
-  }
-
-  // Re-check after the await above — a concurrent caller may have already
-  // started (or even finished) a refresh while we were reading the disk.
   if (!inFlightRefresh) {
     inFlightRefresh = (async () => {
       try {
-        const fresh = await refresh(c, cachedTokens!.refreshToken);
-        await saveTokens(c.tokenPath, fresh);
-        cachedTokens = fresh;
-        return fresh;
+        return await withTokenLock(c.tokenPath, async () => {
+          // Re-check disk now that we hold the cross-process lock —
+          // another process may have already rotated the token (finished
+          // its own refresh while we waited for the lock), so adopt that
+          // instead of attempting a redundant, conflicting refresh.
+          const onDisk = await loadTokens(c.tokenPath);
+          if (onDisk && onDisk.expiresAt > Date.now() + 60_000) {
+            cachedTokens = onDisk;
+            return onDisk;
+          }
+          if (onDisk) cachedTokens = onDisk;
+          const fresh = await refresh(c, cachedTokens!.refreshToken);
+          await saveTokens(c.tokenPath, fresh);
+          cachedTokens = fresh;
+          return fresh;
+        });
       } finally {
         inFlightRefresh = null;
       }

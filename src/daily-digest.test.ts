@@ -318,6 +318,20 @@ test("generateDigest: refuses to re-run an already-processed date (would corrupt
   });
 });
 
+test("generateDigest: rejects a non-finite seedCtl/seedAtl instead of writing Infinity (-> null) into the sidecar", async () => {
+  await withTempDigestPaths(async (paths) => {
+    const suunto = fakeSuunto();
+    await assert.rejects(
+      () => generateDigest({ suunto, ...paths, date: "2026-01-01", seedCtl: Infinity }),
+      /seedCtl must be a finite number/,
+    );
+    await assert.rejects(
+      () => generateDigest({ suunto, ...paths, date: "2026-01-01", seedAtl: -Infinity }),
+      /seedAtl must be a finite number/,
+    );
+  });
+});
+
 test("generateDigest: a missing optional subscription (sleep/recovery/stats throwing) degrades to 'no data' instead of failing the whole digest", async () => {
   await withTempDigestPaths(async (paths) => {
     const suunto = {

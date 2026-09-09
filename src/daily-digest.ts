@@ -392,6 +392,18 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
         `this only supports moving strictly forward one day at a time.`,
     );
   }
+  // Defense in depth: MCP call args and the CLI's --seed-ctl/--seed-atl
+  // both validate this too, but generateDigest is a public entry point
+  // callable directly — a non-finite value here (JSON's 1e400 parses to
+  // Infinity, which isn't NaN) would flow into averages.ctl/.atl, and
+  // JSON.stringify has no Infinity representation, so it gets silently
+  // written to disk as null on the very first run.
+  if (cfg.seedCtl !== undefined && !Number.isFinite(cfg.seedCtl)) {
+    throw new Error(`seedCtl must be a finite number, got ${cfg.seedCtl}`);
+  }
+  if (cfg.seedAtl !== undefined && !Number.isFinite(cfg.seedAtl)) {
+    throw new Error(`seedAtl must be a finite number, got ${cfg.seedAtl}`);
+  }
   if (isFirstRun && (cfg.seedCtl !== undefined || cfg.seedAtl !== undefined)) {
     // Anchor to the watch's own displayed Fitness/Fatigue on first use —
     // there's no API to read those, so this only works if the caller

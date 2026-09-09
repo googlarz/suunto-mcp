@@ -10,6 +10,7 @@ import {
   getValidAccessToken,
   __resetRefreshSingleton,
   __setCachedTokensForTest,
+  withTokenLock,
 } from "./auth.js";
 import { loadTokens, saveTokens } from "./storage.js";
 import { SuuntoNotAuthenticatedError, SuuntoTokenError } from "./errors.js";
@@ -218,4 +219,43 @@ test("auth: concurrent refreshes share a single in-flight request", async () => 
 
   assert.equal(calls, 1, "only one refresh request should be sent");
   assert.deepEqual(new Set(tokens), new Set(["fresh-1"]));
+});
+
+// withTokenLock is tested directly, bypassing getValidAccessToken's
+// in-process inFlightRefresh dedup — that dedup already prevents two
+// refreshes from the SAME process, so testing through it would only prove
+// the in-process case again. The actual gap this closes is two separate
+// processes (no shared inFlightRefresh) racing on the same token file.
+test("withTokenLock: serializes two concurrent 'processes' racing on the same lock path", async () => {
+  const lockTarget = join(tmp, "tokens.json");
+  const order: string[] = [];
+  const holdLockFor = (label: string, ms: number) =>
+    withTokenLock(lockTarget, async () => {
+      order.push(`${label}:start`);
+      await new Promise((r) => setTimeout(r, ms));
+      order.push(`${label}:end`);
+    });
+  await Promise.all([holdLockFor("A", 40), holdLockFor("B", 10)]);
+  // Whichever ran first must fully finish before the other starts —
+  // interleaved starts (A:start, B:start, ...) would mean no real mutex.
+  assert.ok(
+    (order[0] === "A:start" && order[1] === "A:end") || (order[0] === "B:start" && order[1] === "B:end"),
+    `expected the first holder to finish before the second started, got: ${order.join(", ")}`,
+  );
+});
+
+test("withTokenLock: reclaims a stale lock left by a crashed holder instead of blocking forever", async () => {
+  const lockTarget = join(tmp, "tokens.json");
+  const { mkdirSync, utimesSync } = await import("node:fs");
+  const lockPath = `${lockTarget}.lock`;
+  mkdirSync(lockPath);
+  // Back-date the lock well past the staleness threshold, simulating a
+  // process that crashed while holding it.
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(lockPath, old, old);
+  let ran = false;
+  await withTokenLock(lockTarget, async () => {
+    ran = true;
+  });
+  assert.equal(ran, true);
 });

@@ -41,8 +41,12 @@ export function validateAgainstSchema(schema: any, value: any, path = "value"): 
     }
     case "integer":
     case "number": {
-      if (typeof value !== "number" || Number.isNaN(value)) {
-        errors.push(`"${path}" must be a number`);
+      // Number.isNaN alone misses ±Infinity — JSON's 1e400 parses to
+      // Infinity, which is typeof "number" and not NaN, so it sailed
+      // through and corrupted digest state as null (JSON.stringify has no
+      // Infinity representation).
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        errors.push(`"${path}" must be a finite number`);
         break;
       }
       if (schema.type === "integer" && !Number.isInteger(value)) errors.push(`"${path}" must be an integer`);
@@ -67,6 +71,15 @@ export function validateAgainstSchema(schema: any, value: any, path = "value"): 
       if (schema.enum && !schema.enum.includes(value)) {
         errors.push(`"${path}" must be one of: ${schema.enum.join(", ")}`);
       }
+      // A regex like ^\d{4}-\d{2}-\d{2}$ matches "2026-02-31" just fine —
+      // it checks digit shape, not calendar validity. format: "date"/
+      // "date-time" get an actual round-trip parse check on top.
+      if (schema.format === "date" && !isValidCalendarDate(value)) {
+        errors.push(`"${path}" is not a valid calendar date (YYYY-MM-DD)`);
+      }
+      if (schema.format === "date-time" && Number.isNaN(Date.parse(value))) {
+        errors.push(`"${path}" is not a valid date-time`);
+      }
       break;
     }
     case "boolean": {
@@ -76,4 +89,14 @@ export function validateAgainstSchema(schema: any, value: any, path = "value"): 
     // No schema.type (or an unrecognized one): nothing declared to check.
   }
   return errors;
+}
+
+// new Date("2026-02-31") does NOT return Invalid Date — the ISO parser
+// silently rolls it over to March 3rd (confirmed). Round-tripping back to
+// an ISO date string and comparing catches what a pattern regex and a bare
+// Date.parse both miss.
+function isValidCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
