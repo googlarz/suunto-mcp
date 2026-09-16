@@ -488,7 +488,7 @@ const tools = [
   {
     name: "push_strength_guide",
     description:
-      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide's one-lap-per-whole-exercise (too coarse for sets), each set here is its own step, and each rest period between sets is too — both advance on a lap-button press (the user decides when a set's reps are done, and when they're ready to lift again after rest). Rest shows a live count-up stopwatch, not a countdown — it never auto-advances, it's paced by the user, with restSec shown only as a target label. Since a button press is itself logged as a manual lap by the watch, one lap lands at the start of every set and every rest with no extra bookkeeping. Both set and rest steps also show a live heart-rate field, so effort and recovery are visible on-watch per segment, not just after the fact from lap data. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
+      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide's one-lap-per-whole-exercise (too coarse for sets), lapGranularity:'perSet' (default) makes each set its own step, and each rest period between sets too — both advance on a lap-button press by default (restMode:'stopwatch', the recommended default: the user decides when a set's reps are done, and when they're ready again after rest, paced by feel/HR not a clock). restMode:'countdown' instead auto-advances rest after restSec with no lap needed, for a hard timer. lapGranularity:'perExercise' instead gives one step per whole exercise like push_workout_guide, for a shorter Guide list at the cost of per-set lap data. Since a button press is itself logged as a manual lap by the watch, stopwatch mode lands one lap at the start of every set and every rest with no extra bookkeeping. All work/rest steps also show a live heart-rate field, so effort and recovery are visible on-watch per segment, not just after the fact from lap data. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -515,11 +515,23 @@ const tools = [
               restSec: {
                 type: "integer",
                 minimum: 1,
-                description: "Target rest in seconds, shown as a label next to a live count-up stopwatch — not auto-timed, the user laps when ready. Applied both between sets within this exercise and after its last set (before the next exercise).",
+                description: "Target rest in seconds. With restMode 'stopwatch' (default) it's shown as a label only, not enforced. With 'countdown' it's the actual auto-advance duration. Applied both between sets within this exercise and after its last set (before the next exercise).",
               },
             },
             required: ["name", "detail", "sets", "restSec"],
           },
+        },
+        restMode: {
+          type: "string",
+          enum: ["stopwatch", "countdown"],
+          default: "stopwatch",
+          description: "'stopwatch' (default, recommended): rest counts up, advances on a lap press — the user paces their own rest. 'countdown': rest counts down from restSec and auto-advances on its own, no lap needed.",
+        },
+        lapGranularity: {
+          type: "string",
+          enum: ["perSet", "perExercise"],
+          default: "perSet",
+          description: "'perSet' (default, recommended): one step per set plus one per rest, so laps bound every set/rest individually — needed to read per-set HR and duration from the synced workout. 'perExercise': one step per whole exercise instead, like push_workout_guide — shorter Guide list, coarser data.",
         },
         guideId: {
           type: "string",
@@ -714,7 +726,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           );
         }
         const zip = buildStrengthGuideZip(
-          { title: a.title, date: a.date, exercises: a.exercises },
+          {
+            title: a.title,
+            date: a.date,
+            exercises: a.exercises,
+            restMode: a.restMode,
+            lapGranularity: a.lapGranularity,
+          },
           cfg.appName,
         );
         const data = a.guideId

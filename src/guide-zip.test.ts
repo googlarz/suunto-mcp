@@ -93,3 +93,25 @@ test("buildStrengthGuideJson: set and rest steps both show a live heartRate fiel
     "rest step must include a heartRate field",
   );
 });
+
+test("buildStrengthGuideJson: restMode 'countdown' uses stepDurationCountdown + auto-advance instead of a stopwatch", () => {
+  const guide = buildStrengthGuideJson({ ...strengthPlan, restMode: "countdown" }, "app") as any;
+  const restStep = guide.steps[1];
+  assert.ok(
+    restStep.fields.some((f: any) => f.type === "stepDurationCountdown" && f.value === 90),
+    "rest step must show a countdown from restSec",
+  );
+  assert.ok(!restStep.fields.some((f: any) => f.type === "duration"));
+  assert.equal(restStep.transitions[0].condition.type, "stepDuration");
+  assert.equal(restStep.transitions[0].condition.value, 90);
+});
+
+test("buildStrengthGuideJson: lapGranularity 'perExercise' gives one step per exercise instead of per set", () => {
+  const guide = buildStrengthGuideJson({ ...strengthPlan, lapGranularity: "perExercise" }, "app") as any;
+  // Steps: [exercise1, rest, exercise2, DONE] — 4 total, not one per set.
+  assert.equal(guide.steps.length, 4);
+  const firstExercise = guide.steps[0];
+  assert.equal(firstExercise.title, "1/2");
+  assert.ok(firstExercise.fields.some((f: any) => f.type === "text" && f.value === "Bench Press"));
+  assert.equal(guide.steps[guide.steps.length - 1].title, "DONE");
+});
