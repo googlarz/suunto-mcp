@@ -346,3 +346,106 @@ export function buildIntervalGuideZip(plan: IntervalPlan, ownerAppName: string):
     { name: "icon.png", data: buildIconPng() },
   ]);
 }
+
+// ---------- Strength (resistance training) guides ----------
+
+export interface StrengthExercise {
+  name: string; // e.g. "Bench Press 15°"
+  detail: string; // per-set display string, e.g. "60kg x10"
+  sets: number; // 1-100
+  restSec: number; // rest duration in seconds, applied both between sets within this exercise AND after its last set (before the next exercise)
+}
+
+export interface StrengthPlan {
+  title: string;
+  date: string; // YYYY-MM-DD
+  exercises: StrengthExercise[];
+}
+
+// Neither push_workout_guide (one lap per whole exercise) nor
+// push_interval_guide (auto-advance only) fits resistance training: sets end
+// on a lap press (the user decides when their reps are done, duration
+// varies), but rest between sets should auto-advance on its own timer.
+//
+// Lap pattern: one lap at the start of every set AND every rest.
+// - Set step: createManualLap: true auto-logs a lap the instant the set
+//   starts (marking the previous rest's end), plus a manualLap transition
+//   so the user's lap press both advances to rest AND logs the set-end lap.
+// - Rest step: a stepDuration transition auto-advances into the next set
+//   after restSec — no button press, and no createManualLap here (the next
+//   set step's own createManualLap covers rest-end/next-set-start).
+// RepeatStep can't show a live "current iteration" counter, so sets are
+// unrolled as explicit steps (like buildGuideJson's exercises.forEach)
+// rather than wrapped in a RepeatStep.
+export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string) {
+  const exercises = plan.exercises;
+  const steps: Record<string, unknown>[] = [];
+  const totalExercises = exercises.length;
+
+  exercises.forEach((ex, exIndex) => {
+    const isLastExercise = exIndex === totalExercises - 1;
+
+    for (let set = 1; set <= ex.sets; set++) {
+      const isLastSet = set === ex.sets;
+      steps.push({
+        type: "fields",
+        title: `${set}/${ex.sets}`,
+        createManualLap: true,
+        fields: [
+          { type: "text", value: truncate(ex.name, 54) },
+          { type: "text", value: truncate(ex.detail, 54) },
+        ],
+        notification: { title: "SET", text: truncate(ex.name, 54) },
+        transitions: [{ condition: { type: "manualLap" } }],
+      });
+
+      if (!(isLastSet && isLastExercise)) {
+        const nextFieldText = isLastSet
+          ? `Next: ${exercises[exIndex + 1].name}`
+          : "Next set";
+        steps.push({
+          type: "fields",
+          title: `${exIndex + 1}/${totalExercises}`,
+          fields: [
+            { type: "stepDurationCountdown", value: ex.restSec },
+            { type: "text", value: truncate(nextFieldText, 54) },
+          ],
+          transitions: [{ condition: { type: "stepDuration", value: ex.restSec } }],
+        });
+      }
+    }
+  });
+
+  steps.push({
+    type: "fields",
+    title: "DONE",
+    fields: [{ type: "text", value: "Session complete" }],
+  });
+
+  return {
+    type: "sequence",
+    name: plan.title,
+    description: `${totalExercises} exercise${totalExercises === 1 ? "" : "s"}`,
+    shortDescription: truncate(plan.title, 23),
+    localDate: plan.date,
+    usage: "workout",
+    owner: ownerAppName,
+    steps,
+  };
+}
+
+export function buildStrengthGuideZip(plan: StrengthPlan, ownerAppName: string): Buffer {
+  const manifest = {
+    name: plan.title,
+    type: "sequence",
+    owner: ownerAppName,
+    description: `Strength plan for ${plan.date}`,
+  };
+  const guide = buildStrengthGuideJson(plan, ownerAppName);
+
+  return buildZip([
+    { name: "manifest.json", data: Buffer.from(JSON.stringify(manifest), "utf8") },
+    { name: "guide.json", data: Buffer.from(JSON.stringify(guide), "utf8") },
+    { name: "icon.png", data: buildIconPng() },
+  ]);
+}

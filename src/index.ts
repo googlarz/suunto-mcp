@@ -23,7 +23,7 @@ import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
-import { buildGuideZip, buildIntervalGuideZip } from "./guide-zip.js";
+import { buildGuideZip, buildIntervalGuideZip, buildStrengthGuideZip } from "./guide-zip.js";
 import { generateDigest } from "./daily-digest.js";
 import { validateAgainstSchema } from "./schema-validate.js";
 
@@ -486,6 +486,50 @@ const tools = [
     },
   },
   {
+    name: "push_strength_guide",
+    description:
+      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Combines push_workout_guide and push_interval_guide: unlike push_workout_guide's one-lap-per-whole-exercise (too coarse for sets), each set here is its own step that ends on a lap press since reps take a variable amount of time; unlike push_interval_guide's auto-advance-only segments, rest periods between sets auto-advance on their own timer so the user doesn't have to lap for those. Each set step logs a lap the instant it begins (createManualLap) and advances to rest on the next lap press (manualLap transition); each rest step auto-advances into the next set after restSec (stepDuration transition), so one lap lands at the start of every set and every rest. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          minLength: 1,
+          description: "Short session name shown in the Suunto app, e.g. 'Push A'.",
+        },
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          description: "Session date YYYY-MM-DD.",
+        },
+        exercises: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1, description: "Exercise name, e.g. 'Bench Press 15°'." },
+              detail: { type: "string", minLength: 1, description: "Per-set display string, e.g. '60kg x10'." },
+              sets: { type: "integer", minimum: 1, maximum: 100, description: "Number of sets for this exercise." },
+              restSec: {
+                type: "integer",
+                minimum: 1,
+                description: "Rest duration in seconds, applied both between sets within this exercise and after its last set (before the next exercise).",
+              },
+            },
+            required: ["name", "detail", "sets", "restSec"],
+          },
+        },
+        guideId: {
+          type: "string",
+          description: "If provided, updates this existing guide instead of creating a new one.",
+        },
+      },
+      required: ["title", "date", "exercises"],
+    },
+  },
+  {
     name: "get_upload_status",
     description:
       "Polls the processing status of a workout upload initiated by upload_workout. Returns status (e.g. 'Queued', 'Processing', 'Processed', 'Error') and the workoutKey once processing completes. Use the returned workoutKey with get_workout for full detail.",
@@ -649,6 +693,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
         const zip = buildIntervalGuideZip(
           { title: a.title, date: a.date, blocks: a.blocks },
+          cfg.appName,
+        );
+        const data = a.guideId
+          ? await suunto.updateGuide(a.guideId, zip)
+          : await suunto.createGuide(zip);
+        return text(
+          JSON.stringify({
+            ...data,
+            nextStep:
+              "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
+          }),
+        );
+      }
+      case "push_strength_guide": {
+        if (!cfg.appName) {
+          return text(
+            "Error: SUUNTO_APP_NAME is not set. Add it to .env with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
+            true,
+          );
+        }
+        const zip = buildStrengthGuideZip(
+          { title: a.title, date: a.date, exercises: a.exercises },
           cfg.appName,
         );
         const data = a.guideId
