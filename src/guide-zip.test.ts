@@ -73,3 +73,17 @@ test("buildStrengthGuideJson: no rest step after the final set of the final exer
   assert.equal(last.createManualLap, true, "must be the final set step, not a rest step");
   assert.equal(guide.steps[guide.steps.length - 1].title, "DONE");
 });
+
+test("buildStrengthGuideJson: set and rest steps both show a live heartRate field", () => {
+  const guide = buildStrengthGuideJson(strengthPlan, "app") as any;
+  const setStep = guide.steps[0];
+  const restStep = guide.steps[1];
+  assert.ok(
+    setStep.fields.some((f: any) => f.type === "heartRate"),
+    "set step must include a heartRate field",
+  );
+  assert.ok(
+    restStep.fields.some((f: any) => f.type === "heartRate"),
+    "rest step must include a heartRate field",
+  );
+});

@@ -377,6 +377,15 @@ export interface StrengthPlan {
 // RepeatStep can't show a live "current iteration" counter, so sets are
 // unrolled as explicit steps (like buildGuideJson's exercises.forEach)
 // rather than wrapped in a RepeatStep.
+//
+// Field layout: every step keeps to 3 fields (well under the 4-5 max and
+// the "fewer fields when intense" guidance), ordered by priority — the
+// schema gives the first field the best placement/biggest size. A live
+// heartRate field rides along on both set and rest steps (the whole point
+// of per-set/per-rest laps is reading HR per segment), but it's ordered
+// last on sets (glance-only, not what's being acted on) and second on rest
+// (a recovery check, but the countdown telling you when to go is what
+// actually matters there).
 export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string) {
   const exercises = plan.exercises;
   const steps: Record<string, unknown>[] = [];
@@ -391,9 +400,13 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
         type: "fields",
         title: `${set}/${ex.sets}`,
         createManualLap: true,
+        // Field order is priority order (first = best placement/biggest
+        // size per the schema): what to do first (name, target), live HR
+        // last — useful to glance at, not the thing being acted on.
         fields: [
           { type: "text", value: truncate(ex.name, 54) },
           { type: "text", value: truncate(ex.detail, 54) },
+          { type: "heartRate", title: "HR" },
         ],
         notification: { title: "SET", text: truncate(ex.name, 54) },
         transitions: [{ condition: { type: "manualLap" } }],
@@ -406,8 +419,11 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
         steps.push({
           type: "fields",
           title: `${exIndex + 1}/${totalExercises}`,
+          // Timer first (the one thing that matters — when does rest end),
+          // then a recovery-HR glance, then the lowest-priority context text.
           fields: [
             { type: "stepDurationCountdown", value: ex.restSec },
+            { type: "heartRate", title: "HR" },
             { type: "text", value: truncate(nextFieldText, 54) },
           ],
           transitions: [{ condition: { type: "stepDuration", value: ex.restSec } }],
