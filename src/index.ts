@@ -488,7 +488,7 @@ const tools = [
   {
     name: "push_strength_guide",
     description:
-      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Combines push_workout_guide and push_interval_guide: unlike push_workout_guide's one-lap-per-whole-exercise (too coarse for sets), each set here is its own step that ends on a lap press since reps take a variable amount of time; unlike push_interval_guide's auto-advance-only segments, rest periods between sets auto-advance on their own timer so the user doesn't have to lap for those. Each set step logs a lap the instant it begins (createManualLap) and advances to rest on the next lap press (manualLap transition); each rest step auto-advances into the next set after restSec (stepDuration transition), so one lap lands at the start of every set and every rest. Both set and rest steps also show a live heart-rate field, so effort and recovery are visible on-watch per segment, not just after the fact from lap data. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
+      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide's one-lap-per-whole-exercise (too coarse for sets), each set here is its own step, and each rest period between sets is too — both advance on a lap-button press (the user decides when a set's reps are done, and when they're ready to lift again after rest). Rest shows a live count-up stopwatch, not a countdown — it never auto-advances, it's paced by the user, with restSec shown only as a target label. Since a button press is itself logged as a manual lap by the watch, one lap lands at the start of every set and every rest with no extra bookkeeping. Both set and rest steps also show a live heart-rate field, so effort and recovery are visible on-watch per segment, not just after the fact from lap data. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -515,7 +515,7 @@ const tools = [
               restSec: {
                 type: "integer",
                 minimum: 1,
-                description: "Rest duration in seconds, applied both between sets within this exercise and after its last set (before the next exercise).",
+                description: "Target rest in seconds, shown as a label next to a live count-up stopwatch — not auto-timed, the user laps when ready. Applied both between sets within this exercise and after its last set (before the next exercise).",
               },
             },
             required: ["name", "detail", "sets", "restSec"],

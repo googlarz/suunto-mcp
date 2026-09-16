@@ -38,19 +38,22 @@ const strengthPlan = {
   ],
 };
 
-test("buildStrengthGuideJson: a set step has createManualLap and a manualLap transition", () => {
+test("buildStrengthGuideJson: a set step advances on a manualLap transition and has no createManualLap", () => {
   const guide = buildStrengthGuideJson(strengthPlan, "app") as any;
   const setStep = guide.steps[0];
-  assert.equal(setStep.createManualLap, true);
   assert.equal(setStep.transitions[0].condition.type, "manualLap");
+  assert.equal(setStep.createManualLap, undefined);
 });
 
-test("buildStrengthGuideJson: a rest step has a stepDuration transition matching restSec and no createManualLap", () => {
+test("buildStrengthGuideJson: a rest step is a stopwatch (not a countdown) that advances on a manualLap transition", () => {
   const guide = buildStrengthGuideJson(strengthPlan, "app") as any;
   const restStep = guide.steps[1];
-  assert.equal(restStep.transitions[0].condition.type, "stepDuration");
-  assert.equal(restStep.transitions[0].condition.value, 90);
+  assert.equal(restStep.transitions[0].condition.type, "manualLap");
   assert.equal(restStep.createManualLap, undefined);
+  const durationField = restStep.fields.find((f: any) => f.type === "duration");
+  assert.ok(durationField, "rest step must show a count-up duration field, not stepDurationCountdown");
+  assert.equal(durationField.window, "step");
+  assert.ok(!restStep.fields.some((f: any) => f.type === "stepDurationCountdown"));
 });
 
 test("buildStrengthGuideJson: set step title is the per-exercise set counter, not a global counter", () => {
@@ -70,7 +73,10 @@ test("buildStrengthGuideJson: no rest step after the final set of the final exer
   const guide = buildStrengthGuideJson(strengthPlan, "app") as any;
   const last = guide.steps[guide.steps.length - 2]; // step before DONE
   assert.equal(last.title, "2/2");
-  assert.equal(last.createManualLap, true, "must be the final set step, not a rest step");
+  assert.ok(
+    last.fields.some((f: any) => f.type === "text" && f.value === "Overhead Press"),
+    "must be the final set step (shows the exercise name), not a rest step",
+  );
   assert.equal(guide.steps[guide.steps.length - 1].title, "DONE");
 });
 
