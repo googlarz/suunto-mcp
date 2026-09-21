@@ -488,7 +488,7 @@ const tools = [
   {
     name: "push_strength_guide",
     description:
-      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide's one-lap-per-whole-exercise (too coarse for sets), lapGranularity:'perSet' (default) makes each set its own step, and each rest period between sets too — both advance on a lap-button press by default (restMode:'stopwatch', the recommended default: the user decides when a set's reps are done, and when they're ready again after rest, paced by feel/HR not a clock). restMode:'countdown' instead auto-advances rest after restSec with no lap needed, for a hard timer. lapGranularity:'perExercise' instead gives one step per whole exercise like push_workout_guide, for a shorter Guide list at the cost of per-set lap data. Since a button press is itself logged as a manual lap by the watch, stopwatch mode lands one lap at the start of every set and every rest with no extra bookkeeping. All work/rest steps also show a live heart-rate field, so effort and recovery are visible on-watch per segment, not just after the fact from lap data. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
+      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Session flow: before every exercise (the first one and each one after another) a prep step — a self-paced count-up stopwatch showing the exercise's weight/sets (detail), its name and live HR, so the user can walk to the station, set up the weight and decide how long to take by HR; a lap press starts the exercise. Then, with lapGranularity:'perSet' (default), each set is its own step (titled with the set counter, e.g. 2/3) that ends on a lap press when the reps are done, and each rest between sets is its own step showing the same set counter plus 'Next: set 3/3'. restMode:'countdown' (default) counts rest down from restSec and auto-advances into the next set with a vibration; restMode:'stopwatch' counts up and waits for a lap press instead. lapGranularity:'perExercise' gives one step per whole exercise (after its prep) like push_workout_guide, with no between-set rests, for a shorter Guide list at the cost of per-set lap data. Every prep, set and rest lands in its own lap (lap presses are logged as manual laps by the watch; sets after an auto-advanced countdown rest get an automatic lap), so per-set and per-rest HR and duration can be read from the synced workout, and every step also shows live heart rate on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -510,12 +510,12 @@ const tools = [
             type: "object",
             properties: {
               name: { type: "string", minLength: 1, description: "Exercise name, e.g. 'Bench Press 15°'." },
-              detail: { type: "string", minLength: 1, description: "Per-set display string, e.g. '60kg x10'." },
+              detail: { type: "string", minLength: 1, description: "Display string shown on the exercise's set steps and on the prep screen before it — include weight and sets, e.g. '60kg 3x10'." },
               sets: { type: "integer", minimum: 1, maximum: 100, description: "Number of sets for this exercise." },
               restSec: {
                 type: "integer",
                 minimum: 1,
-                description: "Target rest in seconds. With restMode 'stopwatch' (default) it's shown as a label only, not enforced. With 'countdown' it's the actual auto-advance duration. Applied both between sets within this exercise and after its last set (before the next exercise).",
+                description: "Rest between sets within this exercise, in seconds. With restMode 'countdown' (default) it's the countdown and auto-advance duration; with 'stopwatch' it's shown as a target label only. Not applied between exercises — that's the self-paced prep stopwatch.",
               },
             },
             required: ["name", "detail", "sets", "restSec"],
@@ -523,9 +523,9 @@ const tools = [
         },
         restMode: {
           type: "string",
-          enum: ["stopwatch", "countdown"],
-          default: "stopwatch",
-          description: "'stopwatch' (default, recommended): rest counts up, advances on a lap press — the user paces their own rest. 'countdown': rest counts down from restSec and auto-advances on its own, no lap needed.",
+          enum: ["countdown", "stopwatch"],
+          default: "countdown",
+          description: "Rest between sets. 'countdown' (default): counts down from restSec and auto-advances into the next set. 'stopwatch': counts up and waits for a lap press — the user paces it. Has no effect with lapGranularity 'perExercise' (no between-set rests). Before/between exercises is always a self-paced stopwatch.",
         },
         lapGranularity: {
           type: "string",

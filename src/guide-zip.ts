@@ -351,16 +351,17 @@ export function buildIntervalGuideZip(plan: IntervalPlan, ownerAppName: string):
 
 export interface StrengthExercise {
   name: string; // e.g. "Bench Press 15°"
-  detail: string; // per-set display string, e.g. "60kg x10"
+  detail: string; // display string, e.g. "60kg 3x10" — shown on set steps and on the prep screen before the exercise, so include weight and sets
   sets: number; // 1-100
-  restSec: number; // target rest between sets, shown as a label. Applied both between sets within this exercise AND after its last set (before the next exercise)
+  restSec: number; // rest between sets within this exercise. Not applied between exercises — that's the self-paced prep stopwatch
 }
 
-// "stopwatch" (default, recommended): rest counts up, the user laps when
-// ready — matches how lifters actually rest (by feel/HR, not a fixed
-// number). "countdown": rest counts down from restSec and auto-advances
-// with no lap press needed, for users who want a hard timer.
-export type StrengthRestMode = "stopwatch" | "countdown";
+// Rest BETWEEN SETS only (before an exercise and between exercises is
+// always a self-paced prep stopwatch, see buildPrepStep).
+// "countdown" (default): rest counts down from restSec and auto-advances
+// into the next set with a vibration, hands-free.
+// "stopwatch": rest counts up, the user laps when ready.
+export type StrengthRestMode = "countdown" | "stopwatch";
 
 // "perSet" (default, recommended): one step per set and one per rest, so
 // laps bound every individual set and rest — needed to read HR/duration
@@ -369,13 +370,14 @@ export type StrengthRestMode = "stopwatch" | "countdown";
 // (all sets folded into ex.detail, e.g. "60kg 3x10"), like
 // push_workout_guide — coarser data, but a shorter Guide list on watches
 // where scrolling through every set is more friction than it's worth.
+// (No between-set rests in this mode, so restMode has no effect.)
 export type StrengthLapGranularity = "perSet" | "perExercise";
 
 export interface StrengthPlan {
   title: string;
   date: string; // YYYY-MM-DD
   exercises: StrengthExercise[];
-  restMode?: StrengthRestMode; // default "stopwatch"
+  restMode?: StrengthRestMode; // default "countdown"
   lapGranularity?: StrengthLapGranularity; // default "perSet"
 }
 
@@ -411,37 +413,70 @@ function buildRestStep(
   };
 }
 
+// Before every exercise — the very first one and each one after another
+// exercise — the user needs time to walk to the station and set up the
+// weight, and decides how long that takes by looking at HR. So this is
+// always a self-paced stopwatch (never a countdown), advanced by a lap
+// press, and shows what they're setting up for: weight/sets and name of the
+// exercise coming next. Timer/HR are numbers so the watch gives them the
+// big slots; the two texts are cropped first if the screen is tight.
+function buildPrepStep(
+  ex: StrengthExercise,
+  exIndex: number,
+  totalExercises: number,
+): Record<string, unknown> {
+  return {
+    type: "fields",
+    title: `${exIndex + 1}/${totalExercises}`,
+    fields: [
+      { type: "duration", window: "step" },
+      { type: "heartRate", title: "HR" },
+      { type: "text", value: truncate(ex.detail, 54) },
+      { type: "text", value: truncate(ex.name, 54) },
+    ],
+    transitions: [{ condition: { type: "manualLap" } }],
+  };
+}
+
 // Neither push_workout_guide (one lap per whole exercise) nor
 // push_interval_guide (auto-advance only) fits resistance training on its
-// own — this tool sits between them and lets the caller pick per plan:
-// - restMode "stopwatch" (default): both sets AND rest end on a lap press,
-//   the user decides when their reps are done and when they're ready again.
-//   Every step boundary is then already a manual lap from the button press
-//   itself (confirmed behavior, also relied on by buildGuideJson's REST
-//   step) — no createManualLap needed anywhere, since nothing auto-advances.
-// - restMode "countdown": rest auto-advances after restSec like
-//   push_interval_guide's segments, no lap needed for rest specifically.
+// own — this tool sits between them. Session flow:
+//   prep (stopwatch) → set 1 → rest → set 2 → ... → last set
+//   → prep for the next exercise (stopwatch) → set 1 → ... → DONE
+// - Prep, set: end on a lap press (the user decides when they're set up
+//   and when their reps are done). The press is itself logged as a manual
+//   lap by the watch (confirmed behavior, also relied on by
+//   buildGuideJson's REST step), so those boundaries need no bookkeeping.
+// - Rest between sets, restMode "countdown" (default): auto-advances after
+//   restSec with no button press, so nothing marks the next set's start —
+//   that set step gets createManualLap: true (a lap the instant it begins)
+//   to keep every set and rest in its own lap. restMode "stopwatch": ends
+//   on a lap press like the others, no createManualLap needed.
 // - lapGranularity "perSet" (default): sets are unrolled as explicit steps
 //   (RepeatStep can't show a live "current iteration" counter, so this
 //   can't use RepeatStep — same as buildGuideJson's exercises.forEach).
-// - lapGranularity "perExercise": one step per exercise, like
-//   buildGuideJson, just with the same field layout/restMode choice.
+// - lapGranularity "perExercise": one work step per exercise after its
+//   prep, like buildGuideJson; no between-set rests, so restMode is moot.
 //
-// Field layout: every step keeps to 3 fields (well under the 4-5 max and
-// the "fewer fields when intense" guidance), ordered by priority — the
-// schema gives the first field the best placement/biggest size. A live
-// heartRate field rides along on both set/exercise and rest steps, ordered
-// last on the work step (glance-only, not what's being acted on) and
-// second on rest (a recovery check, secondary to the timer itself).
+// Set counter: set steps are titled "2/3" and so are the rests after them
+// (rest after set 2 of 3, with "Next: set 3/3" spelled out in its text);
+// prep steps carry the exercise counter ("4/7") instead.
+//
+// Field layout: work and rest steps keep to 3 fields, prep to 4 (all well
+// inside the 4-5 max; prep is the low-intensity moment, so it can afford
+// the extra field), ordered by priority — the schema gives the first field
+// the best placement/biggest size. A live heartRate field rides along on
+// every step: glance-only on the work step (ordered last), a
+// recovery/readiness check on rest and prep (ordered second).
 export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string) {
   const exercises = plan.exercises;
   const steps: Record<string, unknown>[] = [];
   const totalExercises = exercises.length;
-  const restMode = plan.restMode ?? "stopwatch";
+  const restMode = plan.restMode ?? "countdown";
   const lapGranularity = plan.lapGranularity ?? "perSet";
 
   exercises.forEach((ex, exIndex) => {
-    const isLastExercise = exIndex === totalExercises - 1;
+    steps.push(buildPrepStep(ex, exIndex, totalExercises));
 
     if (lapGranularity === "perExercise") {
       steps.push({
@@ -452,22 +487,15 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
           { type: "text", value: truncate(ex.detail, 54) },
           { type: "heartRate", title: "HR" },
         ],
-        notification: { title: "NEXT", text: truncate(ex.name, 54) },
+        notification: { title: "GO", text: truncate(ex.name, 54) },
         transitions: [{ condition: { type: "manualLap" } }],
       });
-
-      if (!isLastExercise) {
-        const next = exercises[exIndex + 1];
-        steps.push(
-          buildRestStep(ex.restSec, `Next: ${next.name}`, `${exIndex + 1}/${totalExercises}`, restMode),
-        );
-      }
       return;
     }
 
     for (let set = 1; set <= ex.sets; set++) {
       const isLastSet = set === ex.sets;
-      steps.push({
+      const step: Record<string, unknown> = {
         type: "fields",
         title: `${set}/${ex.sets}`,
         // Field order is priority order (first = best placement/biggest
@@ -480,14 +508,15 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
         ],
         notification: { title: "SET", text: truncate(ex.name, 54) },
         transitions: [{ condition: { type: "manualLap" } }],
-      });
+      };
+      // Set 1 follows a prep stopwatch that ended on a lap press; later
+      // sets follow a rest, which only needs the extra lap if it auto-advanced.
+      if (set > 1 && restMode === "countdown") step.createManualLap = true;
+      steps.push(step);
 
-      if (!(isLastSet && isLastExercise)) {
-        const nextFieldText = isLastSet
-          ? `Next: ${exercises[exIndex + 1].name}`
-          : "Next set";
+      if (!isLastSet) {
         steps.push(
-          buildRestStep(ex.restSec, nextFieldText, `${exIndex + 1}/${totalExercises}`, restMode),
+          buildRestStep(ex.restSec, `Next: set ${set + 1}/${ex.sets}`, `${set}/${ex.sets}`, restMode),
         );
       }
     }
