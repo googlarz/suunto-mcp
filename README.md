@@ -562,6 +562,9 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `get_upload_status` | Check whether an upload finished processing |
 | `push_workout_guide` | Push a structured workout (exercises, weights, rest, notifications) as a SuuntoPlus Guide — requires `SUUNTO_APP_NAME` |
 | `push_interval_guide` | Push an auto-advancing interval/cardio guide (timed or distance-based segments, target HR ranges) — requires `SUUNTO_APP_NAME` |
+| `push_strength_guide` | Push a per-set strength session (prep stopwatch, set/rest lap tracking, configurable rest mode) — requires `SUUNTO_APP_NAME` |
+| `list_guides` | List all SuuntoPlus Guides on your account |
+| `delete_guide` | Permanently delete a guide by id |
 
 **Other**
 
