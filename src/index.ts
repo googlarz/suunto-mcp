@@ -542,6 +542,28 @@ const tools = [
     },
   },
   {
+    name: "list_guides",
+    description:
+      "Returns all SuuntoPlus Guides (from push_workout_guide/push_interval_guide/push_strength_guide) on the user's account, newest first. Each item includes id, name, description, owner, localDate, and usage. Use the id with delete_guide, or with push_*_guide's guideId param to update an existing guide instead of creating a new one. Read-only.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "delete_guide",
+    description:
+      "Permanently deletes one SuuntoPlus Guide from the user's account by id. Use list_guides to find the id. This removes it from the Suunto app / apizone catalogue; it does not reach into the watch to un-pin a copy already synced there. Write operation (irreversible).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        guideId: {
+          type: "string",
+          minLength: 1,
+          description: "Guide id, from list_guides or from a previous push_*_guide response.",
+        },
+      },
+      required: ["guideId"],
+    },
+  },
+  {
     name: "get_upload_status",
     description:
       "Polls the processing status of a workout upload initiated by upload_workout. Returns status (e.g. 'Queued', 'Processing', 'Processed', 'Error') and the workoutKey once processing completes. Use the returned workoutKey with get_workout for full detail.",
@@ -745,6 +767,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
               "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
           }),
         );
+      }
+      case "list_guides": {
+        const data = await suunto.listGuides();
+        return text(JSON.stringify(data));
+      }
+      case "delete_guide": {
+        await suunto.deleteGuide(a.guideId);
+        return text(JSON.stringify({ ok: true, deletedGuideId: a.guideId }));
       }
       case "get_upload_status": {
         const data = await suunto.getUploadStatus(a.uploadId);
