@@ -387,15 +387,17 @@ function buildRestStep(
   stepTitle: string,
   restMode: StrengthRestMode,
 ): Record<string, unknown> {
-  // Timer/stopwatch first (the one thing that matters — when to go again),
-  // then a recovery-HR glance, then context text as the lowest priority.
+  // HR first (guaranteed the best slot/most likely to actually render — a
+  // text field ahead of it was observed on-device to push HR off screen
+  // entirely, not just get cropped as the docs describe for long text),
+  // then the timer, then context text as the lowest priority.
   if (restMode === "countdown") {
     return {
       type: "fields",
       title: stepTitle,
       fields: [
-        { type: "stepDurationCountdown", value: restSec },
         { type: "heartRate", title: "HR" },
+        { type: "stepDurationCountdown", value: restSec },
         { type: "text", value: truncate(nextFieldText, 54) },
       ],
       transitions: [{ condition: { type: "stepDuration", value: restSec } }],
@@ -405,8 +407,8 @@ function buildRestStep(
     type: "fields",
     title: stepTitle,
     fields: [
-      { type: "duration", window: "step" },
       { type: "heartRate", title: "HR" },
+      { type: "duration", window: "step" },
       { type: "text", value: truncate(`${restSec}s target · ${nextFieldText}`, 54) },
     ],
     transitions: [{ condition: { type: "manualLap" } }],
@@ -418,8 +420,11 @@ function buildRestStep(
 // weight, and decides how long that takes by looking at HR. So this is
 // always a self-paced stopwatch (never a countdown), advanced by a lap
 // press, and shows what they're setting up for: weight/sets and name of the
-// exercise coming next. Timer/HR are numbers so the watch gives them the
-// big slots; the two texts are cropped first if the screen is tight.
+// exercise coming next. HR first (see buildRestStep's note — a text field
+// ahead of a number field was observed on-device to hide the number
+// entirely), then the stopwatch, then name+detail combined into one
+// 2-line text field (\n) rather than two separate text fields, to keep
+// this to 3 fields total instead of 4.
 function buildPrepStep(
   ex: StrengthExercise,
   exIndex: number,
@@ -429,10 +434,9 @@ function buildPrepStep(
     type: "fields",
     title: `${exIndex + 1}/${totalExercises}`,
     fields: [
-      { type: "duration", window: "step" },
       { type: "heartRate", title: "HR" },
-      { type: "text", value: truncate(ex.detail, 54) },
-      { type: "text", value: truncate(ex.name, 54) },
+      { type: "duration", window: "step" },
+      { type: "text", value: truncate(`${ex.detail}\n${ex.name}`, 54) },
     ],
     transitions: [{ condition: { type: "manualLap" } }],
   };
@@ -462,12 +466,14 @@ function buildPrepStep(
 // (rest after set 2 of 3, with "Next: set 3/3" spelled out in its text);
 // prep steps carry the exercise counter ("4/7") instead.
 //
-// Field layout: work and rest steps keep to 3 fields, prep to 4 (all well
-// inside the 4-5 max; prep is the low-intensity moment, so it can afford
-// the extra field), ordered by priority — the schema gives the first field
-// the best placement/biggest size. A live heartRate field rides along on
-// every step: glance-only on the work step (ordered last), a
-// recovery/readiness check on rest and prep (ordered second).
+// Field layout: 2 fields on the work step, 3 on rest/prep (well inside the
+// 4-5 max), ordered by priority — the schema gives the first field the
+// best placement/biggest size. heartRate is always first: confirmed
+// on-device that a text field ahead of it can hide it entirely rather than
+// just cropping (unlike the docs' description of long text cropping other
+// fields), so HR gets the guaranteed slot on every step. Name/detail
+// (and detail/name on prep) are combined into one \n-joined text field
+// instead of two separate ones, to keep total field counts low.
 export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string) {
   const exercises = plan.exercises;
   const steps: Record<string, unknown>[] = [];
@@ -483,9 +489,8 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
         type: "fields",
         title: `${exIndex + 1}/${totalExercises}`,
         fields: [
-          { type: "text", value: truncate(ex.name, 54) },
-          { type: "text", value: truncate(ex.detail, 54) },
           { type: "heartRate", title: "HR" },
+          { type: "text", value: truncate(`${ex.name}\n${ex.detail}`, 54) },
         ],
         notification: { title: "GO", text: truncate(ex.name, 54) },
         transitions: [{ condition: { type: "manualLap" } }],
@@ -498,13 +503,13 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
       const step: Record<string, unknown> = {
         type: "fields",
         title: `${set}/${ex.sets}`,
-        // Field order is priority order (first = best placement/biggest
-        // size per the schema): what to do first (name, target), live HR
-        // last — useful to glance at, not the thing being acted on.
+        // HR first — a text field ahead of it was observed on-device to
+        // hide it entirely, not just crop it as the docs describe for long
+        // text (see buildRestStep). Name+detail combined into one 2-line
+        // text field (\n) instead of two separate fields.
         fields: [
-          { type: "text", value: truncate(ex.name, 54) },
-          { type: "text", value: truncate(ex.detail, 54) },
           { type: "heartRate", title: "HR" },
+          { type: "text", value: truncate(`${ex.name}\n${ex.detail}`, 54) },
         ],
         notification: { title: "SET", text: truncate(ex.name, 54) },
         transitions: [{ condition: { type: "manualLap" } }],

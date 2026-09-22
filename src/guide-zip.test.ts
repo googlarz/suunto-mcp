@@ -48,10 +48,9 @@ test("buildStrengthGuideJson: every exercise starts with a self-paced prep stopw
   ] as const) {
     const prep = guide.steps[i];
     assert.equal(prep.title, title, "prep carries the exercise counter");
-    assert.deepEqual(prep.fields[0], { type: "duration", window: "step" });
-    assert.ok(prep.fields.some((f: any) => f.type === "heartRate"));
-    assert.ok(prep.fields.some((f: any) => f.type === "text" && f.value === detail));
-    assert.ok(prep.fields.some((f: any) => f.type === "text" && f.value === name));
+    assert.deepEqual(prep.fields[0], { type: "heartRate", title: "HR" }, "HR must be first so it actually renders");
+    assert.ok(prep.fields.some((f: any) => f.type === "duration" && f.window === "step"));
+    assert.ok(prep.fields.some((f: any) => f.type === "text" && f.value === `${detail}\n${name}`));
     assert.equal(prep.transitions[0].condition.type, "manualLap");
     assert.ok(!prep.fields.some((f: any) => f.type === "stepDurationCountdown"), "prep is never a countdown");
   }
@@ -60,7 +59,8 @@ test("buildStrengthGuideJson: every exercise starts with a self-paced prep stopw
 test("buildStrengthGuideJson: no countdown between exercises — the step before the next exercise's first set is its prep stopwatch", () => {
   const guide = buildStrengthGuideJson(strengthPlan, "app") as any;
   assert.equal(guide.steps[5].title, "3/3", "last set of exercise 1");
-  assert.equal(guide.steps[6].fields[0].type, "duration");
+  assert.equal(guide.steps[6].fields[0].type, "heartRate");
+  assert.ok(guide.steps[6].fields.some((f: any) => f.type === "duration"));
   assert.equal(guide.steps[7].title, "1/2", "first set of exercise 2");
 });
 
@@ -104,7 +104,7 @@ test("buildStrengthGuideJson: no rest step after the final set of the final exer
   const last = guide.steps[guide.steps.length - 2]; // step before DONE
   assert.equal(last.title, "2/2");
   assert.ok(
-    last.fields.some((f: any) => f.type === "text" && f.value === "Overhead Press"),
+    last.fields.some((f: any) => f.type === "text" && f.value === "Overhead Press\n40kg 2x8"),
     "must be the final set step (shows the exercise name), not a rest step",
   );
   assert.equal(guide.steps[guide.steps.length - 1].title, "DONE");
@@ -123,7 +123,8 @@ test("buildStrengthGuideJson: prep, set and rest steps all show a live heartRate
 test("buildStrengthGuideJson: restMode 'stopwatch' counts up, advances on a lap press, and needs no createManualLap", () => {
   const guide = buildStrengthGuideJson({ ...strengthPlan, restMode: "stopwatch" }, "app") as any;
   const restStep = guide.steps[2];
-  assert.deepEqual(restStep.fields[0], { type: "duration", window: "step" });
+  assert.deepEqual(restStep.fields[0], { type: "heartRate", title: "HR" }, "HR must be first so it actually renders");
+  assert.ok(restStep.fields.some((f: any) => f.type === "duration" && f.window === "step"));
   assert.ok(!restStep.fields.some((f: any) => f.type === "stepDurationCountdown"));
   assert.equal(restStep.transitions[0].condition.type, "manualLap");
   assert.equal(guide.steps[3].createManualLap, undefined, "the lap press already marks the set start");
@@ -133,8 +134,10 @@ test("buildStrengthGuideJson: lapGranularity 'perExercise' gives prep + one step
   const guide = buildStrengthGuideJson({ ...strengthPlan, lapGranularity: "perExercise" }, "app") as any;
   // [prep1, ex1, prep2, ex2, DONE]
   assert.equal(guide.steps.length, 5);
-  assert.equal(guide.steps[0].fields[0].type, "duration");
-  assert.ok(guide.steps[1].fields.some((f: any) => f.type === "text" && f.value === "Bench Press"));
-  assert.equal(guide.steps[2].fields[0].type, "duration");
+  assert.equal(guide.steps[0].fields[0].type, "heartRate");
+  assert.ok(guide.steps[0].fields.some((f: any) => f.type === "duration"));
+  assert.equal(guide.steps[1].fields[0].type, "heartRate", "HR must be first on the exercise step too");
+  assert.ok(guide.steps[1].fields.some((f: any) => f.type === "text" && f.value === "Bench Press\n60kg 3x10"));
+  assert.equal(guide.steps[2].fields[0].type, "heartRate");
   assert.equal(guide.steps[guide.steps.length - 1].title, "DONE");
 });
