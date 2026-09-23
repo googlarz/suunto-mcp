@@ -56,6 +56,31 @@ test("buildStrengthGuideJson: every exercise starts with a self-paced prep stopw
   }
 });
 
+test("buildStrengthGuideJson: prep shows plates instead of detail when given; falls back to detail when absent", () => {
+  const planWithPlates = {
+    ...strengthPlan,
+    exercises: [
+      { ...strengthPlan.exercises[0], plates: "2x20+1x5/side" },
+      strengthPlan.exercises[1], // no plates — e.g. a dumbbell exercise
+    ],
+  };
+  const guide = buildStrengthGuideJson(planWithPlates, "app") as any;
+  assert.ok(
+    guide.steps[0].fields.some((f: any) => f.type === "text" && f.value === "2x20+1x5/side\nBench Press"),
+    "prep uses plates over detail when given",
+  );
+  assert.ok(
+    !guide.steps[0].fields.some((f: any) => f.type === "text" && f.value.includes("60kg 3x10")),
+    "raw detail must not also appear on prep once plates is given",
+  );
+  assert.ok(
+    guide.steps[6].fields.some((f: any) => f.type === "text" && f.value === "40kg 2x8\nOverhead Press"),
+    "prep falls back to detail when plates is omitted",
+  );
+  // Set steps are unaffected by plates — still show detail, not plate math.
+  assert.ok(guide.steps[1].fields.some((f: any) => f.type === "text" && f.value.includes("60kg 3x10")));
+});
+
 test("buildStrengthGuideJson: no countdown between exercises — the step before the next exercise's first set is its prep stopwatch", () => {
   const guide = buildStrengthGuideJson(strengthPlan, "app") as any;
   assert.equal(guide.steps[5].title, "3/3", "last set of exercise 1");

@@ -212,6 +212,15 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) : text;
 }
 
+// Confirmed (both in the docs and on-device): a text field over 40
+// characters hides every OTHER field in the same step, not just itself —
+// there's no "wider" or "auto-fit" option, this is the hard ceiling for a
+// text field that has to coexist with e.g. a live heartRate field. Below
+// 40 both render; above it the text takes over the whole screen. Every
+// text field in buildStrengthGuideJson that shares a step with another
+// field uses this instead of the generic 54-char truncate() cap.
+const TEXT_WITH_SIBLING_FIELDS_MAX = 40;
+
 export function buildGuideZip(plan: GuidePlan, ownerAppName: string): Buffer {
   const manifest = {
     name: plan.title,
@@ -351,9 +360,10 @@ export function buildIntervalGuideZip(plan: IntervalPlan, ownerAppName: string):
 
 export interface StrengthExercise {
   name: string; // e.g. "Bench Press 15°"
-  detail: string; // display string, e.g. "60kg 3x10" — shown on set steps and on the prep screen before the exercise, so include weight and sets
+  detail: string; // display string, e.g. "60kg 3x10" — shown on set steps and (unless plates is given) on the prep screen before the exercise
   sets: number; // 1-100
   restSec: number; // rest between sets within this exercise. Not applied between exercises — that's the self-paced prep stopwatch
+  plates?: string; // per-side plate breakdown for barbell exercises, e.g. "2x20+1x5/side" — shown on the prep screen INSTEAD of detail (that's the moment you're loading the bar, not mid-set). Omit for non-barbell exercises (dumbbell, machine, bodyweight, cable) — detail is shown there instead. The math is done by the caller, not this tool.
 }
 
 // Rest BETWEEN SETS only (before an exercise and between exercises is
@@ -398,7 +408,7 @@ function buildRestStep(
       fields: [
         { type: "heartRate", title: "HR" },
         { type: "stepDurationCountdown", value: restSec },
-        { type: "text", value: truncate(nextFieldText, 54) },
+        { type: "text", value: truncate(nextFieldText, TEXT_WITH_SIBLING_FIELDS_MAX) },
       ],
       transitions: [{ condition: { type: "stepDuration", value: restSec } }],
     };
@@ -409,7 +419,7 @@ function buildRestStep(
     fields: [
       { type: "heartRate", title: "HR" },
       { type: "duration", window: "step" },
-      { type: "text", value: truncate(`${restSec}s target · ${nextFieldText}`, 54) },
+      { type: "text", value: truncate(`${restSec}s target · ${nextFieldText}`, TEXT_WITH_SIBLING_FIELDS_MAX) },
     ],
     transitions: [{ condition: { type: "manualLap" } }],
   };
@@ -419,24 +429,25 @@ function buildRestStep(
 // exercise — the user needs time to walk to the station and set up the
 // weight, and decides how long that takes by looking at HR. So this is
 // always a self-paced stopwatch (never a countdown), advanced by a lap
-// press, and shows what they're setting up for: weight/sets and name of the
-// exercise coming next. HR first (see buildRestStep's note — a text field
-// ahead of a number field was observed on-device to hide the number
-// entirely), then the stopwatch, then name+detail combined into one
-// 2-line text field (\n) rather than two separate text fields, to keep
-// this to 3 fields total instead of 4.
+// press, and shows what they're setting up for: what's being loaded (plate
+// breakdown if given, otherwise the plain weight/reps detail) and the
+// exercise's name. HR first (see buildRestStep's note — a text field ahead
+// of a number field was observed on-device to hide the number entirely),
+// then the stopwatch, then that combined into one 2-line text field (\n)
+// rather than two separate text fields, to keep this to 3 fields total.
 function buildPrepStep(
   ex: StrengthExercise,
   exIndex: number,
   totalExercises: number,
 ): Record<string, unknown> {
+  const loadInfo = ex.plates ?? ex.detail;
   return {
     type: "fields",
     title: `${exIndex + 1}/${totalExercises}`,
     fields: [
       { type: "heartRate", title: "HR" },
       { type: "duration", window: "step" },
-      { type: "text", value: truncate(`${ex.detail}\n${ex.name}`, 54) },
+      { type: "text", value: truncate(`${loadInfo}\n${ex.name}`, TEXT_WITH_SIBLING_FIELDS_MAX) },
     ],
     transitions: [{ condition: { type: "manualLap" } }],
   };
