@@ -3,6 +3,7 @@ import "./env.js";
 import { loadConfig } from "./config.js";
 import { loadTokens } from "./storage.js";
 import { SuuntoClient } from "./api.js";
+import { SuuntoAuthError, SuuntoEmptyResponseError, SuuntoForbiddenError, SuuntoNotFoundError } from "./errors.js";
 
 interface Check {
   name: string;
@@ -125,7 +126,7 @@ async function run(): Promise<Check[]> {
         name: label,
         status: "warn",
         detail:
-          /403|404|401/.test(msg)
+          !(err instanceof SuuntoEmptyResponseError) && (err instanceof SuuntoForbiddenError || err instanceof SuuntoNotFoundError || err instanceof SuuntoAuthError)
             ? "not subscribed on apizone (or wrong path) — that tool will return errors"
             : msg,
       });

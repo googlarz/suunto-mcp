@@ -1,6 +1,7 @@
 {
   "name": "suunto-mcp",
   "version": "0.15.0",
+  "mcpName": "io.github.googlarz/suunto-mcp",
   "description": "MCP server that connects your Suunto watch data to Claude and other AI assistants.",
   "type": "module",
   "bin": {
@@ -26,7 +27,7 @@
     "auth": "node dist/auth-cli.js",
     "webhook": "node dist/webhook.js",
     "doctor": "node dist/doctor.js",
-    "test": "tsc -p tsconfig.test.json && node --test dist-test/*.test.js",
+    "test": "tsc -p tsconfig.test.json && node --import ./test-fixtures/hermetic.mjs --test dist-test/*.test.js",
     "prepublishOnly": "npm test && npm run build"
   },
   "files": [
