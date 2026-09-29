@@ -3,7 +3,7 @@
   "name": "io.github.googlarz/suunto-mcp",
   "title": "Suunto MCP",
   "description": "Suunto watch data (workouts, sleep, recovery, 24/7 activity) for Claude and other AI assistants.",
-  "version": "0.15.1",
+  "version": "0.15.1-rc.0",
   "websiteUrl": "https://github.com/googlarz/suunto-mcp#readme",
   "repository": {
     "url": "https://github.com/googlarz/suunto-mcp",
@@ -15,6 +15,50 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "suunto-mcp",
       "version": "0.15.1",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SUUNTO_CLIENT_ID",
+          "description": "Suunto API zone OAuth client ID",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "SUUNTO_CLIENT_SECRET",
+          "description": "Suunto API zone OAuth client secret",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "SUUNTO_SUBSCRIPTION_KEY",
+          "description": "Suunto API zone subscription key",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.googlarz/suunto-mcp",
+  "title": "Suunto MCP",
+  "description": "Suunto watch data (workouts, sleep, recovery, 24/7 activity) for Claude and other AI assistants.",
+  "version": "0.15.1",
+  "websiteUrl": "https://github.com/googlarz/suunto-mcp#readme",
+  "repository": {
+    "url": "https://github.com/googlarz/suunto-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "suunto-mcp",
+      "version": "0.15.1-rc.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
