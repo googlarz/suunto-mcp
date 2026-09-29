@@ -50,7 +50,8 @@ export function assertCredentials(c: Config): void {
     throw new Error(
       `Missing required env vars: ${missing.join(", ")}.\n` +
         `\n` +
-        `Did you copy .env.example to .env and fill in the values?\n` +
+        `Set them in the "env" block of your MCP client's config for suunto-mcp\n` +
+        `(Claude Desktop, Claude Code), or in a .env file in the folder you run it from:\n` +
         `  cp .env.example .env\n` +
         `  $EDITOR .env\n` +
         `\n` +

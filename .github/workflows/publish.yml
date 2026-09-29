@@ -1,0 +1,110 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm trusted publishing (also enables provenance)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false # never use caches in release builds
+
+      - name: Require npm >= 11.5.1 (trusted publishing)
+        run: |
+          set -euo pipefail
+          required=11.5.1
+          current="$(npm --version)"
+          echo "npm ${current}"
+          [ "$(printf '%s\n' "$required" "$current" | sort -V | head -n1)" = "$required" ] \
+            || { echo "::error::npm ${current} is older than ${required}"; exit 1; }
+
+      - name: Verify tag, package.json and server.json agree
+        id: meta
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '${tag}' is not vMAJOR.MINOR.PATCH[-prerelease]"; exit 1
+          fi
+          version="${tag#v}"
+          check() { # name expected actual
+            [ "$2" = "$3" ] || { echo "::error::$1: expected '$2', found '$3'"; exit 1; }
+          }
+          check "package.json version" "$version" "$(jq -r .version package.json)"
+          # server.json feeds the MCP registry, which prereleases skip — stable tags only.
+          if [[ "$version" != *-* ]]; then
+            check "server.json version" "$version" "$(jq -r .version server.json)"
+            check "server.json packages[0].version" "$version" "$(jq -r '.packages[0].version' server.json)"
+            check "server.json packages[0].identifier" "$(jq -r .name package.json)" "$(jq -r '.packages[0].identifier' server.json)"
+            check "server.json name vs package.json mcpName" "$(jq -r .mcpName package.json)" "$(jq -r .name server.json)"
+          fi
+          if [[ "$version" == *-* ]]; then echo "npm_tag=next" >> "$GITHUB_OUTPUT"; else echo "npm_tag=latest" >> "$GITHUB_OUTPUT"; fi
+
+      - run: npm ci
+      - run: npm test
+
+      # prepublishOnly (npm test && npm run build) runs inside this step and builds dist/.
+      # No NODE_AUTH_TOKEN / NPM_TOKEN: npm authenticates with the OIDC token.
+      # Provenance is generated automatically for trusted publishing from a public repo.
+      - name: npm publish
+        env:
+          NPM_TAG: ${{ steps.meta.outputs.npm_tag }}
+        run: npm publish --tag "$NPM_TAG"
+
+  mcp-registry:
+    name: Publish to MCP Registry
+    needs: npm
+    if: ${{ !contains(github.ref_name, '-') }} # stable releases only
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC -> MCP Registry (namespace io.github.<repo owner>/*)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mcp-publisher (pinned, checksum-verified)
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
+          MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc # linux_amd64 tarball
+        run: |
+          set -euo pipefail
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+
+      - name: Wait until npm serves the new version with mcpName
+        run: |
+          set -euo pipefail
+          pkg="$(jq -r '.packages[0].identifier' server.json)"
+          version="$(jq -r .version server.json)"
+          want="$(jq -r .name server.json)"
+          for i in $(seq 1 18); do
+            got="$(curl -fsS "https://registry.npmjs.org/${pkg}/${version}" | jq -r '.mcpName // empty' || true)"
+            [ "$got" = "$want" ] && exit 0
+            sleep 10
+          done
+          echo "::error::${pkg}@${version} with mcpName ${want} not visible on npm after 3 minutes"; exit 1
+
+      - run: ./mcp-publisher login github-oidc
+      - run: ./mcp-publisher publish

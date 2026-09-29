@@ -95,7 +95,7 @@ export function validateAgainstSchema(schema: any, value: any, path = "value"): 
 // silently rolls it over to March 3rd (confirmed). Round-tripping back to
 // an ISO date string and comparing catches what a pattern regex and a bare
 // Date.parse both miss.
-function isValidCalendarDate(value: string): boolean {
+export function isValidCalendarDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const d = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;

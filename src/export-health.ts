@@ -9,11 +9,11 @@
 // only for what health-skill's own structured vitals store can honestly
 // hold.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Config } from "./config.js";
-import { SuuntoClient } from "./api.js";
+import { SuuntoClient, localDate } from "./api.js";
 
 // Evaluated per-call, not cached at module load, so tests can override it
 // via env var without touching the real user's state file.
@@ -22,20 +22,38 @@ function statePath(): string {
 }
 const MAX_WINDOW_DAYS = 28; // Suunto daily-stats API limit
 
+// A state file that exists but can't be read is NOT a first run: treating it as
+// one would re-export the last 27 days, and health-skill stores every row it is
+// given, so they would all be duplicated. Stop and say so instead.
 function loadLastExportedDate(): string | undefined {
   const path = statePath();
   if (!existsSync(path)) return undefined;
+  let lastDate: unknown;
   try {
-    return JSON.parse(readFileSync(path, "utf8")).lastDate;
-  } catch {
-    return undefined;
+    lastDate = JSON.parse(readFileSync(path, "utf8")).lastDate;
+  } catch (err: any) {
+    throw new Error(unreadableState(path, err.message));
   }
+  if (typeof lastDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(lastDate)) {
+    throw new Error(unreadableState(path, "it has no valid lastDate"));
+  }
+  return lastDate;
+}
+
+function unreadableState(path: string, why: string): string {
+  return (
+    `The sync state file ${path} exists but can't be used (${why}). Fix it, or delete it to start over — ` +
+    `but starting over re-exports the last ${MAX_WINDOW_DAYS - 1} days, and health-skill would store those days a second time.`
+  );
 }
 
 export function saveLastExportedDate(date: string): void {
   const path = statePath();
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ lastDate: date }, null, 2));
+  // Temp file + rename, so a crash can't leave a truncated state file.
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify({ lastDate: date }, null, 2));
+  renameSync(tmp, path);
 }
 
 function addDays(isoDate: string, days: number): string {
@@ -44,8 +62,10 @@ function addDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Local date: TimeISO8601 stamps in daily stats are local, so "is this day
+// finished?" has to be judged against the local calendar.
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localDate(0);
 }
 
 interface DailyStatsSample {
@@ -116,15 +136,17 @@ export async function exportHealthCsv(
   let observedMaxDate = lastExported ?? start;
   for (const [date, steps] of [...stepsByDate.entries()].sort()) {
     if (lastExported && date <= lastExported) continue; // avoid re-import (no dedupe on health-skill's side)
+    // health-skill inserts every CSV row blindly, so a partial total for a
+    // day still in progress would be stored and then stored again as the
+    // final total the next day. Only completed days are exported.
+    if (date >= end) continue;
     rows.push(`${date},steps,${Math.round(steps)},`);
     if (date > observedMaxDate) observedMaxDate = date;
   }
 
   // Never let the watermark reach today — today's total is still
-  // accumulating, so treating it as "done" would freeze whatever partial
-  // count happened to exist at export time and never re-sync it. Cap to
-  // yesterday; today keeps getting re-exported on every run until it's
-  // genuinely a past day, at which point the next run locks it in for real.
+  // accumulating (and is not exported above), so the next run picks it up
+  // once it is a past day. Cap to yesterday.
   const watermarkCeiling = addDays(end, -1);
   let maxDate = observedMaxDate > watermarkCeiling ? watermarkCeiling : observedMaxDate;
   if (savedWatermark && savedWatermark > maxDate) maxDate = savedWatermark;

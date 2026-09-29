@@ -22,7 +22,7 @@ Once it's set up, just ask:
 
 - *"How many kilometers did I run this month?"*
 - *"Compare my last three long runs — has my heart-rate drift improved?"*
-- *"Pull the GPX of yesterday's trail run and write a short journal entry."*
+- *"How did my heart rate hold up set by set in last night's gym session?"*
 - *"What's my average resting HR trend over the last two weeks?"*
 - *"Summarize my training week in the style of a coaching report."*
 - *"I've been feeling off — how do my recovery scores compare to last month?"*
@@ -297,15 +297,16 @@ Now paste the following into the config file. Replace `/Users/yourname/suunto-mc
       "env": {
         "SUUNTO_CLIENT_ID": "your-client-id",
         "SUUNTO_CLIENT_SECRET": "your-client-secret",
-        "SUUNTO_SUBSCRIPTION_KEY": "your-subscription-key",
-        "SUUNTO_APP_NAME": "your-app-name"
+        "SUUNTO_SUBSCRIPTION_KEY": "your-subscription-key"
       }
     }
   }
 }
 ```
 
-`SUUNTO_APP_NAME` is only needed if you want to push guided workouts to your watch — leave it out (or delete that line) if you're only asking Claude about your data.
+To also push guided workouts to your watch, add one more line inside `"env"`: put a comma at the end of the `SUUNTO_SUBSCRIPTION_KEY` line, then add `"SUUNTO_APP_NAME": "your-app-name"` (exactly the app name registered on apizone) on a new line after it. If you only ask Claude about your data, you don't need it.
+
+Anything the server needs must be in this `"env"` block — a `.env` file is only read by the terminal commands (`npm run auth`, `npm run doctor`, the CLI) when you run them from this folder.
 
 Save the file.
 
@@ -345,9 +346,9 @@ Claude: Looking up your workouts…
 
 | Category | What you can ask about | Requires |
 |----------|----------------------|---------|
-| **Workouts** | Any recorded activity — runs, hikes, rides, swims, ski tours. Distance, time, heart rate, pace, elevation, GPS route, power. | Developer API *(already subscribed)* |
+| **Workouts** | Any recorded activity — runs, hikes, rides, swims, ski tours. Distance, time, heart rate, pace, elevation, power, and lap-by-lap data for guided sessions. | Developer API *(already subscribed)* |
 | **Sleep** | Sleep duration, stages (light/deep/REM), sleep score. | Sleep API subscription on apizone |
-| **Recovery** | HRV, recovery status, stress balance. | Recovery API subscription on apizone |
+| **Recovery** | Recovery balance and stress state through the day (HRV comes with the sleep data). | Recovery API subscription on apizone |
 | **Daily activity** | Steps, calories, 24/7 heart rate. | Daily Activity API subscription on apizone |
 
 To add sleep, recovery, or daily activity: go back to [apizone.suunto.com](https://apizone.suunto.com), find each product, and subscribe. Then run `npm run doctor` to confirm they're active.
@@ -372,7 +373,7 @@ This pairs naturally with a coaching workflow: describe your goals, equipment, a
 
 ## Daily health digest
 
-Ask Claude *"generate my daily digest for yesterday"* and it writes a color-coded markdown summary — steps, sleep, recovery balance, HRV, and a training-load model (Fitness/Fatigue/Form) — appended to `SUUNTO_HISTORY.md`.
+Ask Claude *"generate my daily digest for yesterday"* and it writes a color-coded markdown summary — steps, sleep, recovery balance, HRV, and a training-load model (Fitness/Fatigue/Form) — appended to `SUUNTO_HISTORY.md` in the folder the server runs from (set `SUUNTO_DIGEST_HISTORY_PATH` to choose another file).
 
 **Fitness (CTL), Fatigue (ATL), and Form (TSB) aren't Suunto API fields** — there's no endpoint for them. They're computed here from each workout's real `tss.trainingStressScore` using standard 42-day/7-day exponential decay, the same math training-load tools like TrainingPeaks use. The running values persist in `~/.suunto-mcp/averages.json` (override with `SUUNTO_DIGEST_AVERAGES_PATH`) since there's nowhere else to keep them.
 
@@ -383,7 +384,7 @@ A few things worth knowing before you rely on it:
 - **Recovery Balance** is reported as morning (the lowest point overnight) vs. peak (the highest point that day) — they use different color scales, since peak is naturally higher than the overnight low.
 - **HRV** below your normal range for 2+ days in a row, or morning recovery below 65% for 2+ days in a row, adds a note to check your blood pressure — sustained low HRV/recovery is a real physiological signal worth a second data point on.
 - **Rolling baselines** track each metric separately, with a separate bucket for "party nights" (>20,000 steps) so an outlier day doesn't skew your normal-day average.
-- **Run dates in chronological order.** Baselines are "as of whenever this ran," not "as of the calendar date" — backfilling an old missed date after a later one will make that day's baseline comparison slightly off. Fine for the normal daily-scheduled use; worth knowing if you're catching up on missed days.
+- **Run dates in chronological order.** The digest refuses a date on or before the last one it processed, so a missed day can't be filled in after a later one has run — the running totals move forward one day at a time.
 - Requires Sleep and Recovery API subscriptions on apizone for those sections to populate — without them, the digest still generates, those sections just say "no data" instead of erroring.
 
 CLI: `suunto-mcp daily-digest 2026-04-20 [--seed-ctl 42 --seed-atl 38]`. MCP tool: `generate_daily_digest`.
@@ -462,9 +463,11 @@ To fully remove access:
 
 ## Pairs well with health-skill
 
-If you use [googlarz/health-skill](https://github.com/googlarz/health-skill) — a Claude skill for symptom triage and health Q&A — Suunto MCP gives it a live feed of your training, sleep, and recovery data. Together they can answer questions like *"given my recovery scores this week, should I keep tomorrow's interval session?"* with real numbers.
+If you use [googlarz/health-skill](https://github.com/googlarz/health-skill) — a Claude skill for symptom triage and health Q&A — you can connect both to Claude: health-skill handles the health side while Claude reads your training, sleep, and recovery data from Suunto MCP in the same conversation. Together they can answer questions like *"given my recovery scores this week, should I keep tomorrow's interval session?"* with real numbers.
 
-The same combination works for planning, not just Q&A: Claude can check your actual HRV and sleep before writing a session, scale it back on a bad recovery day instead of a generic one, and push the result straight to your watch with `push_workout_guide`. Ask for it directly — *"check my recovery and plan today's gym session"* — no extra setup beyond having both connected.
+The same combination works for planning, not just Q&A: Claude can check your actual HRV and sleep before writing a session, scale it back on a bad recovery day instead of a generic one, and push the result straight to your watch with `push_strength_guide` (gym) or `push_interval_guide` (cardio). Ask for it directly — *"check my recovery and plan today's gym session"* — no extra setup beyond having both connected.
+
+To also store your daily step counts in health-skill's own records, run `suunto-mcp sync-to-health-skill --health-root <your health folder>` (add `--person-id` for a household member). It copies steps only, and only for days that are finished — today's total is picked up tomorrow.
 
 For the full version — real progressive-overload programming that persists week to week instead of a one-off ask — install [googlarz/gym-skill](https://github.com/googlarz/gym-skill): `/gym setup` once, then `/gym plan`/`/gym today`/`/gym log`/`/gym review` going forward.
 
@@ -475,7 +478,13 @@ For the full version — real progressive-overload programming that persists wee
 <details>
 <summary>Using with Claude Code instead of Claude Desktop</summary>
 
-Edit `~/.claude/mcp_config.json` and add the same `"suunto"` block from Step 10. Then run `claude mcp list` to verify it's loaded.
+Run this in a terminal (use your own values and the real path to this folder), then `claude mcp list` to verify it's loaded:
+
+```bash
+claude mcp add suunto -e SUUNTO_CLIENT_ID=your-client-id -e SUUNTO_CLIENT_SECRET=your-client-secret -e SUUNTO_SUBSCRIPTION_KEY=your-subscription-key -- node /full/path/to/suunto-mcp/dist/index.js
+```
+
+Add `-e SUUNTO_APP_NAME=your-app-name` if you want to push guided workouts.
 
 </details>
 
@@ -487,7 +496,6 @@ After building, you can query Suunto data directly without Claude:
 ```bash
 suunto-mcp list-workouts --limit 10
 suunto-mcp get-workout <workoutKey>
-suunto-mcp export-workout-gpx <workoutKey> > route.gpx
 suunto-mcp get-sleep 2026-04-20
 suunto-mcp list-recovery --from 2026-04-01 --to 2026-04-30
 ```
@@ -532,11 +540,12 @@ Claude picks the right tool automatically — you don't need to know these. For 
 
 | Tool | What it does |
 |------|-------------|
-| `list_workouts` | Recent workouts, filter by date or sport |
-| `get_workout` | Full summary for one workout |
-| `get_workout_samples` | Time-series: HR, pace, altitude, power, GPS per second |
-| `get_workout_fit` | Raw FIT file decoded to structured data |
-| `export_workout_gpx` | GPX route export for maps, Strava, route planning |
+| `list_workouts` | Recent workouts, filtered by date |
+| `get_workout` | Summary numbers for one workout (no laps — use `get_workout_laps`) |
+| `get_workout_laps` | Lap-by-lap table for one workout: time, heart rate, calories and the guide step of each lap — the way to read back a guided gym session set by set |
+| `get_workout_fit` | Raw FIT file decoded to structured data (large — `full: true` is about 550 KB for a strength session) |
+| `get_workout_samples` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026); use `get_workout_fit` |
+| `export_workout_gpx` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026) |
 
 **24/7 health** *(requires individual product subscriptions on apizone)*
 
@@ -544,7 +553,7 @@ Claude picks the right tool automatically — you don't need to know these. For 
 |------|-------------|
 | `get_daily_activity` / `list_daily_activity` | Steps, calories, daily heart rate |
 | `get_sleep` / `list_sleep` | Sleep stages, duration, score |
-| `get_recovery` / `list_recovery` | Recovery score, HRV, stress balance |
+| `get_recovery` / `list_recovery` | Recovery balance and stress state through the day |
 | `get_daily_activity_statistics` | Aggregated daily stats over a date range |
 
 **Routes**
@@ -570,7 +579,8 @@ Claude picks the right tool automatically — you don't need to know these. For 
 
 | Tool | What it does |
 |------|-------------|
-| `list_subscriptions` | Active webhook subscriptions on your account |
+| `list_subscriptions` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026) |
+| `generate_daily_digest` | Writes the daily health digest to `SUUNTO_HISTORY.md` (see *Daily health digest*) — a write tool |
 
 </details>
 

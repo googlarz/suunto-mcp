@@ -6,8 +6,9 @@ import "./env.js";
 const [, , firstArg] = process.argv;
 if (firstArg !== undefined || process.stdin.isTTY) {
   const { runCli } = await import("./cli.js");
+  const { exitAfterFlush } = await import("./exit.js");
   await runCli(process.argv.slice(2));
-  process.exit(0);
+  await exitAfterFlush(0); // never settles: exits from the flush callback, so the MCP startup below can't run
 }
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -26,6 +27,8 @@ import { RESOURCES, readResource } from "./resources.js";
 import { buildGuideZip, buildIntervalGuideZip, buildStrengthGuideZip } from "./guide-zip.js";
 import { generateDigest } from "./daily-digest.js";
 import { validateAgainstSchema } from "./schema-validate.js";
+import { TOOL_META } from "./tool-meta.js";
+import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -60,11 +63,11 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
   return { contents: [contents] };
 });
 
-const tools = [
+const toolDefs = [
   {
     name: "list_workouts",
     description:
-      "Returns the user's recent Suunto workouts ordered newest-first (Workout API v3). Each item: workoutKey (string id), activityId (numeric activity code — there is no separate plain-language 'sport' field; use get_workout_fit for the parsed FIT file's session.sport if a sport name is needed), startTime (epoch ms), totalTime (s), totalDistance (m), totalAscent (m), totalDescent (m), energyConsumption (joules, not 'totalCalories'), hrdata: { avg, max } (workout heart rate — hrdata.max is the account's overall max HR, use hrdata.workoutMaxHR for this specific workout's peak). Auto-paginates with offset-based pagination until limit is reached or no more workouts exist. Use get_workout for full detail (laps, HR zones, sport-specific metrics) on a single result. Read-only.",
+      "Returns the user's recent Suunto workouts ordered newest-first (Workout API v3). Each item: workoutKey (string id), activityId (numeric activity code — there is no separate plain-language 'sport' field; use get_workout_fit for the parsed FIT file's session.sport if a sport name is needed), startTime (epoch ms), totalTime (s), totalDistance (m), totalAscent (m), totalDescent (m), energyConsumption (kilocalories, not 'totalCalories'), hrdata: { avg, max } (workout heart rate — hrdata.max is the account's overall max HR, use hrdata.workoutMaxHR for this specific workout's peak). Auto-paginates with offset-based pagination until limit is reached or no more workouts exist. Each item also embeds SummaryExtension (including apps[]: the SuuntoPlus guide that ran, if any) and IntensityExtension (HR-zone times). Use get_workout_laps for the lap table of a single workout. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -93,7 +96,7 @@ const tools = [
   {
     name: "get_workout",
     description:
-      "Returns the full summary for one workout: all fields Suunto exposes including laps, HR zones, training-effect score, and sport-specific metrics (pace zones for running, power for cycling, etc.). Throws SuuntoNotFoundError if the workoutKey does not exist. Use list_workouts to discover valid workoutKey values. For second-by-second time-series (HR, pace, GPS) use get_workout_samples instead. Read-only.",
+      "Returns the base summary for one workout (about 1.6 KB): the same scalar fields as a list_workouts item (times, distance, energy, hrdata, tss/tssList, recoveryTime) plus extensionTypes, the list of data streams Suunto holds for it. It does NOT include laps, HR zones or other extension data — use get_workout_laps for laps and zone times, get_workout_fit for record-level data. Throws SuuntoNotFoundError if the workoutKey is malformed (not 24 hex characters) or does not exist. Use list_workouts to discover valid workoutKey values. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -109,7 +112,7 @@ const tools = [
   {
     name: "get_workout_samples",
     description:
-      "Returns the time-series sample stream for one workout. Each sample: timestamp (ms), heartRate (bpm), speed (m/s), altitude (m), power (W), cadence, latitude, longitude. Sampled at the device's recording interval (typically 1 s). Long workouts (>2 h) may return thousands of records — use get_workout_fit with full=false for a compact summary instead. Throws SuuntoNotFoundError if the key is invalid. Read-only.",
+      "UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/workout/samples) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error; it is not an authentication problem. Use get_workout_fit with full=true for record-level data (heart rate etc.), or get_workout_laps for laps. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -125,7 +128,7 @@ const tools = [
   {
     name: "get_workout_fit",
     description:
-      "Downloads the workout's binary FIT file from Suunto and returns it parsed to JSON. Default (full=false): compact summary { sport, total_distance_km, avg_heart_rate, training_effect, laps, records_sample: { first, middle, last (one record each), count } }. Set full=true to receive every parsed FIT record — responses are often >100 KB for long workouts. Use the default for analysis and summaries; full=true only when raw record-level data is required. Read-only.",
+      "Downloads the workout's binary FIT file from Suunto and returns it parsed to JSON. Default (full=false): compact summary { sport, total_distance_km, avg_heart_rate, training_effect, laps (a COUNT only, not the laps), records_sample: { first, middle, last (one record each), count } }. Set full=true to receive every parsed FIT record and lap — pretty-printed, about 550 KB for a 35-lap strength session, so the result usually spills to a file. For per-lap data use get_workout_laps instead (about 2.5 KB); use full=true only when record-level data is required. An unknown workoutKey fails with a 403 Forbidden error here (not-found on the other workout tools). Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -144,9 +147,25 @@ const tools = [
     },
   },
   {
+    name: "get_workout_laps",
+    description:
+      "Returns the manual laps of one workout as a compact table, plus its training-load fields — the way to read back a guided gym session set by set (push_strength_guide records one lap per set and per rest; push_workout_guide one lap per exercise and one per rest between exercises). A session from push_interval_guide auto-advances and is expected to record no manual laps (unverified), so it should return an empty table. About 2.5 KB for a 35-lap strength session, versus ~550 KB for get_workout_fit full=true. Output: { workoutKey, activityId, startTime (epoch ms), totalTimeS, guide: { id, name } | null (the guide that ran, as recorded by Suunto — not looked up in list_guides, because guides are often deleted afterwards), tss: [{ method (seen so far: 'HR', 'MET'), value }], pte, peakEpoc, recoveryTime (from the workout's summary extension; units not verified, and it can differ from the recoveryTime that list_workouts and get_workout carry), hrZoneTimeS: [zone1..zone5 seconds], lapCount, laps: { cols, rows } }. laps.cols = [i (1-based), startOffsetS (from workout start), durationS, hrAvg, hrMax, hrMin (bpm), kcal, kind, label]; each row is an array in that order. label is the text of the guide step that was active during the lap (lines joined with ' | '), or null when no guide ran. kind is 'rest' when the label contains 'Next:' at its start or after a '·' (a per-set rest lap reads 'Next: set k/S', or '<restSec>s target · Next: set k/S' with restMode 'stopwatch'), 'done' for the final 'Session complete' lap, 'step' for any other labelled lap, null when there is no label. A per-set strength guide yields, per exercise, a prep lap, then set 1, rest, set 2, rest, … — 2 × sets laps — and one trailing 'Session complete' lap for the whole session; a prep lap and a set lap look alike in the label, so tell them apart by position. Real sessions can deviate (skipped or repeated rest laps), so check the labels rather than only counting. A workout without manual laps (unguided gym, cycling) returns lapCount 0 and laps.rows [] — not an error. Call list_workouts first for the workoutKey.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutKey: {
+          type: "string",
+          minLength: 1,
+          description: "The 24-character workoutKey returned by list_workouts. Anything else fails with a not-found error without calling Suunto.",
+        },
+      },
+      required: ["workoutKey"],
+    },
+  },
+  {
     name: "export_workout_gpx",
     description:
-      "Returns the workout's GPS route as a GPX 1.1 XML string (not JSON). Each trackpoint contains lat, lon, elevation, and timestamp. Suitable for direct import into Strava, Komoot, Google Earth, or any GPX-compatible tool. Returns a valid but empty GPX document if the workout has no GPS data. Use get_workout_samples for numeric time-series (HR, power, cadence) instead of GPS. Read-only.",
+      "UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/workout/exportGpx) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error; it is not an authentication problem. Would return the workout's GPS route as a GPX 1.1 XML string. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -162,7 +181,7 @@ const tools = [
   {
     name: "get_daily_activity",
     description:
-      "Returns the 24/7 activity time-series samples for one calendar day from the /247samples API. Each sample includes a timestamp (ISO8601) and activity metrics such as steps and HR. Days without synced data return an empty payload. Use list_daily_activity to fetch a date range. Requires 24/7 Activity API subscription on apizone. Read-only.",
+      "Returns the 24/7 activity samples for one local calendar day (00:00–23:59 in the local time the watch stamped on each sample) from the /247samples API, as a plain array of { timestamp (ISO 8601 with UTC offset), entryData: { HR (bpm), StepCount, EnergyConsumption (joules, as in get_daily_activity_statistics) } } — 144 rows for a full day, one per 10 minutes (138 or 150 on the days the clocks change). A day without synced data returns []. Use list_daily_activity for a date range. Requires 24/7 Activity API subscription on apizone. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -173,7 +192,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-20"],
-          description: "Calendar date YYYY-MM-DD. Suunto syncs once daily, so today's data is usually incomplete — but the API responds 200 with an empty or partial payload for today/future dates, it does not throw SuuntoNotFoundError (confirmed live). Use yesterday or earlier for complete results.",
+          description: "Calendar date YYYY-MM-DD (a local day, in the local time the watch stamped on each sample). Data arrives when the watch syncs, so today's is usually partial — the API answers 200 with an empty or partial payload for today and future dates rather than an error (confirmed live). Use yesterday or earlier for complete results.",
         },
       },
       required: ["date"],
@@ -182,7 +201,7 @@ const tools = [
   {
     name: "list_daily_activity",
     description:
-      "Returns 24/7 activity time-series samples from the /247samples API for the date range [from, to] inclusive, ordered chronologically by timestamp. Each sample: { timestamp (ISO8601), steps, HR, and other activity metrics }. Days without synced data are omitted. Use get_daily_activity for a single day or get_daily_activity_statistics for aggregated daily step/energy totals. Requires 24/7 Activity API subscription on apizone. Read-only.",
+      "Returns 24/7 activity samples from the /247samples API for the local calendar days [from, to] inclusive (in the local time the watch stamped on each sample), ordered chronologically, as a plain array of { timestamp (ISO 8601 with UTC offset), entryData: { HR (bpm), StepCount, EnergyConsumption (joules, as in get_daily_activity_statistics) } }. Days without synced data are simply absent. Use get_daily_activity for a single day or get_daily_activity_statistics for aggregated daily step/energy totals. Requires 24/7 Activity API subscription on apizone. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -202,7 +221,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-30"],
-          description: "End date YYYY-MM-DD, inclusive. Future dates are accepted but produce no entries. Prefer ranges ≤ 30 days for responsiveness.",
+          description: "End date YYYY-MM-DD, inclusive. Future dates are accepted but produce no entries. Prefer about 3–7 days: a day is ~15 KB, so 30 days is ~450 KB (use get_daily_activity_statistics for longer totals).",
         },
       },
       required: ["from", "to"],
@@ -211,7 +230,7 @@ const tools = [
   {
     name: "get_sleep",
     description:
-      "Returns sleep time-series samples from the /247samples API for one calendar day: { timestamp (ISO8601), totalSleep (s), deepSleep (s), lightSleep (s), remSleep (s), awake (s), efficiency (%), sleepScore }. Days without recorded sleep return an empty payload. Use list_sleep for a date range. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns the sleeps of one night from the /247samples API. A date means the NIGHT of that date: every sleep that began between 12:00 (noon) on it and 12:00 the next day, in the local time the watch stamped on the sleep — so 23:00, 00:30 and 03:00 bedtimes all belong to the same date, and an afternoon nap is filed with the night after it. Last night is therefore filed under yesterday's date. Plain array with one row per sleep — Suunto re-sends a sleep every time it revises it, and only the longest revision is kept — of { timestamp (= BedtimeStart, ISO 8601 with UTC offset), entryData: { SleepId, IsNap, BedtimeStart, BedtimeEnd, Duration (s), DeepSleepDuration, LightSleepDuration, REMSleepDuration (s), SleepQualityScore, AvgHRV (ms), HRAvg, HRMin (bpm), … } }. IsNap is true for any sleep shorter than about 3 hours, at any time of day, and can flip while a sleep is still being recorded — so it also marks a short fragment of a split night; do not drop rows by IsNap alone. A night can hold several rows (a split night, or a nap beside it): rows are not merged, so decide from BedtimeStart and Duration which belong together. Returns [] when no sleep began in that window, e.g. today's date before tonight. Use list_sleep for a range. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -222,7 +241,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-20"],
-          description: "Date YYYY-MM-DD the person went to bed (bedtime), NOT the wake-up date — a bedtime shortly after midnight still counts as the previous date. To get 'last night's sleep' as of right now, use yesterday's date, not today's. Suunto syncs once daily — use yesterday or earlier for reliable results.",
+          description: "Date YYYY-MM-DD of the night, NOT the wake-up date: sleeps that began between noon on this date and noon the next day (in the local time the watch stamped on each sample), so a bedtime shortly after midnight — even 03:00 — still belongs to the previous date. Last night's sleep is under yesterday's date, not today's; today's date is empty until tonight's sleep begins.",
         },
       },
       required: ["date"],
@@ -231,7 +250,7 @@ const tools = [
   {
     name: "list_sleep",
     description:
-      "Returns sleep time-series samples from the /247samples API for the date range [from, to] inclusive, ordered chronologically by timestamp. Each entry: { timestamp (ISO8601), totalSleep (s), deepSleep (s), lightSleep (s), remSleep (s), awake (s), efficiency (%), sleepScore }. Nights without recorded sleep are omitted. Use get_sleep for a single night. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns the sleeps of the nights [from, to] inclusive from the /247samples API, ordered chronologically by bedtime. A date means the NIGHT of that date: every sleep that began between 12:00 (noon) on it and 12:00 the next day, in the local time the watch stamped on the sleep — so 23:00, 00:30 and 03:00 bedtimes all belong to the same date, and an afternoon nap is filed with the night after it. Last night is therefore filed under yesterday's date. Same rows as get_sleep, one per sleep (revisions collapsed): { timestamp (= BedtimeStart, ISO 8601 with UTC offset), entryData: { SleepId, IsNap, BedtimeStart, BedtimeEnd, Duration (s), DeepSleepDuration, LightSleepDuration, REMSleepDuration (s), SleepQualityScore, AvgHRV (ms), HRAvg, HRMin (bpm), … } }. Nights without recorded sleep are simply absent. Use get_sleep for a single night. Requires Sleep API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -260,7 +279,7 @@ const tools = [
   {
     name: "get_recovery",
     description:
-      "Returns recovery and HRV time-series samples from the /247samples API for one calendar day. Each sample: { timestamp (ISO8601), Balance (0.0–1.0 recovery balance), StressState (0=Invalid, 1=Relaxing, 2=Active, 3=Passive, 4=Stressful) }. Days without recovery data return an empty payload. Use list_recovery for a date range. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns recovery-balance samples from the /247samples API for one local calendar day (00:00–23:59 in the local time the watch stamped on each sample), as a plain array of { timestamp (ISO 8601 with UTC offset), entryData: { Balance (0.0–1.0 recovery balance), StressState (0=Invalid, 1=Relaxing, 2=Active, 3=Passive, 4=Stressful) } } — 48 half-hourly rows for a full day (46 or 50 on the days the clocks change). A day without recovery data returns []. Use list_recovery for a date range. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -271,7 +290,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-20"],
-          description: "Calendar date YYYY-MM-DD. Suunto syncs once daily, so today's data is usually incomplete — but the API responds 200 with an empty or partial payload for today/future dates, it does not throw SuuntoNotFoundError (confirmed live). Use yesterday or earlier for complete results.",
+          description: "Calendar date YYYY-MM-DD (a local day, in the local time the watch stamped on each sample). Data arrives when the watch syncs, so today's is usually partial — the API answers 200 with an empty or partial payload for today and future dates rather than an error (confirmed live). Use yesterday or earlier for complete results.",
         },
       },
       required: ["date"],
@@ -280,7 +299,7 @@ const tools = [
   {
     name: "list_recovery",
     description:
-      "Returns recovery and HRV time-series samples from the /247samples API for the date range [from, to] inclusive, ordered chronologically by timestamp. Each entry: { timestamp (ISO8601), Balance (0.0–1.0 recovery balance), StressState (0=Invalid, 1=Relaxing, 2=Active, 3=Passive, 4=Stressful) }. Days without recovery data are omitted. Use get_recovery for a single day. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
+      "Returns recovery-balance samples from the /247samples API for the local calendar days [from, to] inclusive (in the local time the watch stamped on each sample), ordered chronologically, as a plain array of { timestamp (ISO 8601 with UTC offset), entryData: { Balance (0.0–1.0 recovery balance), StressState (0=Invalid, 1=Relaxing, 2=Active, 3=Passive, 4=Stressful) } }. Days without recovery data are simply absent. Use get_recovery for a single day. Requires Recovery API subscription on apizone; returns 404 without it. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -300,7 +319,7 @@ const tools = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-30"],
-          description: "End date YYYY-MM-DD, inclusive. Future dates are accepted but produce no entries. Prefer ranges ≤ 30 days for responsiveness.",
+          description: "End date YYYY-MM-DD, inclusive. Future dates are accepted but produce no entries. Prefer about 14 days or less: a day is ~4 KB of output.",
         },
       },
       required: ["from", "to"],
@@ -309,7 +328,7 @@ const tools = [
   {
     name: "get_daily_activity_statistics",
     description:
-      "Returns aggregated daily step count and energy consumption (joules) from the /247 API for the given datetime range. Response is an array of AggregatedActivityData objects, each with a Name ('stepcount' or 'energyconsumption'), Aggregation ('sum'), and Sources array containing per-device Samples with TimeISO8601 and Value. Maximum fetch interval is 28 days. Samples with null Value indicate no data synced for that day. Prefer this tool over list_daily_activity when you need totals rather than intraday time-series. Read-only.",
+      "Returns aggregated daily step count and energy consumption (joules) from the /247 API for the given datetime range. Response is an array of AggregatedActivityData objects, each with a Name ('stepcount' or 'energyconsumption'), Aggregation ('sum'), and Sources array containing per-device Samples with TimeISO8601 and Value. The window must be less than 28 days (exactly 28 is rejected). Samples with null Value indicate no data synced for that day. Each daily Sample is stamped local noon (TimeISO8601 like 2026-09-27T12:00:00+02:00); a one-day window (startdate = enddate = D) was observed returning the samples for D and the day after, so select samples by the date in TimeISO8601 rather than summing the response. Prefer this tool over list_daily_activity when you need totals rather than intraday time-series. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -317,13 +336,13 @@ const tools = [
           type: "string",
           examples: ["2026-04-01T00:00:00"],
           description:
-            "Start datetime in ISO-8601 format (e.g. 2026-04-01T00:00:00). Data is stored in UTC.",
+            "Start datetime in ISO-8601 format, with or without a UTC offset (e.g. 2026-04-01T00:00:00 or 2026-04-01T00:00:00+02:00). An offset written +0200, as `date +%z` prints it, is rewritten to +02:00 because Suunto rejects the former.",
         },
         enddate: {
           type: "string",
-          examples: ["2026-04-30T23:59:59"],
+          examples: ["2026-04-27T23:59:59"],
           description:
-            "End datetime in ISO-8601 format (e.g. 2026-04-30T23:59:59). Must be within 28 days of startdate.",
+            "End datetime in ISO-8601 format, same forms as startdate (e.g. 2026-04-27T23:59:59). Must be less than 28 days after startdate.",
         },
       },
       required: ["startdate", "enddate"],
@@ -332,7 +351,7 @@ const tools = [
   {
     name: "list_subscriptions",
     description:
-      "Returns all active webhook subscriptions on this Suunto account as an array of { id, eventType, callbackUrl, createdAt }. Returns an empty array if no webhooks are registered. Use to audit which event types are already wired before adding new subscriptions. Requires Subscriptions API product on apizone. Read-only.",
+      "UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/subscriptions) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error rather than returning a list. Would return the active webhook subscriptions as an array of { id, eventType, callbackUrl, createdAt }. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -390,7 +409,7 @@ const tools = [
   {
     name: "push_workout_guide",
     description:
-      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. There is no live push to the watch itself — delivery depends on the phone's normal Suunto app sync. In testing it showed up on the watch after the next ordinary sync with no manual pinning needed; if it doesn't appear, check the Suunto app under SuuntoPlus Guides and pin it there. Write operation.",
+      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. There is no live push to the watch itself — delivery depends on the phone's normal Suunto app sync. In testing it showed up on the watch after the next ordinary sync with no manual pinning needed; if it doesn't appear, check the Suunto app under SuuntoPlus Guides and pin it there. For gym sessions prefer push_strength_guide: it records one lap per set and per rest, which get_workout_laps can read back. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -488,7 +507,7 @@ const tools = [
   {
     name: "push_strength_guide",
     description:
-      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Session flow: before every exercise (the first one and each one after another) a prep step — a self-paced count-up stopwatch showing what's being loaded (the exercise's plate breakdown if given, otherwise its weight/sets detail), its name and live HR, so the user can walk to the station, set up the weight and decide how long to take by HR; a lap press starts the exercise. Then, with lapGranularity:'perSet' (default), each set is its own step (titled with the set counter, e.g. 2/3) that ends on a lap press when the reps are done, and each rest between sets is its own step showing the same set counter plus 'Next: set 3/3'. restMode:'countdown' (default) counts rest down from restSec and auto-advances into the next set with a vibration; restMode:'stopwatch' counts up and waits for a lap press instead. lapGranularity:'perExercise' gives one step per whole exercise (after its prep) like push_workout_guide, with no between-set rests, for a shorter Guide list at the cost of per-set lap data. Every prep, set and rest lands in its own lap (lap presses are logged as manual laps by the watch; sets after an auto-advanced countdown rest get an automatic lap), so per-set and per-rest HR and duration can be read from the synced workout, and every step also shows live heart rate on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
+      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API — the tool to use for gym sessions. Per exercise: a prep step (self-paced stopwatch showing the plate breakdown if given, otherwise the weight/sets detail, plus the exercise name and live HR; a lap press starts the exercise), then with lapGranularity 'perSet' (default) each set is its own step ended by a lap press, and each rest between sets is its own step showing 'Next: set k/S'. restMode 'countdown' (default) counts down restSec and auto-advances into the next set with a vibration; 'stopwatch' counts up and waits for a lap press. lapGranularity 'perExercise' gives one step per exercise after its prep, with no between-set rests and no per-set laps. Every prep, set and rest is its own lap and the guide ends with one extra 'Session complete' step, so a perSet session records 2 × (total sets) + 1 laps. Read them back after the workout with get_workout_laps — its labels are the step texts. Requires SUUNTO_APP_NAME to exactly match the app name registered on apizone.suunto.com. Without guideId a new guide is created on every call (see list_guides / delete_guide to tidy up); with guideId that guide is overwritten. There is no live push to the watch: it appears after the phone's next normal Suunto app sync. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -586,7 +605,7 @@ const tools = [
   {
     name: "generate_daily_digest",
     description:
-      "Builds a color-coded daily health digest (steps, sleep, recovery balance, HRV, and a training-load model) for one date and appends it as markdown to a history file. Suunto's API has no fitness/fatigue endpoints, so this computes CTL (42-day fitness), ATL (7-day fatigue), and TSB (form) from each workout's tss.trainingStressScore using standard exponential time constants, persisting the running values in a local sidecar file (SUUNTO_DIGEST_AVERAGES_PATH env var, default ~/.suunto-mcp/averages.json) since there's nowhere else to store them. Rolling 28-day baselines per metric are also tracked there, with a separate baseline bucket for 'party nights' (>20,000 steps) so those don't skew the normal-day average. Requires Sleep and Recovery API subscriptions on apizone for the sleep/recovery sections to populate — falls back to 'no data' text for sections without a subscription rather than erroring. Write operation (updates the sidecar file and appends to the history file).",
+      "Builds a color-coded daily health digest (steps, sleep, recovery balance, HRV, and a training-load model) for one date and appends it as markdown to a history file. Suunto's API has no fitness/fatigue endpoints, so this computes CTL (42-day fitness), ATL (7-day fatigue), and TSB (form) from each workout's tss.trainingStressScore using standard exponential time constants, persisting the running values in a local sidecar file (SUUNTO_DIGEST_AVERAGES_PATH env var, default ~/.suunto-mcp/averages.json) since there's nowhere else to store them. Running-average baselines (all days so far) per metric are also tracked there, with a separate baseline bucket for 'party nights' (>20,000 steps) so those don't skew the normal-day average. Requires Sleep and Recovery API subscriptions on apizone for the sleep/recovery sections to populate — falls back to 'no data' text for sections without a subscription rather than erroring. Write operation (updates the sidecar file and appends to the history file).",
     inputSchema: {
       type: "object",
       properties: {
@@ -594,7 +613,7 @@ const tools = [
           type: "string",
           format: "date",
           pattern: "^\\d{4}-\\d{2}-\\d{2}$",
-          description: "Calendar date YYYY-MM-DD to summarize. Use yesterday or earlier — Suunto syncs once daily, so today's data is usually incomplete.",
+          description: "Calendar date YYYY-MM-DD to summarize. Use yesterday or earlier — today's data is usually partial until the watch has synced.",
         },
         seedCtl: {
           type: "number",
@@ -610,6 +629,14 @@ const tools = [
   },
 ];
 
+// Titles + annotations live in tool-meta.ts; a tool without an entry there
+// fails at startup rather than shipping unannotated.
+const tools = toolDefs.map((t) => {
+  const meta = TOOL_META[t.name];
+  if (!meta) throw new Error(`Tool "${t.name}" has no entry in tool-meta.ts`);
+  return { ...t, ...meta };
+});
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -617,14 +644,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const a = args as Record<string, any>;
 
   try {
+    // Checked before ensureReady(): otherwise a missing-credentials error
+    // masks a typo'd tool name.
+    const tool = tools.find((t) => t.name === name);
+    if (!tool) return text(`Unknown tool: ${name}`, true);
     // Each tool declares a full inputSchema, but the MCP SDK doesn't
     // enforce it — a call could otherwise pass e.g. limit: -1 straight
     // through to the API layer instead of being rejected up front.
-    const tool = tools.find((t) => t.name === name);
-    if (tool) {
-      const errors = validateAgainstSchema(tool.inputSchema, a);
-      if (errors.length) return text(`Invalid arguments for ${name}: ${errors.join("; ")}`, true);
-    }
+    const errors = validateAgainstSchema(tool.inputSchema, a);
+    if (errors.length) return text(`Invalid arguments for ${name}: ${errors.join("; ")}`, true);
     ensureReady();
     switch (name) {
       case "list_workouts": {
@@ -649,29 +677,35 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const bytes = await suunto.getWorkoutFit(a.workoutKey);
         const parsed = await parseFit(bytes);
         const out = a.full ? parsed : summarizeFit(parsed);
+        // Pretty-printed on purpose: full output is ~550 KB and spills to a
+        // file, and callers slice the laps (near the top) by line range.
         return text(JSON.stringify(out, null, 2));
+      }
+      case "get_workout_laps": {
+        const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
+        return text(JSON.stringify(shapeLaps(data)));
       }
       case "export_workout_gpx": {
         const bytes = await suunto.getWorkoutGpx(a.workoutKey);
         return text(new TextDecoder().decode(bytes));
       }
+      // Compact JSON (no indentation): identical content, 25-30% fewer bytes
+      // for the model to read — a week of daily activity was ~157 KB.
       case "get_daily_activity":
-        return text(JSON.stringify(await suunto.getDailyActivity(a.date), null, 2));
+        return text(JSON.stringify(await suunto.getDailyActivity(a.date)));
       case "list_daily_activity":
-        return text(
-          JSON.stringify(await suunto.listDailyActivity(a.from, a.to), null, 2),
-        );
+        return text(JSON.stringify(await suunto.listDailyActivity(a.from, a.to)));
       case "get_sleep":
-        return text(JSON.stringify(await suunto.getSleep(a.date), null, 2));
+        return text(JSON.stringify(await suunto.getSleep(a.date)));
       case "list_sleep":
-        return text(JSON.stringify(await suunto.listSleep(a.from, a.to), null, 2));
+        return text(JSON.stringify(await suunto.listSleep(a.from, a.to)));
       case "get_recovery":
-        return text(JSON.stringify(await suunto.getRecovery(a.date), null, 2));
+        return text(JSON.stringify(await suunto.getRecovery(a.date)));
       case "list_recovery":
-        return text(JSON.stringify(await suunto.listRecovery(a.from, a.to), null, 2));
+        return text(JSON.stringify(await suunto.listRecovery(a.from, a.to)));
       case "get_daily_activity_statistics": {
         const data = await suunto.getDailyStats(a.startdate, a.enddate);
-        return text(JSON.stringify(data, null, 2));
+        return text(JSON.stringify(data));
       }
       case "list_subscriptions": {
         const data = await suunto.subscriptions();
@@ -703,7 +737,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "push_workout_guide": {
         if (!cfg.appName) {
           return text(
-            "Error: SUUNTO_APP_NAME is not set. Add it to .env with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
+            "Error: SUUNTO_APP_NAME is not set. Set it in the env block of your MCP client config (or in .env when running from the repo folder) with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
             true,
           );
         }
@@ -725,7 +759,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "push_interval_guide": {
         if (!cfg.appName) {
           return text(
-            "Error: SUUNTO_APP_NAME is not set. Add it to .env with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
+            "Error: SUUNTO_APP_NAME is not set. Set it in the env block of your MCP client config (or in .env when running from the repo folder) with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
             true,
           );
         }
@@ -747,7 +781,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "push_strength_guide": {
         if (!cfg.appName) {
           return text(
-            "Error: SUUNTO_APP_NAME is not set. Add it to .env with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
+            "Error: SUUNTO_APP_NAME is not set. Set it in the env block of your MCP client config (or in .env when running from the repo folder) with the exact app name registered on apizone.suunto.com — the Guide API rejects uploads where manifest.json's owner doesn't match.",
             true,
           );
         }

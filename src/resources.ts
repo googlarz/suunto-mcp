@@ -1,4 +1,4 @@
-import type { SuuntoClient } from "./api.js";
+import { localDate, type SuuntoClient } from "./api.js";
 
 export const RESOURCES = [
   {
@@ -16,7 +16,7 @@ export const RESOURCES = [
   {
     uri: "suunto://today/recovery",
     name: "Today's recovery",
-    description: "Recovery / HRV / stress for today.",
+    description: "Recovery balance and stress state for today.",
     mimeType: "application/json",
   },
   {
@@ -34,23 +34,20 @@ export const RESOURCES = [
   },
 ];
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Local dates: the API windows are local days (see api.ts), so a UTC date would
+// name the wrong day for the first hours after local midnight.
+const today = () => localDate(0);
 
-// Suunto keys a sleep session by the date the person went to bed (even a
-// bedtime shortly after midnight still counts as the previous date) — so
-// "last night's sleep" as of right now is filed under yesterday, not today.
-const yesterday = () => {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-};
+// A sleep is filed under the date of the night it began (noon to noon, see
+// api.ts nightOf) — so "last night's sleep" as of right now is filed under
+// yesterday, not today.
+const yesterday = () => localDate(1);
 
 function startOfIsoWeekMs(): number {
   const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  const day = d.getUTCDay();
-  const diff = (day + 6) % 7; // Monday-based
-  d.setUTCDate(d.getUTCDate() - diff);
+  d.setHours(0, 0, 0, 0);
+  const diff = (d.getDay() + 6) % 7; // Monday-based
+  d.setDate(d.getDate() - diff);
   return d.getTime();
 }
 
@@ -90,6 +87,9 @@ export async function readResource(
       );
       payload = {
         weekStartISO: new Date(since).toISOString(),
+        // The same Monday as a plain local date — weekStartISO is an instant, so in
+        // a zone east of UTC its UTC date reads as the Sunday before.
+        weekStart: localDate(0, new Date(since)),
         ...total,
         totalDurationHours: +(total.totalDurationS / 3600).toFixed(2),
         totalDistanceKm: +(total.totalDistanceM / 1000).toFixed(2),

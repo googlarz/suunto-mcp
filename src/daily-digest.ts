@@ -10,9 +10,11 @@
 //   caller of this module's parsing functions gets deduped data back.
 // - list_workouts genuinely has workout.tss.trainingStressScore (HR-based
 //   calculation method) and hrdata.avg, confirmed live.
-import { mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, appendFile, rename, rm } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
-import type { SuuntoClient } from "./api.js";
+import { dayFetchBounds, workoutDate, type SuuntoClient } from "./api.js";
+import { SuuntoApiError, SuuntoEmptyResponseError } from "./errors.js";
 
 // ---------- Sidecar state (CTL/ATL/baselines — Suunto's API has no endpoint for these) ----------
 
@@ -87,7 +89,16 @@ export async function loadAverages(path: string): Promise<AveragesState> {
 
 export async function saveAverages(path: string, state: AveragesState): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(state, null, 2), "utf8");
+  // Temp file + rename: a crash mid-write must not leave a truncated sidecar
+  // that loadAverages then chokes on (or worse, half-applied state).
+  const tmp = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  try {
+    await writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+    await rename(tmp, path);
+  } catch (err) {
+    await rm(tmp, { force: true });
+    throw err;
+  }
 }
 
 // Keep only the most recent N days of a date-keyed history map, to stop it
@@ -286,7 +297,7 @@ export function hrvDisplayRange(baseline: Baseline): { low: number; high: number
 
 export interface SoWhatInput {
   tsb: number;
-  recoveryMorningPct: number;
+  recoveryMorningPct: number | null; // null: no recovery data for the day
   hrv: number | null;
   hrvWellBelowStreak: number;
   recoveryMorningBelowStreak: number;
@@ -301,11 +312,11 @@ export function soWhat(i: SoWhatInput): string {
 
   // Primary verdict, most severe/specific first.
   let verdict: string;
-  if (i.tsb > 10 && i.recoveryMorningPct >= 80) {
+  if (i.tsb > 10 && i.recoveryMorningPct !== null && i.recoveryMorningPct >= 80) {
     verdict = "Peak form — ideal day for a race or performance test.";
   } else if (i.tsb < -10) {
     verdict = "Clear fatigue — at least 2 rest days needed.";
-  } else if (i.tsb >= -10 && i.tsb < 0 && i.recoveryMorningPct < 65) {
+  } else if (i.tsb >= -10 && i.tsb < 0 && i.recoveryMorningPct !== null && i.recoveryMorningPct < 65) {
     verdict = "Rest day — don't train today.";
   } else if (i.tsb >= 0) {
     verdict =
@@ -376,6 +387,27 @@ function fmtBaseline(b: Baseline, formatter: (avg: number) => string): string {
   return b.n === 0 ? "n/a" : formatter(b.avg);
 }
 
+// A missing optional product subscription is the ONE failure a section may
+// swallow (Suunto's gateway answers 403/404, or a plain 401). Everything
+// else — a rate limit (Suunto also disguises RateLimitExceeded as HTTP 401),
+// a removed route, a 5xx, a network error — is a real failure. Treating it
+// as "no data" wrote {avg:0,n:1} into the steps baseline, reset the streaks
+// and could flip the verdict to "Rest day": wrong data, saved permanently.
+export function degradesToNoData(err: unknown): boolean {
+  if (!(err instanceof SuuntoApiError)) return false;
+  // An empty 200 from a subscribed endpoint is a malformed answer, not a missing product.
+  if (err instanceof SuuntoEmptyResponseError) return false;
+  if (err.status === 403 || err.status === 404) return true;
+  return err.status === 401 && !/RateLimitExceeded|OperationNotFound/.test(err.body);
+}
+
+function optionalSection<T>(call: Promise<T>): Promise<T | never[]> {
+  return call.catch((err) => {
+    if (degradesToNoData(err)) return [];
+    throw err;
+  });
+}
+
 export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   const { suunto, date } = cfg;
   const averages = await loadAverages(cfg.averagesPath);
@@ -414,20 +446,23 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
 
   // Fetch everything in parallel — these are 4 independent network calls.
   // Daily activity / sleep / recovery each need their own optional apizone
-  // subscription — a missing one throws (403/404), and this module
-  // promises to fall back to "no data" for that section rather than
-  // failing the whole digest. Workouts use the base Developer API, always
-  // assumed present, so its failure is treated as a genuine error.
+  // subscription, and this module promises "no data" for a section whose
+  // subscription is missing rather than failing the whole digest — but ONLY
+  // for that case (see degradesToNoData). Workouts use the base Developer
+  // API, always assumed present, so its failure is always a genuine error.
   const startOfDay = `${date}T00:00:00`;
   const endOfDay = `${date}T23:59:59`;
   const [stepsStats, rawSleep, rawRecovery, workouts] = await Promise.all([
-    suunto.getDailyStats(startOfDay, endOfDay).catch(() => []),
-    suunto.getSleep(date).catch(() => []),
-    suunto.getRecovery(date).catch(() => []),
+    optionalSection(suunto.getDailyStats(startOfDay, endOfDay)),
+    optionalSection(suunto.getSleep(date)),
+    optionalSection(suunto.getRecovery(date)),
+    // A wide window, narrowed to the workouts whose own local date is `date`
+    // just below: a UTC day would file a 00:30 workout under the previous date
+    // (and its TSS with it).
     suunto.listWorkouts({
-      since: Date.parse(`${date}T00:00:00Z`),
-      until: Date.parse(`${date}T23:59:59Z`),
-      limit: 10,
+      since: dayFetchBounds(date, date).from,
+      until: dayFetchBounds(date, date).to,
+      limit: 30,
     }),
   ]);
 
@@ -437,16 +472,19 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   // steps. Matches export-health.ts's extractStepsByDate, which already
   // handles this correctly.
   const stepsMetric = (stepsStats ?? []).find((m: any) => m.Name === "stepcount");
-  const stepsValue: number = (stepsMetric?.Sources ?? []).reduce(
-    (sum: number, source: any) =>
-      sum +
-      ((source.Samples ?? []) as any[])
-        .filter((s) => s.TimeISO8601?.startsWith(date) && s.Value !== null && s.Value !== undefined)
-        .reduce((sSum: number, s: any) => sSum + s.Value, 0),
-    0,
+  const stepSamples: any[] = (stepsMetric?.Sources ?? []).flatMap((source: any) =>
+    ((source.Samples ?? []) as any[]).filter(
+      (s) => s.TimeISO8601?.startsWith(date) && s.Value !== null && s.Value !== undefined,
+    ),
   );
+  // No sample for the day is "no data", not 0 steps: a 0 would be shown as a red
+  // day and averaged into the steps baseline for good (the date can't be re-run).
+  const hasSteps = stepSamples.length > 0;
+  const stepsValue: number = stepSamples.reduce((sum: number, s: any) => sum + s.Value, 0);
 
-  // --- Sleep (main overnight sleep, keyed to the wake-up date) ---
+  // --- Sleep: the main sleep of the night that began on `date` (getSleep files
+  // a night under the date it starts, noon to noon — see nightOf in api.ts;
+  // the digest runs the morning after, so that night is finished by then) ---
   const sleepEntries = parseSleepEntries(rawSleep as any[]);
   const mainSleep = pickMainSleep(sleepEntries);
 
@@ -461,7 +499,8 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   const recoverySamples = ((rawRecovery ?? []) as any[])
     .map((r) => ({ ts: String(r.timestamp ?? ""), balance: r.entryData?.Balance as number }))
     .filter((s) => typeof s.balance === "number" && s.ts)
-    .sort((a, b) => a.ts.localeCompare(b.ts));
+    // by instant, not string: on a fall-back day local 02:xx occurs twice
+    .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
   const recoveryValues = recoverySamples.map((s) => s.balance);
   const morningRecovery = recoveryValues.length ? Math.min(...recoveryValues) : null;
   const peakRecovery = recoveryValues.length ? Math.max(...recoveryValues) : null;
@@ -469,7 +508,12 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   const lastRecovery = recoverySamples.length ? recoverySamples[recoverySamples.length - 1].balance : null;
 
   // --- Workouts / TSS for the day ---
-  const todaysWorkouts = (workouts.payload ?? []) as any[];
+  // A workout whose date can't be determined (no startTime) is kept rather than
+  // silently dropping its training load.
+  const todaysWorkouts = ((workouts.payload ?? []) as any[]).filter((w) => {
+    const d = workoutDate(w);
+    return d === "" || d === date;
+  });
   const todayTss = todaysWorkouts.reduce(
     (sum, w) => sum + (w?.tss?.trainingStressScore ?? 0),
     0,
@@ -511,10 +555,12 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   const hrvBaselineBefore = { ...averages.baselines.hrv };
   const hrv7dHistoryBefore = { ...averages.hrvHistory };
 
-  if (isPartyNight) {
-    averages.baselines.stepsPartyNight = updateBaseline(averages.baselines.stepsPartyNight, stepsValue);
-  } else {
-    averages.baselines.steps = updateBaseline(averages.baselines.steps, stepsValue);
+  if (hasSteps) {
+    if (isPartyNight) {
+      averages.baselines.stepsPartyNight = updateBaseline(averages.baselines.stepsPartyNight, stepsValue);
+    } else {
+      averages.baselines.steps = updateBaseline(averages.baselines.steps, stepsValue);
+    }
   }
   if (mainSleep) {
     averages.baselines.sleepDuration = updateBaseline(averages.baselines.sleepDuration, mainSleep.duration);
@@ -545,8 +591,6 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   averages.recoveryMorningBelowStreak =
     morningPct !== null && morningPct < 65 ? averages.recoveryMorningBelowStreak + 1 : 0;
 
-  await saveAverages(cfg.averagesPath, averages);
-
   // 7-day trailing HRV average from stored history — a real, honestly-labeled
   // substitute for "the watch's own 7-day average," which isn't exposed by
   // any Suunto API endpoint. Not the same number the watch shows; the
@@ -560,7 +604,7 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   // --- Format markdown ---
   const overallVerdict = soWhat({
     tsb,
-    recoveryMorningPct: morningPct ?? 0,
+    recoveryMorningPct: morningPct,
     hrv,
     hrvWellBelowStreak: averages.hrvWellBelowStreak,
     recoveryMorningBelowStreak: averages.recoveryMorningBelowStreak,
@@ -580,7 +624,9 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
 
   lines.push("**🏃 Activity**");
   lines.push(
-    `${stepsColor(stepsValue)} ${stepsValue.toLocaleString()} steps *(baseline: ${fmtBaseline(stepsBaselineBefore, (v) => Math.round(v).toLocaleString())})*`,
+    hasSteps
+      ? `${stepsColor(stepsValue)} ${stepsValue.toLocaleString()} steps *(baseline: ${fmtBaseline(stepsBaselineBefore, (v) => Math.round(v).toLocaleString())})*`
+      : "⚪ No step data for this date.",
   );
   if (hadWorkout) {
     for (const w of todaysWorkouts) {
@@ -671,6 +717,11 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
   const markdown = lines.join("\n");
   await mkdir(dirname(cfg.historyPath), { recursive: true }).catch(() => {});
   await appendFile(cfg.historyPath, markdown, "utf8");
+  // Saved LAST: the forward-only guard at the top refuses any date <=
+  // lastUpdated, so committing state before the history entry exists would
+  // lock in a day whose entry was never written (an unwritable history path
+  // did exactly that) with no way to re-run it.
+  await saveAverages(cfg.averagesPath, averages);
 
   return { markdown, date };
 }

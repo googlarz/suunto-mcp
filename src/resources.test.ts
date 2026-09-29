@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RESOURCES, readResource } from "./resources.js";
+import { localDate } from "./api.js";
 
 test("resources: each entry has uri, name, description, mimeType", () => {
   assert.ok(RESOURCES.length >= 5);
@@ -34,9 +35,9 @@ test("resources: readResource(today/sleep) calls getSleep with yesterday's date,
     },
   };
   const out = await readResource("suunto://today/sleep", fakeClient);
-  const todayStr = new Date().toISOString().slice(0, 10);
   assert.match(receivedDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
-  assert.notEqual(receivedDate, todayStr, "last night's sleep started yesterday, not today");
+  assert.notEqual(receivedDate, localDate(0), "last night's sleep started yesterday, not today");
+  assert.equal(receivedDate, localDate(1));
   assert.deepEqual(JSON.parse(out.text), { score: 88 });
 });
 
@@ -64,4 +65,37 @@ test("resources: readResource throws on unknown uri", async () => {
     () => readResource("suunto://nope", {} as any),
     /Unknown resource/,
   );
+});
+
+// ---------- dates and windows: local calendar, not UTC ----------
+
+test("resources: today/recovery and today/activity ask for today's local date", async () => {
+  const seen: Record<string, string> = {};
+  const fakeClient: any = {
+    getRecovery: async (d: string) => ((seen.recovery = d), []),
+    getDailyActivity: async (d: string) => ((seen.activity = d), []),
+  };
+  await readResource("suunto://today/recovery", fakeClient);
+  await readResource("suunto://today/activity", fakeClient);
+  assert.deepEqual(seen, { recovery: localDate(0), activity: localDate(0) });
+});
+
+test("resources: this-week starts at local Monday 00:00 and says which Monday", async () => {
+  let since: number | undefined;
+  const fakeClient: any = {
+    listWorkouts: async (o: any) => {
+      since = o.since;
+      return { payload: [{ workoutKey: "k", activityId: 1, startTime: 1, totalTime: 3600, totalDistance: 10000 }] };
+    },
+  };
+  const out = JSON.parse((await readResource("suunto://this-week/summary", fakeClient)).text);
+  // independent computation, from local calendar fields
+  const now = new Date();
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+  assert.equal(since, monday.getTime());
+  assert.equal(out.weekStart, localDate(0, monday));
+  assert.equal(new Date(out.weekStartISO).getTime(), monday.getTime());
+  assert.equal(new Date(monday).getDay(), 1, "a Monday");
+  assert.equal(out.count, 1);
+  assert.equal(out.totalDistanceKm, 10);
 });

@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
+import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -18,9 +19,10 @@ Usage: suunto-mcp <command> [options]
 Workout commands:
   list-workouts        [--since ISO] [--until ISO] [--limit N]
   get-workout          <workoutKey>
-  get-workout-samples  <workoutKey>
+  get-workout-laps     <workoutKey>
   get-workout-fit      <workoutKey> [--full]
-  export-workout-gpx   <workoutKey>
+  get-workout-samples  <workoutKey>   (currently rejected by Suunto)
+  export-workout-gpx   <workoutKey>   (currently rejected by Suunto)
 
 24/7 health commands:
   get-daily-activity   <YYYY-MM-DD>
@@ -31,12 +33,15 @@ Workout commands:
   list-recovery        --from YYYY-MM-DD --to YYYY-MM-DD
 
 Other:
-  list-subscriptions
+  list-subscriptions   (currently rejected by Suunto)
   sync-to-health-skill --health-root <path> [--person-id ID] [--since YYYY-MM-DD]
                         Exports step data as a health-skill-compatible CSV and
                         imports it via care_workspace.py. Steps only — HRV/RHR/
                         VO2max/SpO2 have no genuine match in Suunto's API and
-                        aren't force-mapped.
+                        aren't force-mapped. Only finished days are exported.
+                        --since re-exports that window even if already synced,
+                        and health-skill does not dedupe: those days are stored
+                        twice.
   daily-digest          <YYYY-MM-DD> [--seed-ctl N --seed-atl N]
                         Builds a color-coded health digest (steps, sleep,
                         recovery, HRV, CTL/ATL/TSB training load) for one
@@ -89,6 +94,12 @@ export async function runCli(argv: string[]) {
       case "get-workout": {
         const key = rest[0] ?? die("Usage: get-workout <workoutKey>");
         out(await suunto.getWorkout(key));
+        break;
+      }
+
+      case "get-workout-laps": {
+        const key = rest[0] ?? die("Usage: get-workout-laps <workoutKey>");
+        out(shapeLaps(await suunto.getWorkoutWithExtensions(key, LAP_EXTENSIONS)));
         break;
       }
 
