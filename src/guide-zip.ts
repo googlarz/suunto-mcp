@@ -501,7 +501,7 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
         title: `${exIndex + 1}/${totalExercises}`,
         fields: [
           { type: "heartRate", title: "HR" },
-          { type: "text", value: truncate(`${ex.name}\n${ex.detail}`, 54) },
+          { type: "text", value: truncate(`${ex.name}\n${ex.detail}`, TEXT_WITH_SIBLING_FIELDS_MAX) },
         ],
         notification: { title: "GO", text: truncate(ex.name, 54) },
         transitions: [{ condition: { type: "manualLap" } }],
@@ -520,7 +520,7 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
         // text field (\n) instead of two separate fields.
         fields: [
           { type: "heartRate", title: "HR" },
-          { type: "text", value: truncate(`${ex.name}\n${ex.detail}`, 54) },
+          { type: "text", value: truncate(`${ex.name}\n${ex.detail}`, TEXT_WITH_SIBLING_FIELDS_MAX) },
         ],
         notification: { title: "SET", text: truncate(ex.name, 54) },
         transitions: [{ condition: { type: "manualLap" } }],

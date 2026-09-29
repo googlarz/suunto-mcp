@@ -56,6 +56,28 @@ test("buildStrengthGuideJson: every exercise starts with a self-paced prep stopw
   }
 });
 
+test("buildStrengthGuideJson: no text field sharing a step with another field exceeds 40 chars, in any lapGranularity/restMode", () => {
+  const longPlan = {
+    ...strengthPlan,
+    exercises: [
+      { name: "Incline Dumbbell Bench Press With Pause", detail: "32.5kg each 4x10 tempo 3-1-1", sets: 2, restSec: 90, plates: "2x25+1x10+1x2.5+1x1.25/side" },
+    ],
+  };
+  for (const lapGranularity of ["perSet", "perExercise"] as const) {
+    for (const restMode of ["countdown", "stopwatch"] as const) {
+      const guide = buildStrengthGuideJson({ ...longPlan, lapGranularity, restMode }, "app") as any;
+      for (const step of guide.steps) {
+        if (step.fields.length < 2) continue; // a lone text field (DONE) has no sibling to hide
+        for (const f of step.fields) {
+          if (f.type === "text") {
+            assert.ok(f.value.length <= 40, `${lapGranularity}/${restMode} step "${step.title}": text is ${f.value.length} chars`);
+          }
+        }
+      }
+    }
+  }
+});
+
 test("buildStrengthGuideJson: prep shows plates instead of detail when given; falls back to detail when absent", () => {
   const planWithPlates = {
     ...strengthPlan,
