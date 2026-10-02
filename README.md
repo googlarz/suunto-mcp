@@ -5,6 +5,7 @@
 # Suunto MCP
 
 [![CI](https://github.com/googlarz/suunto-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/googlarz/suunto-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/suunto-mcp.svg)](https://www.npmjs.com/package/suunto-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![suunto-mcp MCP server](https://glama.ai/mcp/servers/googlarz/suunto-mcp/badges/score.svg)](https://glama.ai/mcp/servers/googlarz/suunto-mcp)
 
@@ -474,6 +475,43 @@ For the full version — real progressive-overload programming that persists wee
 ---
 
 ## Advanced
+
+<details>
+<summary>Install from npm instead of cloning the code</summary>
+
+The package is published on npm as [`suunto-mcp`](https://www.npmjs.com/package/suunto-mcp), so you can skip Step 5 (no `git clone`, no build). You still need Node.js 20 or newer and the credentials from Part 1.
+
+**Pair your account (replaces Step 7).** Run these in a terminal, with your own values:
+
+```bash
+export SUUNTO_CLIENT_ID=your-client-id SUUNTO_CLIENT_SECRET=your-client-secret SUUNTO_SUBSCRIPTION_KEY=your-subscription-key
+npx -p suunto-mcp suunto-mcp-auth
+npx -p suunto-mcp suunto-mcp-doctor
+```
+
+The first command opens the browser pairing page and saves your tokens to `~/.suunto-mcp/tokens.json`; the second checks that everything is connected. (The doctor's hint to run `npm run auth` means the first command.)
+
+**Connect to Claude Desktop (replaces Step 10).** Use `npx` instead of a path to the code:
+
+```json
+{
+  "mcpServers": {
+    "suunto": {
+      "command": "npx",
+      "args": ["-y", "suunto-mcp"],
+      "env": {
+        "SUUNTO_CLIENT_ID": "your-client-id",
+        "SUUNTO_CLIENT_SECRET": "your-client-secret",
+        "SUUNTO_SUBSCRIPTION_KEY": "your-subscription-key"
+      }
+    }
+  }
+}
+```
+
+The first start downloads the package, so it can take a few seconds. To stay on one version, write `"suunto-mcp@0.15.1"` in `args`. In Claude Code: `claude mcp add suunto -e SUUNTO_CLIENT_ID=... -e SUUNTO_CLIENT_SECRET=... -e SUUNTO_SUBSCRIPTION_KEY=... -- npx -y suunto-mcp`.
+
+</details>
 
 <details>
 <summary>Using with Claude Code instead of Claude Desktop</summary>
