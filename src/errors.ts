@@ -70,7 +70,7 @@ export class SuuntoEndpointUnavailableError extends SuuntoApiError {
 export class SuuntoNotAuthenticatedError extends Error {
   constructor() {
     super(
-      "Not authenticated. Run `npm run auth` to pair your Suunto account first.",
+      "Not authenticated. Pair your Suunto account first: `npm run auth` (from the cloned folder) or `npx -p suunto-mcp suunto-mcp-auth` (npm install).",
     );
     this.name = "SuuntoNotAuthenticatedError";
   }
