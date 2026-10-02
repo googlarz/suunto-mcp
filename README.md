@@ -489,7 +489,7 @@ npx -p suunto-mcp suunto-mcp-auth
 npx -p suunto-mcp suunto-mcp-doctor
 ```
 
-The first command opens the browser pairing page and saves your tokens to `~/.suunto-mcp/tokens.json`; the second checks that everything is connected. (The doctor's hint to run `npm run auth` means the first command.)
+The first command opens the browser pairing page and saves your tokens to `~/.suunto-mcp/tokens.json`; the second checks that everything is connected.
 
 **Connect to Claude Desktop (replaces Step 10).** Use `npx` instead of a path to the code:
 

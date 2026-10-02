@@ -76,7 +76,7 @@ async function run(): Promise<Check[]> {
     checks.push({
       name: "Pairing",
       status: "warn",
-      detail: "not paired — run `npm run auth` to authorize your Suunto account",
+      detail: "not paired — run `npm run auth` (from the cloned folder) or `npx -p suunto-mcp suunto-mcp-auth` (npm install) to authorize your Suunto account",
     });
     return checks;
   }
