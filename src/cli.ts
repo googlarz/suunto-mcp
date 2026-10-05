@@ -3,7 +3,7 @@ import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
-import { buildSnapshot } from "./snapshot.js";
+import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -28,7 +28,7 @@ Workout commands:
 24/7 health commands:
   get-daily-activity   <YYYY-MM-DD>
   list-daily-activity  --from YYYY-MM-DD --to YYYY-MM-DD
-  get-daily-snapshot   <YYYY-MM-DD>
+  get-daily-snapshot   <YYYY-MM-DD> [--to YYYY-MM-DD]
   get-sleep            <YYYY-MM-DD>
   list-sleep           --from YYYY-MM-DD --to YYYY-MM-DD
   get-recovery         <YYYY-MM-DD>
@@ -151,8 +151,9 @@ export async function runCli(argv: string[]) {
       }
 
       case "get-daily-snapshot": {
-        const date = rest[0] ?? die("Usage: get-daily-snapshot <YYYY-MM-DD>");
-        out(await buildSnapshot(suunto, date));
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { to: { type: "string" } } });
+        const date = positionals[0] ?? die("Usage: get-daily-snapshot <YYYY-MM-DD> [--to YYYY-MM-DD]");
+        out(values.to && values.to !== date ? await buildSnapshotRange(suunto, date, values.to) : await buildSnapshot(suunto, date));
         break;
       }
 

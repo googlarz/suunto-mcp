@@ -29,7 +29,7 @@ import { generateDigest } from "./daily-digest.js";
 import { validateAgainstSchema } from "./schema-validate.js";
 import { TOOL_META } from "./tool-meta.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
-import { buildSnapshot } from "./snapshot.js";
+import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -150,7 +150,7 @@ const toolDefs = [
   {
     name: "get_daily_snapshot",
     description:
-      "One call for \"how was this day, and the night before it\": the aggregation the other tools leave to the caller. Output: { date, sleepNightOf, sleep, recovery, activity, workouts, errors }. sleep describes the NIGHT THAT LED INTO the date (sleepNightOf = the previous date, i.e. sleeps that began between noon on the previous day and noon on the date): { main (the longest non-nap sleep: sleepId, bedtimeStart, bedtimeEnd, durationS, deepS, lightS, remS, score, avgHrv, hrAvg, hrMin, spo2Max), otherNights (further non-nap sleeps, when the watch split a night), nightSleepS (total of main + otherNights, null when there is none), naps }. Suunto marks any sleep shorter than about 3 hours as a nap, so a short night appears under naps with main null. recovery covers the local calendar day: { samples, low: { balance, at }, high, first, last, stressStateSamples (samples per StressState) } or null without data. low is the day's lowest balance — not necessarily overnight (after an evening workout it can fall in the evening). activity: { steps, energyKcal } for the local day — energyKcal is the daily-statistics energy converted from joules; real days come out around 700-1,500 kcal, well below a resting rate, so it looks like ACTIVE energy rather than a total (not verified against the watch). A value is null, never 0, when Suunto has no sample for the date. workouts: the day's workouts (by their own local date) with { workoutKey, activityId, startLocal, totalTimeS, kcal, hrAvg, hrMax, tss (HR method), guide, hasLaps } — pass a workoutKey with hasLaps to get_workout_laps. Each section is fetched independently: one that fails is null and explained in errors, the others are still valid. Use this instead of combining get_sleep, get_recovery, get_daily_activity_statistics and list_workouts by hand. Read-only.",
+      "One call for \"how was this day, and the night before it\": the aggregation the other tools leave to the caller. Output: { date, sleepNightOf, sleep, recovery, activity, workouts, errors }. sleep describes the NIGHT THAT LED INTO the date (sleepNightOf = the previous date, i.e. sleeps that began between noon on the previous day and noon on the date): { main (the longest non-nap sleep: sleepId, bedtimeStart, bedtimeEnd, durationS, deepS, lightS, remS, score, avgHrv, hrAvg, hrMin, spo2Max), otherNights (further non-nap sleeps, when the watch split a night), nightSleepS (total of main + otherNights, null when there is none), naps }. Suunto marks any sleep shorter than about 3 hours as a nap, so a short night appears under naps with main null. recovery covers the local calendar day: { samples, low: { balance, at }, high, first, last, stressStateSamples (samples per StressState) } or null without data. low is the day's lowest balance — not necessarily overnight (after an evening workout it can fall in the evening). activity: { steps, energyKcal } for the local day — energyKcal is the daily-statistics energy converted from joules; real days come out around 700-1,500 kcal, well below a resting rate, so it looks like ACTIVE energy rather than a total (not verified against the watch). A value is null, never 0, when Suunto has no sample for the date. workouts: the day's workouts (by their own local date) with { workoutKey, activityId, startLocal, totalTimeS, kcal, hrAvg, hrMax, tss (HR method), guide, hasLaps } — pass a workoutKey with hasLaps to get_workout_laps. Each section is fetched independently: one that fails is null and explained in errors, the others are still valid. With `to`, returns { from, to, days: [...], errors } instead (errors is shared by the whole range; a failed section is null in every day). Use this instead of combining get_sleep, get_recovery, get_daily_activity_statistics and list_workouts by hand. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -161,7 +161,16 @@ const toolDefs = [
           minLength: 10,
           maxLength: 10,
           examples: ["2026-04-20"],
-          description: "The local calendar day YYYY-MM-DD. Use yesterday or earlier for a complete day; today's data is partial until the watch has synced, and the night that led into today may still be in progress.",
+          description: "The local calendar day YYYY-MM-DD (the first day when `to` is given). Use yesterday or earlier for a complete day; today's data is partial until the watch has synced, and the night that led into today may still be in progress.",
+        },
+        to: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-26"],
+          description: "Optional last day of a range (inclusive, at most 14 days from `date`). The result is then { from, to, days: [one entry per day, in the shape above without errors], errors } — one request per section for the whole range, so prefer it to calling this once per day.",
         },
       },
       required: ["date"],
@@ -703,7 +712,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(out, null, 2));
       }
       case "get_daily_snapshot":
-        return text(JSON.stringify(await buildSnapshot(suunto, a.date)));
+        return text(JSON.stringify(a.to && a.to !== a.date ? await buildSnapshotRange(suunto, a.date, a.to) : await buildSnapshot(suunto, a.date)));
       case "get_workout_laps": {
         const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
         return text(JSON.stringify(shapeLaps(data)));
