@@ -27,6 +27,7 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_workout_samples: { title: "Get workout samples", annotations: READ },
   get_workout_fit: { title: "Get workout FIT data", annotations: READ },
   get_workout_laps: { title: "Get workout laps", annotations: READ },
+  get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   export_workout_gpx: { title: "Export workout as GPX", annotations: READ },
   get_daily_activity: { title: "Get daily activity", annotations: READ },
   list_daily_activity: { title: "List daily activity", annotations: READ },

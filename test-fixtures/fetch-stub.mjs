@@ -82,7 +82,11 @@ globalThis.fetch = async (input) => {
   if (path === "/247/daily-activity-statistics") {
     // the real endpoint answers 400 to an offset written +0200
     if (/[+-]\d{4}$/.test(url.searchParams.get("startdate") ?? "")) return res("Invalid arguments", 400);
-    return res([{ Name: "stepcount", Aggregation: "sum", Sources: [{ Samples: [{ TimeISO8601: "2026-09-27T12:00:00+02:00", Value: 1234 }] }] }]);
+    const day = (url.searchParams.get("startdate") ?? "2026-09-27").slice(0, 10);
+    return res([
+      { Name: "stepcount", Aggregation: "sum", Sources: [{ Samples: [{ TimeISO8601: `${day}T12:00:00+02:00`, Value: 1234 }] }] },
+      { Name: "energyconsumption", Aggregation: "sum", Sources: [{ Samples: [{ TimeISO8601: `${day}T12:00:00+02:00`, Value: 10_000_000 }] }] },
+    ]);
   }
   if (path === "/v2/subscriptions") return res("... Access denied (OperationNotFound)", 401);
   return res("not found", 404);

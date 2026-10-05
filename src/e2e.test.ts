@@ -120,6 +120,34 @@ test("e2e get_sleep / list_sleep: the night of a date, one row per sleep, longes
   });
 });
 
+test("e2e get_daily_snapshot: the night before the date, the day's recovery, steps and energy", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("get_daily_snapshot", { date: "2026-09-28" });
+    assert.equal(isError, false, text);
+    assert.ok(!text.includes("\n"), "compact JSON");
+    const snap = JSON.parse(text);
+    assert.equal(snap.sleepNightOf, "2026-09-27");
+    assert.equal(snap.sleep.main.sleepId, 1);
+    assert.equal(snap.sleep.main.durationS, 27000);
+    assert.deepEqual(snap.sleep.naps.map((n: any) => n.sleepId), [3]);
+    assert.equal(snap.recovery.samples, 48);
+    assert.deepEqual(snap.activity, { steps: 1234, energyKcal: 2390 });
+    assert.deepEqual(snap.workouts, [], "the stub's workouts are on the 27th");
+    assert.deepEqual(snap.errors, []);
+    const day27 = JSON.parse((await call("get_daily_snapshot", { date: "2026-09-27" })).text);
+    assert.equal(day27.workouts.length, 3);
+    assert.equal(day27.sleep.main, null, "no sleep began between noon on the 26th and noon on the 27th");
+  });
+});
+
+test("e2e get_daily_snapshot: an invalid date is rejected before any request", async () => {
+  await withMcp(async (call) => {
+    const r = await call("get_daily_snapshot", { date: "2026-02-30" });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /Invalid arguments/);
+  });
+});
+
 test("e2e get_recovery: exactly the local day's 48 half-hour rows, in order", async () => {
   await withMcp(async (call) => {
     const rows = JSON.parse((await call("get_recovery", { date: "2026-09-27" })).text);
