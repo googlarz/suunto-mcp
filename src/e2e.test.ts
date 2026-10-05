@@ -91,6 +91,8 @@ test("e2e get_workout_laps: compact table with kinds, guide and zones", async ()
     assert.deepEqual(out.guide, { id: "yn8oz6vu", name: "MONDAY" });
     assert.deepEqual(out.hrZoneTimeS, [100, 200, 50, 0, 0]);
     assert.equal(out.tss[0].value, 24.4);
+    assert.deepEqual(out.checks, [], "a clean session has no findings");
+    assert.equal(out.feeling, null);
   });
 });
 

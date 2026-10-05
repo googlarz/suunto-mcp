@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanLabel, lapKind, shapeLaps, LAP_EXTENSIONS } from "./laps.js";
+import { cleanLabel, lapKind, shapeLaps, lapChecks, LAP_EXTENSIONS } from "./laps.js";
 
 // Synthetic response in the live /v3/workouts/{key}?extensions=... shape.
 const START = 1_790_000_000_000;
@@ -122,4 +122,53 @@ test("lapKind: rest, done, step, null — including the older per-exercise rest 
 
 test("LAP_EXTENSIONS: exact Suunto names (case-sensitive, with the Extension suffix)", () => {
   assert.deepEqual(LAP_EXTENSIONS, ["ManualLapStreamExtension", "SummaryExtension", "IntensityExtension"]);
+});
+
+// ---------- lap table checks ----------
+
+const lap = (i: number, label: string | null, hr: number | null = 100) =>
+  [i, 0, 30, hr, hr, hr, 1, label === null ? null : lapKind(label), label];
+
+test("lapChecks: a clean guided session has no findings", () => {
+  const rows = [lap(1, "60kg 3x10 | Bench"), lap(2, "Bench | 60kg 3x10"), lap(3, "Next: set 2/3"), lap(4, "Bench | 60kg 3x10"), lap(5, "Session complete")];
+  assert.deepEqual(lapChecks(rows), []);
+});
+
+test("lapChecks: a table with no laps has no findings (nothing to distrust)", () => {
+  assert.deepEqual(lapChecks([]), []);
+});
+
+test("lapChecks: the same rest twice in a row means a set lap is missing", () => {
+  const rows = [lap(1, "Next: set 2/3"), lap(2, "Next: set 2/3"), lap(3, "Session complete")];
+  const c = lapChecks(rows);
+  assert.deepEqual(c.map((x) => x.code), ["duplicate-rest"]);
+  assert.match(c[0].detail, /laps 1 and 2/);
+  // two different rests in a row are not a duplicate
+  assert.deepEqual(lapChecks([lap(1, "Next: set 2/3"), lap(2, "Next: set 3/3"), lap(3, "Session complete")]), []);
+});
+
+test("lapChecks: a guided table without 'Session complete' is flagged, an unguided one is not", () => {
+  assert.deepEqual(lapChecks([lap(1, "Bench | 60kg"), lap(2, "Next: set 2/3")]).map((x) => x.code), ["no-session-complete"]);
+  assert.deepEqual(lapChecks([lap(1, null), lap(2, null)]), []);
+});
+
+test("lapChecks: some laps labelled and some not", () => {
+  const c = lapChecks([lap(1, "Bench | 60kg"), lap(2, null), lap(3, "Session complete")]);
+  assert.deepEqual(c.map((x) => x.code), ["unlabelled-laps"]);
+  assert.match(c[0].detail, /1 of 3/);
+});
+
+test("lapChecks: no heart rate anywhere (e.g. battery mode Tour)", () => {
+  const rows = [lap(1, "Bench | 60kg", null), lap(2, "Session complete", null)];
+  assert.deepEqual(lapChecks(rows).map((x) => x.code), ["no-heart-rate"]);
+  // a single lap with heart rate is enough
+  assert.deepEqual(lapChecks([lap(1, "Bench | 60kg", null), lap(2, "Session complete", 90)]), []);
+});
+
+test("shapeLaps: carries checks and the feeling answer", () => {
+  const out = shapeLaps(response([{ type: "SummaryExtension", feeling: 4, apps: [] }, { type: "ManualLapStreamExtension", markers: [marker(0, 60, { min: 90, avg: 100, max: 110 }, 5, "Next: set 2/3"), marker(60, 60, { min: 90, avg: 100, max: 110 }, 5, "Next: set 2/3")] }]));
+  assert.equal(out.feeling, 4);
+  assert.deepEqual(out.checks.map((c) => c.code), ["duplicate-rest", "no-session-complete"]);
+  assert.equal(shapeLaps(GUIDED).feeling, null, "skipped question → null");
+  assert.deepEqual(shapeLaps(GUIDED).checks, []);
 });
