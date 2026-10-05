@@ -3,7 +3,7 @@
   "name": "io.github.googlarz/suunto-mcp",
   "title": "Suunto MCP",
   "description": "Suunto watch data (workouts, sleep, recovery, 24/7 activity) for Claude and other AI assistants.",
-  "version": "0.15.3",
+  "version": "0.16.0",
   "websiteUrl": "https://github.com/googlarz/suunto-mcp#readme",
   "repository": {
     "url": "https://github.com/googlarz/suunto-mcp",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "suunto-mcp",
-      "version": "0.15.3",
+      "version": "0.16.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
