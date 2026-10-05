@@ -1,6 +1,6 @@
 // get_daily_snapshot: one call that answers "how was my day and the night before
 // it", with the aggregation every consumer used to redo by hand — one row per
-// sleep, naps apart from nights, the overnight recovery low, steps and energy
+// sleep, naps apart from nights, the recovery low and high, steps and energy
 // of the local day, the day's workouts. Pure shaping functions plus a small
 // orchestrator over SuuntoClient; every section can fail on its own.
 import type { SuuntoClient } from "./api.js";
@@ -31,6 +31,10 @@ function sleepRow(row: any) {
     deepS: num(d.DeepSleepDuration),
     lightS: num(d.LightSleepDuration),
     remS: num(d.REMSleepDuration),
+    // Seconds: time to fall asleep, awake after falling asleep, awake in bed before getting up.
+    latencyS: num(d.SleepOnsetLatencyDuration),
+    wasoS: num(d.WakeAfterSleepOnsetDuration),
+    wakeBeforeOffBedS: num(d.WakeBeforeOffBedDuration),
     score: num(d.SleepQualityScore),
     avgHrv: num(d.AvgHRV),
     hrAvg: num(d.HRAvg),
@@ -81,6 +85,24 @@ export function summarizeRecovery(rows: any[]) {
     // Samples per StressState (one sample is half an hour on a full day).
     stressStateSamples: stateCounts,
   };
+}
+
+// The sample closest in time to `iso`, or null when there is none within an hour
+// (the watch writes one every 30 minutes, so a bigger gap means it hasn't synced
+// that moment — a far-off sample would be a guess).
+const SAMPLE_MAX_GAP_MS = 3_600_000;
+export function nearestSample(rows: any[], iso: unknown): { balance: number; at: string } | null {
+  const target = typeof iso === "string" ? Date.parse(iso) : NaN;
+  if (Number.isNaN(target)) return null;
+  let best: { balance: number; at: string; gap: number } | null = null;
+  for (const r of rows ?? []) {
+    const t = Date.parse(r?.timestamp);
+    const balance = num(r?.entryData?.Balance);
+    if (Number.isNaN(t) || balance === null) continue;
+    const gap = Math.abs(t - target);
+    if (gap <= SAMPLE_MAX_GAP_MS && (best === null || gap < best.gap)) best = { balance, at: r.timestamp, gap };
+  }
+  return best && { balance: best.balance, at: best.at };
 }
 
 // ---------- steps and energy ----------
@@ -151,8 +173,9 @@ function groupBy<T>(rows: T[], key: (row: T) => string): Map<string, T[]> {
 
 const rowsOf = (res: any): any[] => (Array.isArray(res) ? res : res?.payload ?? []);
 
-// The same per-day shape as buildSnapshot, for from..to inclusive, from ONE
-// request per section instead of one per day (Suunto rate-limits with a 401).
+// One entry per day for from..to inclusive, from ONE request per section
+// instead of one per day (Suunto rate-limits with a 401). buildSnapshot is the
+// one-day case.
 export async function buildSnapshotRange(client: SuuntoClient, from: string, to: string) {
   if (from > to) throw new Error(`date (${from}) must be on or before to (${to}).`);
   const count = daysBetween(from, to);
@@ -171,7 +194,7 @@ export async function buildSnapshotRange(client: SuuntoClient, from: string, to:
   const bounds = dayFetchBounds(from, to);
   const [sleepRes, recoveryRes, stats, workouts] = await Promise.all([
     section("sleep", () => client.listSleep(previousDate(from), previousDate(to))),
-    section("recovery", () => client.listRecovery(from, to)),
+    section("recovery", () => client.listRecovery(previousDate(from), to)),
     section("activity", () => client.getDailyStats(`${from}T00:00:00`, `${to}T23:59:59`)),
     section("workouts", () => client.listWorkouts({ since: bounds.from, until: bounds.to, limit: Math.min(10 * count, 150) })),
   ]);
@@ -181,11 +204,23 @@ export async function buildSnapshotRange(client: SuuntoClient, from: string, to:
   const days = [];
   for (let date = from, i = 0; i < count; date = nextDate(date), i++) {
     const nightDate = previousDate(date);
+    const sleep = nights === null ? null : summarizeSleep(nights.get(nightDate) ?? []);
+    const dayRows = recovery?.get(date) ?? [];
+    const base = recovery === null ? null : summarizeRecovery(dayRows);
     days.push({
       date,
       sleepNightOf: nightDate,
-      sleep: nights === null ? null : summarizeSleep(nights.get(nightDate) ?? []),
-      recovery: recovery === null ? null : summarizeRecovery(recovery.get(date) ?? []),
+      sleep,
+      // morning: Balance at the main sleep's BedtimeEnd (the waking value);
+      // atBedtime: at its BedtimeStart, which falls on the previous local day.
+      recovery:
+        base === null
+          ? null
+          : {
+              ...base,
+              morning: nearestSample(dayRows, sleep?.main?.bedtimeEnd),
+              atBedtime: nearestSample([...(recovery!.get(nightDate) ?? []), ...dayRows], sleep?.main?.bedtimeStart),
+            },
       activity: stats === null ? null : summarizeActivity(stats, date),
       workouts: workouts === null ? null : summarizeWorkouts(workouts, date),
     });
@@ -194,35 +229,6 @@ export async function buildSnapshotRange(client: SuuntoClient, from: string, to:
 }
 
 export async function buildSnapshot(client: SuuntoClient, date: string) {
-  const nightOf = previousDate(date);
-  const errors: { section: string; error: string }[] = [];
-  const section = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
-    try {
-      return await fn();
-    } catch (err: any) {
-      errors.push({ section: name, error: err?.message ?? String(err) });
-      return null;
-    }
-  };
-
-  const bounds = dayFetchBounds(date, date);
-  const [sleepRows, recoveryRows, stats, workouts] = await Promise.all([
-    section("sleep", () => client.getSleep(nightOf)),
-    section("recovery", () => client.getRecovery(date)),
-    section("activity", () => client.getDailyStats(`${date}T00:00:00`, `${date}T23:59:59`)),
-    section("workouts", () => client.listWorkouts({ since: bounds.from, until: bounds.to, limit: 30 })),
-  ]);
-
-  return {
-    date,
-    // The night that led into `date`: sleeps that began between noon on the
-    // previous day and noon on `date`.
-    sleepNightOf: nightOf,
-    sleep: sleepRows === null ? null : summarizeSleep(Array.isArray(sleepRows) ? sleepRows : (sleepRows as any)?.payload ?? []),
-    recovery: recoveryRows === null ? null : summarizeRecovery(Array.isArray(recoveryRows) ? recoveryRows : (recoveryRows as any)?.payload ?? []),
-    activity: stats === null ? null : summarizeActivity(stats, date),
-    workouts: workouts === null ? null : summarizeWorkouts(workouts, date),
-    // A section that failed is null above and explained here; the rest is still good.
-    errors,
-  };
+  const { days, errors } = await buildSnapshotRange(client, date, date);
+  return { ...days[0], errors };
 }

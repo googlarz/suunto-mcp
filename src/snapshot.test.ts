@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { previousDate, summarizeSleep, summarizeRecovery, summarizeActivity, summarizeWorkouts, buildSnapshot, buildSnapshotRange } from "./snapshot.js";
+import { previousDate, summarizeSleep, summarizeRecovery, summarizeActivity, summarizeWorkouts, buildSnapshot, buildSnapshotRange, nearestSample } from "./snapshot.js";
 
 const sleepRow = (id: number, bedtime: string, duration: number, extra: Record<string, unknown> = {}) => ({
   timestamp: bedtime,
@@ -103,8 +103,8 @@ test("summarizeWorkouts: empty and malformed lists", () => {
 
 function fakeClient(over: Record<string, unknown> = {}) {
   return {
-    getSleep: async (d: string) => ((over as any).sleepDate = d, [sleepRow(1, "2026-09-27T23:10:00.000+02:00", 27000)]),
-    getRecovery: async () => [rec("04:00", 0.4)],
+    listSleep: async () => [sleepRow(1, "2026-09-27T23:10:00.000+02:00", 27000)],
+    listRecovery: async () => [rec("04:00", 0.4)],
     getDailyStats: async () => stats("2026-09-28", 5000, 8_368_000),
     listWorkouts: async () => ({ payload: [] }),
     ...over,
@@ -113,8 +113,8 @@ function fakeClient(over: Record<string, unknown> = {}) {
 
 test("buildSnapshot: the sleep section is the night before the date; all sections present", async () => {
   const seen: any = {};
-  const snap = await buildSnapshot(fakeClient({ getSleep: async (d: string) => ((seen.sleepDate = d), [sleepRow(1, "2026-09-27T23:10:00.000+02:00", 27000)]) }), "2026-09-28");
-  assert.equal(seen.sleepDate, "2026-09-27");
+  const snap = await buildSnapshot(fakeClient({ listSleep: async (a: string, b: string) => ((seen.range = [a, b]), [sleepRow(1, "2026-09-27T23:10:00.000+02:00", 27000)]) }), "2026-09-28");
+  assert.deepEqual(seen.range, ["2026-09-27", "2026-09-27"]);
   assert.equal(snap.sleepNightOf, "2026-09-27");
   assert.equal(snap.sleep?.main?.sleepId, 1);
   assert.equal(snap.recovery?.low.balance, 0.4);
@@ -126,7 +126,7 @@ test("buildSnapshot: the sleep section is the night before the date; all section
 test("buildSnapshot: a failing section is null and explained; the others survive", async () => {
   const snap = await buildSnapshot(
     fakeClient({
-      getRecovery: async () => {
+      listRecovery: async () => {
         throw new Error("Suunto API 403 /247samples/recovery: Forbidden");
       },
       listWorkouts: async () => {
@@ -152,8 +152,41 @@ test("buildSnapshot: asks for a wide workout window and keeps only the date's ow
     "2026-09-28",
   );
   assert.equal(asked.since, Date.UTC(2026, 8, 28) - 14 * 3_600_000);
-  assert.equal(asked.limit, 30);
+  assert.equal(asked.limit, 10);
   assert.equal(snap.workouts?.length, 1);
+});
+
+test("nearestSample: the closest within an hour, null beyond it or on bad input", () => {
+  const rows = [rec("06:00", 0.5), rec("06:30", 0.6), rec("07:00", 0.7)];
+  assert.deepEqual(nearestSample(rows, "2026-09-28T06:20:00.000+02:00"), { balance: 0.6, at: "2026-09-28T06:30:00.000+02:00" });
+  assert.equal(nearestSample(rows, "2026-09-28T09:00:00.000+02:00"), null, "two hours from the last sample");
+  assert.equal(nearestSample(rows, null), null);
+  assert.equal(nearestSample([], "2026-09-28T06:20:00.000+02:00"), null);
+});
+
+test("buildSnapshot: recovery carries the waking value (at BedtimeEnd) and the bedtime value (previous day's rows)", async () => {
+  const night = sleepRow(1, "2026-09-27T23:10:00.000+02:00", 27000, { BedtimeEnd: "2026-09-28T06:40:00.000+02:00", SleepOnsetLatencyDuration: 600, WakeAfterSleepOnsetDuration: 1200, WakeBeforeOffBedDuration: 300 });
+  const snap = await buildSnapshot(
+    fakeClient({
+      listSleep: async () => [night],
+      listRecovery: async () => [
+        { timestamp: "2026-09-27T23:00:00.000+02:00", entryData: { Balance: 0.3, StressState: 1 } },
+        rec("06:30", 0.9),
+        rec("06:00", 0.8),
+        rec("12:00", 0.5),
+      ],
+    }),
+    "2026-09-28",
+  );
+  assert.deepEqual(snap.recovery?.morning, { balance: 0.9, at: "2026-09-28T06:30:00.000+02:00" });
+  assert.deepEqual(snap.recovery?.atBedtime, { balance: 0.3, at: "2026-09-27T23:00:00.000+02:00" });
+  assert.equal(snap.recovery?.samples, 3, "the previous day's row is not part of the day's summary");
+  assert.deepEqual([snap.sleep?.main?.latencyS, snap.sleep?.main?.wasoS, snap.sleep?.main?.wakeBeforeOffBedS], [600, 1200, 300]);
+});
+
+test("buildSnapshot: no main sleep means no morning/atBedtime, not a guess", async () => {
+  const snap = await buildSnapshot(fakeClient({ listSleep: async () => [] }), "2026-09-28");
+  assert.deepEqual([snap.recovery?.morning, snap.recovery?.atBedtime], [null, null]);
 });
 
 const rangeClient = (over: Record<string, unknown> = {}, calls: string[] = []) =>
@@ -168,7 +201,7 @@ const rangeClient = (over: Record<string, unknown> = {}, calls: string[] = []) =
 test("buildSnapshotRange: one request per section; each day gets its own night, recovery, steps and workouts", async () => {
   const calls: string[] = [];
   const r = await buildSnapshotRange(rangeClient({}, calls), "2026-09-28", "2026-09-29");
-  assert.deepEqual(calls.sort(), ["recovery 2026-09-28..2026-09-29", "sleep 2026-09-27..2026-09-28", "stats", "workouts limit 20"]);
+  assert.deepEqual(calls.sort(), ["recovery 2026-09-27..2026-09-29", "sleep 2026-09-27..2026-09-28", "stats", "workouts limit 20"]);
   assert.deepEqual(r.days.map((d) => d.date), ["2026-09-28", "2026-09-29"]);
   assert.deepEqual(r.days.map((d) => d.sleepNightOf), ["2026-09-27", "2026-09-28"]);
   assert.deepEqual(r.days.map((d) => d.sleep?.main?.sleepId ?? null), [2, null], "night of 09-27 -> day 09-28; night of 09-28 has no row");
