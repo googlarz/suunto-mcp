@@ -140,6 +140,21 @@ test("e2e get_daily_snapshot: the night before the date, the day's recovery, ste
   });
 });
 
+test("e2e get_daily_snapshot with `to`: each day matches the single-day call; a range over 14 days is refused", async () => {
+  await withMcp(async (call) => {
+    const range = JSON.parse((await call("get_daily_snapshot", { date: "2026-09-27", to: "2026-09-28" })).text);
+    assert.deepEqual([range.from, range.to, range.days.map((d: any) => d.date)], ["2026-09-27", "2026-09-28", ["2026-09-27", "2026-09-28"]]);
+    assert.deepEqual(range.errors, []);
+    for (const day of range.days) {
+      const single = JSON.parse((await call("get_daily_snapshot", { date: day.date })).text);
+      assert.deepEqual({ ...single, errors: undefined, activity: undefined }, { ...day, errors: undefined, activity: undefined });
+    }
+    const tooLong = await call("get_daily_snapshot", { date: "2026-09-01", to: "2026-09-20" });
+    assert.equal(tooLong.isError, true);
+    assert.match(tooLong.text, /limited to 14 days/);
+  });
+});
+
 test("e2e get_daily_snapshot: an invalid date is rejected before any request", async () => {
   await withMcp(async (call) => {
     const r = await call("get_daily_snapshot", { date: "2026-02-30" });

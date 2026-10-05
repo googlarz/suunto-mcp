@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { previousDate, summarizeSleep, summarizeRecovery, summarizeActivity, summarizeWorkouts, buildSnapshot } from "./snapshot.js";
+import { previousDate, summarizeSleep, summarizeRecovery, summarizeActivity, summarizeWorkouts, buildSnapshot, buildSnapshotRange } from "./snapshot.js";
 
 const sleepRow = (id: number, bedtime: string, duration: number, extra: Record<string, unknown> = {}) => ({
   timestamp: bedtime,
@@ -154,4 +154,45 @@ test("buildSnapshot: asks for a wide workout window and keeps only the date's ow
   assert.equal(asked.since, Date.UTC(2026, 8, 28) - 14 * 3_600_000);
   assert.equal(asked.limit, 30);
   assert.equal(snap.workouts?.length, 1);
+});
+
+const rangeClient = (over: Record<string, unknown> = {}, calls: string[] = []) =>
+  ({
+    listSleep: async (a: string, b: string) => (calls.push(`sleep ${a}..${b}`), [sleepRow(1, "2026-09-26T23:10:00.000+02:00", 27000), sleepRow(2, "2026-09-27T23:40:00.000+02:00", 25000)]),
+    listRecovery: async (a: string, b: string) => (calls.push(`recovery ${a}..${b}`), [rec("04:00", 0.4), { timestamp: "2026-09-29T04:00:00.000+02:00", entryData: { Balance: 0.7, StressState: 1 } }]),
+    getDailyStats: async () => (calls.push("stats"), [...stats("2026-09-28", 5000, 8_368_000), ...stats("2026-09-29", 7000, 4_184_000)]),
+    listWorkouts: async (o: any) => (calls.push(`workouts limit ${o.limit}`), { payload: [workout("2026-09-29T09:00:00+02:00")] }),
+    ...over,
+  }) as any;
+
+test("buildSnapshotRange: one request per section; each day gets its own night, recovery, steps and workouts", async () => {
+  const calls: string[] = [];
+  const r = await buildSnapshotRange(rangeClient({}, calls), "2026-09-28", "2026-09-29");
+  assert.deepEqual(calls.sort(), ["recovery 2026-09-28..2026-09-29", "sleep 2026-09-27..2026-09-28", "stats", "workouts limit 20"]);
+  assert.deepEqual(r.days.map((d) => d.date), ["2026-09-28", "2026-09-29"]);
+  assert.deepEqual(r.days.map((d) => d.sleepNightOf), ["2026-09-27", "2026-09-28"]);
+  assert.deepEqual(r.days.map((d) => d.sleep?.main?.sleepId ?? null), [2, null], "night of 09-27 -> day 09-28; night of 09-28 has no row");
+  assert.deepEqual(r.days.map((d) => d.recovery?.low.balance), [0.4, 0.7]);
+  assert.deepEqual(r.days.map((d) => d.activity?.steps), [5000, 7000]);
+  assert.deepEqual(r.days.map((d) => d.workouts?.length), [0, 1]);
+  assert.deepEqual(r.errors, []);
+});
+
+test("buildSnapshotRange: a failing section is null on every day and explained once", async () => {
+  const r = await buildSnapshotRange(rangeClient({ listRecovery: async () => { throw new Error("403"); } }), "2026-09-28", "2026-09-29");
+  assert.deepEqual(r.days.map((d) => d.recovery), [null, null]);
+  assert.equal(r.days[0].activity?.steps, 5000);
+  assert.deepEqual(r.errors.map((e) => e.section), ["recovery"]);
+});
+
+test("buildSnapshotRange: refuses a reversed range and one over 14 days; 14 days is fine", async () => {
+  await assert.rejects(buildSnapshotRange(rangeClient(), "2026-09-29", "2026-09-28"), /on or before/);
+  await assert.rejects(buildSnapshotRange(rangeClient(), "2026-09-01", "2026-09-15"), /limited to 14 days; 2026-09-01\.\.2026-09-15 is 15/);
+  const ok = await buildSnapshotRange(rangeClient(), "2026-09-01", "2026-09-14");
+  assert.equal(ok.days.length, 14);
+});
+
+test("buildSnapshotRange: a range across a month and year boundary lists every date once", async () => {
+  const r = await buildSnapshotRange(rangeClient(), "2026-12-30", "2027-01-02");
+  assert.deepEqual(r.days.map((d) => d.date), ["2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02"]);
 });

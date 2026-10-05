@@ -4,17 +4,20 @@
 // of the local day, the day's workouts. Pure shaping functions plus a small
 // orchestrator over SuuntoClient; every section can fail on its own.
 import type { SuuntoClient } from "./api.js";
-import { dayFetchBounds, workoutDate } from "./api.js";
+import { dayFetchBounds, nightOf, rowDate, workoutDate } from "./api.js";
 
 const r1 = (n: unknown): number | null => (typeof n === "number" && Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
 const num = (n: unknown): number | null => (typeof n === "number" && Number.isFinite(n) ? n : null);
 
 const J_PER_KCAL = 4184;
 
-export function previousDate(date: string): string {
+function shiftDate(date: string, days: number): string {
   const [y, m, d] = date.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
+
+export const previousDate = (date: string): string => shiftDate(date, -1);
+const nextDate = (date: string): string => shiftDate(date, 1);
 
 // ---------- sleep ----------
 
@@ -130,6 +133,65 @@ export function summarizeWorkouts(list: any, date: string) {
 }
 
 // ---------- the call ----------
+
+export const MAX_SNAPSHOT_DAYS = 14;
+
+export function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+function groupBy<T>(rows: T[], key: (row: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const k = key(row);
+    groups.set(k, [...(groups.get(k) ?? []), row]);
+  }
+  return groups;
+}
+
+const rowsOf = (res: any): any[] => (Array.isArray(res) ? res : res?.payload ?? []);
+
+// The same per-day shape as buildSnapshot, for from..to inclusive, from ONE
+// request per section instead of one per day (Suunto rate-limits with a 401).
+export async function buildSnapshotRange(client: SuuntoClient, from: string, to: string) {
+  if (from > to) throw new Error(`date (${from}) must be on or before to (${to}).`);
+  const count = daysBetween(from, to);
+  if (count > MAX_SNAPSHOT_DAYS) throw new Error(`A snapshot range is limited to ${MAX_SNAPSHOT_DAYS} days; ${from}..${to} is ${count}.`);
+
+  const errors: { section: string; error: string }[] = [];
+  const section = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (err: any) {
+      errors.push({ section: name, error: err?.message ?? String(err) });
+      return null;
+    }
+  };
+
+  const bounds = dayFetchBounds(from, to);
+  const [sleepRes, recoveryRes, stats, workouts] = await Promise.all([
+    section("sleep", () => client.listSleep(previousDate(from), previousDate(to))),
+    section("recovery", () => client.listRecovery(from, to)),
+    section("activity", () => client.getDailyStats(`${from}T00:00:00`, `${to}T23:59:59`)),
+    section("workouts", () => client.listWorkouts({ since: bounds.from, until: bounds.to, limit: Math.min(10 * count, 150) })),
+  ]);
+  const nights = sleepRes === null ? null : groupBy(rowsOf(sleepRes), (r) => nightOf(r) ?? "");
+  const recovery = recoveryRes === null ? null : groupBy(rowsOf(recoveryRes), rowDate);
+
+  const days = [];
+  for (let date = from, i = 0; i < count; date = nextDate(date), i++) {
+    const nightDate = previousDate(date);
+    days.push({
+      date,
+      sleepNightOf: nightDate,
+      sleep: nights === null ? null : summarizeSleep(nights.get(nightDate) ?? []),
+      recovery: recovery === null ? null : summarizeRecovery(recovery.get(date) ?? []),
+      activity: stats === null ? null : summarizeActivity(stats, date),
+      workouts: workouts === null ? null : summarizeWorkouts(workouts, date),
+    });
+  }
+  return { from, to, days, errors };
+}
 
 export async function buildSnapshot(client: SuuntoClient, date: string) {
   const nightOf = previousDate(date);
