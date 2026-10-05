@@ -349,7 +349,7 @@ Claude: Looking up your workouts…
 |----------|----------------------|---------|
 | **Workouts** | Any recorded activity — runs, hikes, rides, swims, ski tours. Distance, time, heart rate, pace, elevation, power, and lap-by-lap data for guided sessions. | Developer API *(already subscribed)* |
 | **Sleep** | Sleep duration, stages (light/deep/REM), sleep score. | Sleep API subscription on apizone |
-| **Recovery** | Recovery balance and stress state through the day (HRV comes with the sleep data). | Recovery API subscription on apizone |
+| **Recovery** | Recovery balance and stress state through the day (HRV comes with the sleep data). Balance is the watch's *Resources* percentage (0.96 = 96%); stress state 1 = Recovering, 2 = Active. The app's single *Recovery state* percentage is not in the API. | Recovery API subscription on apizone |
 | **Daily activity** | Steps, calories, 24/7 heart rate. | Daily Activity API subscription on apizone |
 
 To add sleep, recovery, or daily activity: go back to [apizone.suunto.com](https://apizone.suunto.com), find each product, and subscribe. Then run `npm run doctor` to confirm they're active.
@@ -377,6 +377,8 @@ This pairs naturally with a coaching workflow: describe your goals, equipment, a
 Ask Claude *"generate my daily digest for yesterday"* and it writes a color-coded markdown summary — steps, sleep, recovery balance, HRV, and a training-load model (Fitness/Fatigue/Form) — appended to `SUUNTO_HISTORY.md` in the folder the server runs from (set `SUUNTO_DIGEST_HISTORY_PATH` to choose another file).
 
 **Fitness (CTL), Fatigue (ATL), and Form (TSB) aren't Suunto API fields** — there's no endpoint for them. They're computed here from each workout's real `tss.trainingStressScore` using standard 42-day/7-day exponential decay, the same math training-load tools like TrainingPeaks use. The running values persist in `~/.suunto-mcp/averages.json` (override with `SUUNTO_DIGEST_AVERAGES_PATH`) since there's nowhere else to keep them.
+
+**How close is it to the watch?** Checked on one day against the Suunto app: Fatigue matched (11), Form matched (2), Fitness came out about 1 lower (13.1 vs 14). Treat Fitness as ±1 of your watch; seed it from the app if you need it exact.
 
 A few things worth knowing before you rely on it:
 - **CTL/ATL start at 0** on first use and take 4–6 weeks to converge to a realistic number — there's no API to read your watch's own displayed Fitness/Fatigue. To skip the cold-start, tell Claude the numbers off your watch on your very first digest (*"my watch shows Fitness 42, Fatigue 38, seed the digest with those"*) — or pass `--seed-ctl 42 --seed-atl 38` on the CLI. Only works on the first-ever digest; ignored after that.
