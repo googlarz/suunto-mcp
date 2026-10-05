@@ -580,7 +580,7 @@ Claude picks the right tool automatically — you don't need to know these. For 
 |------|-------------|
 | `list_workouts` | Recent workouts, filtered by date |
 | `get_workout` | Summary numbers for one workout (no laps — use `get_workout_laps`) |
-| `get_workout_laps` | Lap-by-lap table for one workout: time, heart rate, calories and the guide step of each lap — the way to read back a guided gym session set by set |
+| `get_workout_laps` | Lap-by-lap table for one workout: time, heart rate, calories and the guide step of each lap — the way to read back a guided gym session set by set; it also reports when the table looks unreliable (a missing or doubled lap, no heart rate) |
 | `get_workout_fit` | Raw FIT file decoded to structured data (large — `full: true` is about 550 KB for a strength session) |
 | `get_workout_samples` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026); use `get_workout_fit` |
 | `export_workout_gpx` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026) |
