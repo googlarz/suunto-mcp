@@ -10,7 +10,7 @@ account.
 git clone https://github.com/googlarz/suunto-mcp
 cd suunto-mcp
 npm install
-npm test          # 40 tests, ~10s
+npm test          # full suite, hermetic (no network, no credentials)
 npm run build
 ```
 
