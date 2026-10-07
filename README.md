@@ -106,7 +106,7 @@ After signing in, follow the [How to start](https://apizone.suunto.com/how-to-st
 
 > **Heads up:** Suunto's website states that API access is only for commercial partners — ignore that. Private users do get access, it just takes **3–4 weeks** for the subscription to be approved. Submit it and wait. It will come through.
 
-> You may see other products like "Sleep API", "Recovery API", "Daily Activity API". Skip those for now — the Developer API is enough to get started. You can add the others later if you want sleep and recovery data in Claude.
+> You may see other products like "Sleep API", "Recovery API", "Daily Activity API". The Developer API is enough to get started (workouts). Subscribe to the other three as well if you want sleep, recovery, steps, the daily snapshot or the daily digest — they are listed next to the Developer API, and you can also add them later.
 
 ---
 
@@ -238,12 +238,12 @@ Suunto MCP — health check
 
   ✓  Node version             20.18.0 (require ≥ 20)
   ✓  Credentials              client_id, client_secret, subscription_key set
-  ✓  Network reachability     reachable
+  ✓  Network → cloudapi-oauth.suunto.com   reachable (HTTP 200)
   ✓  Pairing                  paired (user: your-username), token expires in 47 min
-  ✓  API probe (workouts)     received 1 workout
+  ✓  API probe (list_workouts)  received 1 workout
 ```
 
-If any line shows ✗, the message tells you exactly what to fix. Resolve any issues before moving on.
+The exact lines vary a little, and more appear for the Sleep, Recovery and Daily Activity products. If any line shows ✗, the message tells you exactly what to fix — resolve it before moving on. A `!` is only a warning (for example, an optional product you haven't subscribed to).
 
 ---
 
@@ -405,9 +405,15 @@ CLI: `suunto-mcp daily-digest 2026-04-20 [--seed-ctl 42 --seed-atl 38]`. MCP too
 | "Not authenticated" | The pairing step didn't finish | Run `npm run auth` again |
 | You logged in but nothing happened | The browser tab closed or timed out before Suunto confirmed | Close all Suunto tabs and run `npm run auth` again — click Authorize promptly |
 | "Token request failed" or "400 error" | Client Secret or Redirect URI don't match apizone | Go to apizone → profile → OAuth application settings and confirm both values match exactly |
-| "401" error on every request | Subscription key is wrong or incomplete | Go to apizone → profile → Subscriptions, reveal and re-copy the Primary Key |
+| "401" error on every request | Usually the subscription key is wrong or incomplete | Go to apizone → profile → Subscriptions, reveal and re-copy the Primary Key |
+| "401" with "RateLimitExceeded" | Suunto's gateway reports a rate limit as 401 | Wait about 2 minutes and ask again — the key is fine |
+| "401" with "OperationNotFound", or a tool marked "currently unavailable" | Suunto no longer serves that endpoint (`get_workout_samples`, `export_workout_gpx`, `list_subscriptions`) | Nothing to fix on your side; re-pairing will not help |
 | "403 Forbidden" on workouts | Developer API subscription isn't active | Sign in to apizone and confirm it's listed as Active |
 | Sleep / recovery / activity returns "not found" | Those need separate subscriptions | Go to apizone and subscribe to the Sleep, Recovery, or Daily Activity API |
+| Laps missing, doubled or out of order in a guided gym session | The watch's buttons were locked, the exercise was restarted, or a lap was pressed outside the guide | Ask for `get_workout_laps` and read its `checks` list — it says which of these happened; don't trust set-by-set reading while `checks` is non-empty |
+| A workout has no heart rate | Heart-rate tracking was off, e.g. battery mode **Tour** | Choose a different battery mode before the workout; the data can't be recovered afterwards |
+| Daily calories look far too low | The daily-statistics energy looks like *active* energy, not total (resting + active) — this is not verified against the watch | Treat it as active kcal; don't read it as total daily burn |
+| Numbers differ from the Suunto app | Balance equals the app's *Resources* % (0.96 = 96%). The app's single *Recovery state* % is not available through the API. Fitness (CTL) computed here can be about 1 point off the watch | Use the app for Recovery state %; seed the digest from the app if you need CTL exact |
 | Got an SSL error after Apple sign-in | Known Suunto quirk with Apple login | Close the error tab, go back to the auth URL the terminal printed, and continue |
 | "State mismatch" error | A second auth flow started before the first finished | Close all auth-related tabs and run `npm run auth` fresh |
 | `npm run build` failed with an error | Node.js version too old or not installed | Run `node --version` — it must be 20 or higher. Reinstall from [nodejs.org](https://nodejs.org) |
@@ -451,6 +457,30 @@ Use your email address to sign in to apizone. Your username will appear once you
 
 ---
 
+## Upgrading
+
+- **npx:** `npx -y suunto-mcp` fetches the newest version on a fresh start; if you pinned a version in `args`, change it. Restart Claude afterwards.
+- **Cloned folder:** `git pull`, `npm install`, `npm run build`, then restart Claude.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed.
+
+## Environment variables
+
+Set these in the `env` block of your Claude config (or in `.env` for terminal commands).
+
+| Variable | Needed | What it does |
+|---|---|---|
+| `SUUNTO_CLIENT_ID`, `SUUNTO_CLIENT_SECRET`, `SUUNTO_SUBSCRIPTION_KEY` | yes | Your apizone credentials |
+| `SUUNTO_APP_NAME` | to push guides | Exact app name registered on apizone |
+| `SUUNTO_REDIRECT_URI` | no | OAuth callback; default `http://localhost:8421/callback` (must match apizone) |
+| `SUUNTO_TOKEN_PATH` | no | Token file; default `~/.suunto-mcp/tokens.json` |
+| `SUUNTO_TOKEN_STORAGE` | no | `keychain` to store tokens in the OS keychain |
+| `SUUNTO_NO_BROWSER` | no | Don't open a browser during pairing; copy the URL yourself |
+| `SUUNTO_DIGEST_HISTORY_PATH`, `SUUNTO_DIGEST_AVERAGES_PATH` | no | Where the daily digest writes |
+| `SUUNTO_WEBHOOK_SECRET`, `SUUNTO_WEBHOOK_HOST`, `SUUNTO_WEBHOOK_LOG`, `SUUNTO_WEBHOOK_ALLOW_UNSIGNED`, `PORT` | webhook only | See the Webhooks section |
+
+---
+
 ## Disconnecting
 
 To fully remove access:
@@ -460,6 +490,7 @@ To fully remove access:
    ```bash
    rm -f ~/.suunto-mcp/tokens.json
    ```
+   If you used `SUUNTO_TOKEN_STORAGE=keychain`, delete the "suunto-mcp" entry in your system keychain instead. The daily digest also keeps `~/.suunto-mcp/averages.json` and `SUUNTO_HISTORY.md` — delete them too if you want the health data gone.
 3. Remove the `"suunto"` block from your Claude config and restart Claude.
 
 ---
@@ -511,7 +542,7 @@ The first command opens the browser pairing page and saves your tokens to `~/.su
 }
 ```
 
-The first start downloads the package, so it can take a few seconds. To stay on one version, write `"suunto-mcp@0.15.1"` in `args`. In Claude Code: `claude mcp add suunto -e SUUNTO_CLIENT_ID=... -e SUUNTO_CLIENT_SECRET=... -e SUUNTO_SUBSCRIPTION_KEY=... -- npx -y suunto-mcp`.
+The first start downloads the package, so it can take a few seconds. To stay on one version, write `"suunto-mcp@<version>"` in `args` (for example the current one from [npm](https://www.npmjs.com/package/suunto-mcp)). In Claude Code: `claude mcp add suunto -e SUUNTO_CLIENT_ID=... -e SUUNTO_CLIENT_SECRET=... -e SUUNTO_SUBSCRIPTION_KEY=... -- npx -y suunto-mcp`.
 
 </details>
 
@@ -531,16 +562,19 @@ Add `-e SUUNTO_APP_NAME=your-app-name` if you want to push guided workouts.
 <details>
 <summary>CLI — query your data from the terminal</summary>
 
-After building, you can query Suunto data directly without Claude:
+After building, you can query Suunto data directly without Claude. From the cloned folder use `node dist/index.js <command>`; with the npm package use `npx suunto-mcp <command>` (or just `suunto-mcp` if installed globally):
 
 ```bash
-suunto-mcp list-workouts --limit 10
-suunto-mcp get-workout <workoutKey>
-suunto-mcp get-sleep 2026-04-20
-suunto-mcp list-recovery --from 2026-04-01 --to 2026-04-30
+node dist/index.js list-workouts --limit 10
+node dist/index.js get-workout <workoutKey>
+node dist/index.js get-workout-laps <workoutKey>
+node dist/index.js get-daily-snapshot 2026-04-20
+node dist/index.js get-daily-snapshot 2026-04-14 --to 2026-04-20
+node dist/index.js get-sleep 2026-04-20
+node dist/index.js list-recovery --from 2026-04-01 --to 2026-04-30
 ```
 
-All output is JSON — pipe into `jq` for filtering.
+Other commands: `get-workout-fit`, `get-daily-activity`, `list-daily-activity`, `list-sleep`, `get-recovery`, `daily-digest`, `sync-to-health-skill`. Run it with `--help` for the full list and every option. All output is JSON — pipe into `jq` for filtering.
 
 </details>
 
@@ -551,9 +585,9 @@ All output is JSON — pipe into `jq` for filtering.
 npm run webhook
 ```
 
-Starts an HTTP receiver on port 8422 that logs workout events as they arrive. Expose it to the internet (cloudflared, ngrok, your own server) and register the URL in apizone → webhooks.
+Starts an HTTP receiver on port 8422 that logs workout events as they arrive. It listens on `127.0.0.1` only, so expose it through a tunnel (cloudflared, ngrok) or a reverse proxy and register the URL in apizone → webhooks.
 
-**Set `SUUNTO_WEBHOOK_SECRET`** to the notification secret you configure in apizone's OAuth application settings. Without it, the receiver accepts *any* POST to its URL as genuine — since this endpoint is exposed to the internet, anyone who finds it could inject forged events. With it set, every request is verified against Suunto's `X-HMAC-SHA256-Signature` header and rejected with 401 if it doesn't match.
+**Set `SUUNTO_WEBHOOK_SECRET`** to the notification secret you configure in apizone's OAuth application settings. Every request is verified against Suunto's `X-HMAC-SHA256-Signature` header and rejected with 401 if it doesn't match. Without the secret the receiver rejects *everything* (set `SUUNTO_WEBHOOK_ALLOW_UNSIGNED=1` only for local testing). Other options: `PORT`, `SUUNTO_WEBHOOK_HOST` (default `127.0.0.1`), `SUUNTO_WEBHOOK_LOG` (default `~/.suunto-mcp/webhooks.ndjson`, written private and capped at 100 MB).
 
 Most users can skip this whole section — asking Claude on demand is simpler.
 
