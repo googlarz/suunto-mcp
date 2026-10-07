@@ -50,6 +50,9 @@ function ensureReady() {
   assertCredentials(cfg);
 }
 
+// Far above any real route (a day-long track is well under 1 MB); keeps a mistaken path from reading a huge file.
+const MAX_GPX_BYTES = 10_000_000;
+
 const server = new Server(
   { name: "suunto-mcp", version: pkgVersion },
   { capabilities: { tools: {}, resources: {} } },
@@ -408,6 +411,30 @@ const toolDefs = [
     },
   },
   {
+    name: "upload_route",
+    description:
+      "Imports a GPX file as a route in the user's Suunto account (it appears in the Suunto app's route library as PRIVATE and can then be synced to the watch for navigation). Provide the absolute path to a .gpx file. Every <rte> or <trk> element in the file becomes its own route; the route name comes from its <name> (or <desc>), and waypoints are created from <wpt> elements at the same coordinates as route points and from route points that have a name or type. The route's activities come from the `activities` argument, NOT from the GPX content (default [1] = running). Returns { count, routes: [{ id, name, activities, segments }] }. A route cannot be deleted through this server — remove it in the Suunto app. Requires the Route API on the Suunto subscription (list_routes shows existing routes). Write operation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          minLength: 1,
+          description: "Absolute path to the .gpx file on disk.",
+        },
+        activities: {
+          type: "array",
+          items: { type: "integer", minimum: 0 },
+          minItems: 1,
+          maxItems: 20,
+          default: [1],
+          description: "Suunto activity IDs the route is suitable for (1 = running; the other IDs are in Suunto's Activities.pdf on apizone). Shown in the app's route details. Optional.",
+        },
+      },
+      required: ["filePath"],
+    },
+  },
+  {
     name: "upload_workout",
     description:
       "Uploads a workout file to the user's Suunto account. Provide the absolute path to the file on disk. The file is pushed to Suunto and appears in the app after processing (usually a few seconds). Returns an uploadId you can poll with get_upload_status. Suunto's own upload API docs state only .fit (binary) is currently supported for this endpoint — a .gpx path is still accepted here (sent as application/gpx+xml) in case that changes, but treat it as unverified; use .fit for a workout that must reliably show up. Write operation.",
@@ -751,6 +778,29 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "export_route": {
         const bytes = await suunto.exportRoute(a.routeId);
         return text(new TextDecoder().decode(bytes));
+      }
+      case "upload_route": {
+        const { readFile, stat } = await import("node:fs/promises");
+        const filePath: string = a.filePath;
+        if (extname(filePath).toLowerCase() !== ".gpx") {
+          return text(`Error: upload_route only accepts .gpx files, not "${extname(filePath) || "no extension"}".`, true);
+        }
+        if ((await stat(filePath)).size > MAX_GPX_BYTES) {
+          return text(`Error: ${filePath} is larger than ${MAX_GPX_BYTES / 1_000_000} MB; split the route into smaller files.`, true);
+        }
+        const gpx = await readFile(filePath);
+        // A renamed non-GPX file must not be pushed to Suunto's storage.
+        if (!gpx.subarray(0, 4096).toString("utf8").includes("<gpx")) {
+          return text("Error: the file does not look like GPX (no <gpx> element).", true);
+        }
+        const { items } = await suunto.importRoute(gpx, a.activities ?? [1]);
+        const routes = items.map((r: any) => ({
+          id: r.id ?? null,
+          name: r.description ?? null,
+          activities: r.activities ?? null,
+          segments: Array.isArray(r.segments) ? r.segments.length : null,
+        }));
+        return text(JSON.stringify({ count: routes.length, routes }));
       }
       case "upload_workout": {
         const { readFile } = await import("node:fs/promises");

@@ -224,3 +224,48 @@ test("e2e upload_workout: only .fit and .gpx files are accepted, before any requ
     }
   });
 });
+
+const gpxFile = async (body: string, name = "route.gpx") => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const path = join(await mkdtemp(join(tmpdir(), "suunto-route-")), name);
+  await writeFile(path, body);
+  return path;
+};
+
+test("e2e upload_route: one route per <rte>/<trk>, named from the file, with the requested activities", async () => {
+  await withMcp(async (call) => {
+    const path = await gpxFile(`<?xml version="1.0"?><gpx version="1.1"><rte><name>Morning loop</name><rtept lat="1" lon="2"/></rte><trk><name>Long ride</name><trkseg/></trk></gpx>`);
+    const r = await call("upload_route", { filePath: path, activities: [3, 5] });
+    assert.equal(r.isError, false, r.text);
+    assert.deepEqual(JSON.parse(r.text), {
+      count: 2,
+      routes: [
+        { id: "route0", name: "Morning loop", activities: [3, 5], segments: 1 },
+        { id: "route1", name: "Long ride", activities: [3, 5], segments: 1 },
+      ],
+    });
+    const dflt = JSON.parse((await call("upload_route", { filePath: path })).text);
+    assert.deepEqual(dflt.routes[0].activities, [1], "running is the default");
+  });
+});
+
+test("e2e upload_route: only real .gpx files are accepted, before any request", async () => {
+  await withMcp(async (call) => {
+    const notGpx = await gpxFile("just some text", "route.gpx");
+    const wrongExt = await gpxFile(`<gpx><rte><name>x</name></rte></gpx>`, "route.txt");
+    for (const [filePath, pattern] of [
+      [notGpx, /does not look like GPX/],
+      [wrongExt, /only accepts \.gpx/],
+      ["/etc/hosts", /only accepts \.gpx/],
+    ] as const) {
+      const r = await call("upload_route", { filePath });
+      assert.equal(r.isError, true, filePath);
+      assert.match(r.text, pattern);
+    }
+    const bad = await call("upload_route", { filePath: notGpx, activities: [] });
+    assert.equal(bad.isError, true, "an empty activities list is invalid");
+    assert.match(bad.text, /Invalid arguments/);
+  });
+});

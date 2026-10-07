@@ -339,6 +339,30 @@ export class SuuntoClient {
     }
   }
 
+  // ---------- Route import ----------
+  // POST /v2/route/import?activities=1,3 with the raw GPX as the body (verified
+  // live 2026-10-07). Each rte/trk element in the file becomes its own route;
+  // the activities come from the query string, never from the GPX content.
+  async importRoute(gpx: Buffer, activities: number[]): Promise<{ items: any[] }> {
+    const token = await getValidAccessToken(this.cfg);
+    const res = await fetch(`${API_BASE}/v2/route/import?activities=${activities.join(",")}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Ocp-Apim-Subscription-Key": this.cfg.subscriptionKey,
+        "Content-Type": "application/gpx+xml",
+        Accept: "application/json",
+      },
+      body: new Uint8Array(gpx),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw errorFor(res.status, "/v2/route/import", body);
+    }
+    const json = (await res.json()) as any;
+    return { items: Array.isArray(json?.items) ? json.items : [] };
+  }
+
   getUploadStatus(uploadId: string) {
     return this.json<any>(`/v2/upload/${encodeURIComponent(uploadId)}`);
   }

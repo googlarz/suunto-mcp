@@ -42,6 +42,7 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_upload_status: { title: "Get workout upload status", annotations: READ },
   list_guides: { title: "List SuuntoPlus guides", annotations: READ },
   upload_workout: { title: "Upload workout file", annotations: CREATE },
+  upload_route: { title: "Import GPX route", annotations: CREATE },
   push_workout_guide: { title: "Push workout guide to watch", annotations: PUSH },
   push_interval_guide: { title: "Push interval guide to watch", annotations: PUSH },
   push_strength_guide: { title: "Push strength guide to watch", annotations: PUSH },

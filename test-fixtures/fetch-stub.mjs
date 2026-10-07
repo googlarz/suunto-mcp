@@ -40,9 +40,18 @@ function recoveryRows(url) {
   return rows.filter((r) => inWindow(Date.parse(r.timestamp), url));
 }
 
-globalThis.fetch = async (input) => {
+globalThis.fetch = async (input, init = {}) => {
   const url = new URL(String(input));
   const path = url.pathname;
+
+  if (path === "/v2/route/import") {
+    if (init.method !== "POST" || init.headers?.["Content-Type"] !== "application/gpx+xml") return res("bad request", 400);
+    const gpx = new TextDecoder().decode(init.body);
+    // one route per <rte>/<trk>, named from its <name>, like the real endpoint
+    const names = [...gpx.matchAll(/<(?:rte|trk)>\s*<name>([^<]*)<\/name>/g)].map((m) => m[1]);
+    const activities = (url.searchParams.get("activities") ?? "1").split(",").map(Number);
+    return res({ items: names.map((description, i) => ({ id: `route${i}`, username: "u", description, activities, segments: [{ start: {}, end: {} }] })) });
+  }
 
   if (path === "/v3/workouts/") {
     const total = Number(process.env.STUB_WORKOUTS ?? 3);
