@@ -26,6 +26,7 @@ jobs:
       # What ships must start: install the real tarball and do the MCP handshake.
       - name: Smoke-test the packed tarball
         run: |
+          mkdir "$RUNNER_TEMP/pack"
           npm pack --pack-destination "$RUNNER_TEMP/pack"
           mkdir "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
           npm init -y >/dev/null
