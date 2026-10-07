@@ -4,7 +4,7 @@
     "googlarz"
   ],
   "title": "Suunto MCP",
-  "description": "MCP server that bridges Suunto sports watch data to AI assistants. Exposes workouts, GPS tracks, time-series samples, FIT files, sleep, recovery, HRV, and 24/7 activity data via natural language queries.",
+  "description": "MCP server that bridges Suunto sports watch data to AI assistants. Exposes workouts and lap-by-lap data, FIT files, sleep, recovery, HRV, 24/7 activity and a one-call daily snapshot via natural language queries; pushes workout guides to the watch.",
   "homepage": "https://github.com/googlarz/suunto-mcp",
   "repository": "https://github.com/googlarz/suunto-mcp",
   "license": "MIT",

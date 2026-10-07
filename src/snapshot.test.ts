@@ -152,7 +152,7 @@ test("buildSnapshot: asks for a wide workout window and keeps only the date's ow
     "2026-09-28",
   );
   assert.equal(asked.since, Date.UTC(2026, 8, 28) - 14 * 3_600_000);
-  assert.equal(asked.limit, 10);
+  assert.equal(asked.limit, 25);
   assert.equal(snap.workouts?.length, 1);
 });
 
@@ -201,7 +201,7 @@ const rangeClient = (over: Record<string, unknown> = {}, calls: string[] = []) =
 test("buildSnapshotRange: one request per section; each day gets its own night, recovery, steps and workouts", async () => {
   const calls: string[] = [];
   const r = await buildSnapshotRange(rangeClient({}, calls), "2026-09-28", "2026-09-29");
-  assert.deepEqual(calls.sort(), ["recovery 2026-09-27..2026-09-29", "sleep 2026-09-27..2026-09-28", "stats", "workouts limit 20"]);
+  assert.deepEqual(calls.sort(), ["recovery 2026-09-27..2026-09-29", "sleep 2026-09-27..2026-09-28", "stats", "workouts limit 50"]);
   assert.deepEqual(r.days.map((d) => d.date), ["2026-09-28", "2026-09-29"]);
   assert.deepEqual(r.days.map((d) => d.sleepNightOf), ["2026-09-27", "2026-09-28"]);
   assert.deepEqual(r.days.map((d) => d.sleep?.main?.sleepId ?? null), [2, null], "night of 09-27 -> day 09-28; night of 09-28 has no row");
@@ -228,4 +228,24 @@ test("buildSnapshotRange: refuses a reversed range and one over 14 days; 14 days
 test("buildSnapshotRange: a range across a month and year boundary lists every date once", async () => {
   const r = await buildSnapshotRange(rangeClient(), "2026-12-30", "2027-01-02");
   assert.deepEqual(r.days.map((d) => d.date), ["2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02"]);
+});
+
+test("buildSnapshotRange: a malformed or non-calendar date is an error, not an empty result", async () => {
+  await assert.rejects(buildSnapshotRange(rangeClient(), "2026-01-01", "2026-1-5"), /not a valid calendar date/);
+  await assert.rejects(buildSnapshotRange(rangeClient(), "2026-09-28", "2026-02-30"), /not a valid calendar date/);
+  await assert.rejects(buildSnapshot(rangeClient(), "garbage"), /not a valid calendar date/);
+});
+
+test("buildSnapshotRange: reaching the workout limit is reported, not silent", async () => {
+  const full = Array.from({ length: 25 }, () => workout("2026-09-28T09:00:00+02:00"));
+  const r = await buildSnapshotRange(rangeClient({ listWorkouts: async () => ({ payload: full }) }), "2026-09-28", "2026-09-28");
+  assert.match(r.errors.find((e) => e.section === "workouts")!.error, /25-workout limit/);
+  const ok = await buildSnapshotRange(rangeClient({ listWorkouts: async () => ({ payload: full.slice(0, 24) }) }), "2026-09-28", "2026-09-28");
+  assert.deepEqual(ok.errors, []);
+});
+
+test("nearestSample: an exact tie picks the earlier sample (rows are time-ordered)", () => {
+  const rows = [rec("00:30", 0.1), rec("01:30", 0.9)];
+  assert.equal(nearestSample(rows, "2026-09-28T01:00:00.000+02:00")?.balance, 0.1);
+  assert.equal(nearestSample([rec("06:00", 0.5)], "2026-09-28T07:00:00.000+02:00")?.balance, 0.5, "exactly one hour is still within range");
 });

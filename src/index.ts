@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { extname } from "node:path";
 import "./env.js";
 
 // CLI mode: any explicit command arg, OR running interactively in a terminal.
@@ -754,8 +755,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "upload_workout": {
         const { readFile } = await import("node:fs/promises");
         const filePath: string = a.filePath;
-        const ext = filePath.split(".").pop()?.toLowerCase();
-        const contentType = ext === "gpx" ? "application/gpx+xml" : "application/octet-stream";
+        // Only workout files: a prompt-injected call must not be able to push
+        // any other local file (keys, token files) to Suunto's storage.
+        const ext = extname(filePath).toLowerCase();
+        if (ext !== ".fit" && ext !== ".gpx") {
+          return text(`Error: upload_workout only accepts .fit or .gpx files, not "${ext || "no extension"}".`, true);
+        }
+        const contentType = ext === ".gpx" ? "application/gpx+xml" : "application/octet-stream";
         const fileBytes = await readFile(filePath);
         const { uploadId, uploadUrl } = await suunto.initiateUpload({
           description: a.description,

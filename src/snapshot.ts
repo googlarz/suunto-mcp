@@ -5,6 +5,7 @@
 // orchestrator over SuuntoClient; every section can fail on its own.
 import type { SuuntoClient } from "./api.js";
 import { dayFetchBounds, nightOf, rowDate, workoutDate } from "./api.js";
+import { isValidCalendarDate } from "./schema-validate.js";
 
 const r1 = (n: unknown): number | null => (typeof n === "number" && Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
 const num = (n: unknown): number | null => (typeof n === "number" && Number.isFinite(n) ? n : null);
@@ -177,6 +178,9 @@ const rowsOf = (res: any): any[] => (Array.isArray(res) ? res : res?.payload ?? 
 // instead of one per day (Suunto rate-limits with a 401). buildSnapshot is the
 // one-day case.
 export async function buildSnapshotRange(client: SuuntoClient, from: string, to: string) {
+  for (const d of [from, to]) {
+    if (!isValidCalendarDate(d)) throw new Error(`"${d}" is not a valid calendar date (YYYY-MM-DD).`);
+  }
   if (from > to) throw new Error(`date (${from}) must be on or before to (${to}).`);
   const count = daysBetween(from, to);
   if (count > MAX_SNAPSHOT_DAYS) throw new Error(`A snapshot range is limited to ${MAX_SNAPSHOT_DAYS} days; ${from}..${to} is ${count}.`);
@@ -192,12 +196,18 @@ export async function buildSnapshotRange(client: SuuntoClient, from: string, to:
   };
 
   const bounds = dayFetchBounds(from, to);
+  const workoutLimit = Math.min(25 * count, 200);
   const [sleepRes, recoveryRes, stats, workouts] = await Promise.all([
     section("sleep", () => client.listSleep(previousDate(from), previousDate(to))),
     section("recovery", () => client.listRecovery(previousDate(from), to)),
     section("activity", () => client.getDailyStats(`${from}T00:00:00`, `${to}T23:59:59`)),
-    section("workouts", () => client.listWorkouts({ since: bounds.from, until: bounds.to, limit: Math.min(10 * count, 150) })),
+    section("workouts", () => client.listWorkouts({ since: bounds.from, until: bounds.to, limit: workoutLimit })),
   ]);
+  // The fetch window is wider than the days asked for (it must cover every UTC
+  // offset), so neighbouring days' workouts use up part of the limit too.
+  if (rowsOf(workouts).length >= workoutLimit) {
+    errors.push({ section: "workouts", error: `Reached the ${workoutLimit}-workout limit; some workouts may be missing — ask for fewer days.` });
+  }
   const nights = sleepRes === null ? null : groupBy(rowsOf(sleepRes), (r) => nightOf(r) ?? "");
   const recovery = recoveryRes === null ? null : groupBy(rowsOf(recoveryRes), rowDate);
 

@@ -61,8 +61,9 @@ export async function saveTokens(path: string, bundle: TokenBundle): Promise<voi
     entry.setPassword(JSON.stringify(bundle));
     return;
   }
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(bundle, null, 2), "utf8");
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  // mode applies at creation (no world-readable window); chmod covers a file that already existed.
+  await writeFile(path, JSON.stringify(bundle, null, 2), { encoding: "utf8", mode: 0o600 });
   await chmod(path, 0o600);
 }
 
