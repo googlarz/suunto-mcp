@@ -53,7 +53,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "dotenv": "^16.4.5",
     "fit-file-parser": "^1.21.0"
   },

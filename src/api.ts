@@ -326,6 +326,8 @@ export class SuuntoClient {
   }
 
   async uploadFile(uploadUrl: string, fileBytes: Buffer, contentType: string): Promise<void> {
+    // The URL comes from Suunto's response; never PUT a user's file to anything but https.
+    if (new URL(uploadUrl).protocol !== "https:") throw new Error("Refusing to upload: Suunto returned a non-https upload URL.");
     const res = await fetch(uploadUrl, {
       method: "PUT",
       headers: { "Content-Type": contentType },

@@ -214,3 +214,13 @@ test("get_workout_fit stays pretty-printed: callers slice its ~550 KB output by 
   const handler = source.slice(source.indexOf('case "get_workout_fit"'), source.indexOf('case "export_workout_gpx"'));
   assert.match(handler, /JSON\.stringify\(out, null, 2\)/, "compacting this output breaks line-range slicing of spilled results");
 });
+
+test("e2e upload_workout: only .fit and .gpx files are accepted, before any request or file read", async () => {
+  await withMcp(async (call) => {
+    for (const filePath of ["/etc/hosts", "/Users/x/.suunto-mcp/tokens.json", "/tmp/noextension"]) {
+      const r = await call("upload_workout", { filePath });
+      assert.equal(r.isError, true, filePath);
+      assert.match(r.text, /only accepts \.fit or \.gpx/);
+    }
+  });
+});

@@ -93,7 +93,7 @@ export async function saveAverages(path: string, state: AveragesState): Promise<
   // that loadAverages then chokes on (or worse, half-applied state).
   const tmp = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
-    await writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+    await writeFile(tmp, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
     await rename(tmp, path);
   } catch (err) {
     await rm(tmp, { force: true });

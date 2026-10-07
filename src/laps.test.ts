@@ -172,3 +172,8 @@ test("shapeLaps: carries checks and the feeling answer", () => {
   assert.equal(shapeLaps(GUIDED).feeling, null, "skipped question → null");
   assert.deepEqual(shapeLaps(GUIDED).checks, []);
 });
+
+test("lapChecks: a lap pressed after 'Session complete' is not a fault; one before it still is", () => {
+  assert.deepEqual(lapChecks([lap(1, "Bench | 60kg"), lap(2, "Session complete"), lap(3, null)]), []);
+  assert.deepEqual(lapChecks([lap(1, "Bench | 60kg"), lap(2, null), lap(3, "Session complete"), lap(4, null)]).map((x) => x.code), ["unlabelled-laps"]);
+});

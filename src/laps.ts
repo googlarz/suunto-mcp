@@ -61,9 +61,14 @@ export function lapChecks(rows: any[][]): LapCheck[] {
     }
   }
 
+  // A lap pressed after the guide's final "Session complete" lap has no label by
+  // nature; only unlabelled laps before it point at a problem.
+  const doneAt = rows.findIndex((r) => r[KIND] === "done");
+  const guided = doneAt === -1 ? rows : rows.slice(0, doneAt);
   const labelled = rows.filter((r) => r[LABEL] !== null).length;
-  if (labelled > 0 && labelled < rows.length) {
-    checks.push({ code: "unlabelled-laps", detail: `${rows.length - labelled} of ${rows.length} laps have no guide label (a lap pressed outside the guide, or the guide ended)` });
+  const unlabelled = guided.filter((r) => r[LABEL] === null).length;
+  if (labelled > 0 && unlabelled > 0) {
+    checks.push({ code: "unlabelled-laps", detail: `${unlabelled} of ${rows.length} laps have no guide label (a lap pressed outside the guide, or the guide ended)` });
   }
   if (labelled > 0 && !rows.some((r) => r[KIND] === "done")) {
     checks.push({ code: "no-session-complete", detail: "the guide's final 'Session complete' lap is missing — the session ended early, the buttons were locked, or the watch restarted" });

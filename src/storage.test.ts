@@ -65,3 +65,15 @@ test("storage: saveTokens creates parent dir if missing", async () => {
     await rm(dir, { recursive: true });
   }
 });
+
+test("storage: a new token file and its new directory are private from the first write", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-mcp-"));
+  try {
+    const path = join(dir, "sub", "tokens.json");
+    await saveTokens(path, { accessToken: "a", refreshToken: "r", expiresAt: 1, user: "u" });
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+    assert.equal((await stat(join(dir, "sub"))).mode & 0o777, 0o700);
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});

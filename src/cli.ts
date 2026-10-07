@@ -153,6 +153,7 @@ export async function runCli(argv: string[]) {
       case "get-daily-snapshot": {
         const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { to: { type: "string" } } });
         const date = positionals[0] ?? die("Usage: get-daily-snapshot <YYYY-MM-DD> [--to YYYY-MM-DD]");
+        if (values.to === "") die("Usage: get-daily-snapshot <YYYY-MM-DD> [--to YYYY-MM-DD] (--to needs a date)");
         out(values.to && values.to !== date ? await buildSnapshotRange(suunto, date, values.to) : await buildSnapshot(suunto, date));
         break;
       }
