@@ -151,8 +151,8 @@ export class SuuntoClient {
     return JSON.parse(text) as T;
   }
 
-  async bytes(path: string): Promise<Buffer> {
-    const res = await this.request(path);
+  async bytes(path: string, accept?: string): Promise<Buffer> {
+    const res = await this.request(path, accept ? { headers: { Accept: accept } } : {});
     return Buffer.from(await res.arrayBuffer());
   }
 
@@ -291,7 +291,8 @@ export class SuuntoClient {
   }
 
   async exportRoute(routeId: string): Promise<Buffer> {
-    return this.bytes(`/v2/route/${encodeURIComponent(routeId)}/export`);
+    // The route export answers 500 unless it is asked for GPX explicitly.
+    return this.bytes(`/v2/route/${encodeURIComponent(routeId)}/export`, "application/gpx+xml");
   }
 
   // ---------- Workout Upload ----------

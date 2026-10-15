@@ -269,3 +269,11 @@ test("e2e upload_route: only real .gpx files are accepted, before any request", 
     assert.match(bad.text, /Invalid arguments/);
   });
 });
+
+test("e2e export_route: asks for GPX explicitly and returns the track", async () => {
+  await withMcp(async (call) => {
+    const r = await call("export_route", { routeId: "6acd201e1cc20768cf51aa4f" });
+    assert.equal(r.isError, false, r.text);
+    assert.match(r.text, /<gpx[^>]*>[\s\S]*<name>Stub route<\/name>/);
+  });
+});
