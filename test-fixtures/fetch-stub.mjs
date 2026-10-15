@@ -44,13 +44,22 @@ globalThis.fetch = async (input, init = {}) => {
   const url = new URL(String(input));
   const path = url.pathname;
 
-  if (/^\/v2\/route\/[0-9a-f]+\/export$/.test(path)) {
+  if (/^\/v2\/route\/route\d+$/.test(path) && (init.method ?? "GET") === "GET") {
+    return res({ id: path.split("/").pop(), description: "Stub", watchEnabled: process.env.STUB_ROUTE_WATCH !== "off", totalDistance: 1234.5 });
+  }
+  if (/^\/v2\/route\/[0-9a-f]+\/export$/.test(path) || /^\/v2\/route\/route\d+\/export$/.test(path)) {
     // like the real endpoint: 500 unless GPX is asked for
     if (init.headers?.Accept !== "application/gpx+xml") return res("", 500);
     return res('<?xml version="1.0"?><gpx version="1.1"><rte><name>Stub route</name><rtept lat="1" lon="2"/></rte></gpx>');
   }
   if (path === "/v2/route/import") {
     if (init.method !== "POST" || init.headers?.["Content-Type"] !== "application/gpx+xml") return res("bad request", 400);
+    // like the real backend under load: two imports at once are not reliable
+    globalThis.__routeImportsInFlight = (globalThis.__routeImportsInFlight ?? 0) + 1;
+    await new Promise((r) => setTimeout(r, 40));
+    const overlapped = globalThis.__routeImportsInFlight > 1;
+    globalThis.__routeImportsInFlight--;
+    if (overlapped) return res("General error", 500);
     const gpx = new TextDecoder().decode(init.body);
     // one route per <rte>/<trk>, named from its <name>, like the real endpoint
     const names = [...gpx.matchAll(/<(?:rte|trk)>\s*<name>([^<]*)<\/name>/g)].map((m) => m[1]);

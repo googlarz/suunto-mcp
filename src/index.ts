@@ -413,7 +413,7 @@ const toolDefs = [
   {
     name: "upload_route",
     description:
-      "Imports a GPX file as a route in the user's Suunto account (it appears in the Suunto app's route library as PRIVATE and can then be synced to the watch for navigation). Provide the absolute path to a .gpx file. Every <rte> or <trk> element in the file becomes its own route; the route name comes from its <name> (or <desc>), and waypoints are created from <wpt> elements at the same coordinates as route points and from route points that have a name or type. The route's activities come from the `activities` argument, NOT from the GPX content (default [1] = running). Returns { count, routes: [{ id, name, activities, segments }] }. A route cannot be deleted through this server — remove it in the Suunto app. Requires the Route API on the Suunto subscription (list_routes shows existing routes). Write operation.",
+      "Imports a GPX file as a route in the user's Suunto account (it appears in the Suunto app's route library as PRIVATE and can then be synced to the watch for navigation). Provide the absolute path to a .gpx file. Every <rte> or <trk> element in the file becomes its own route; the route name comes from its <name> (or <desc>), and waypoints are created from <wpt> elements at the same coordinates as route points and from route points that have a name or type. The route's activities come from the `activities` argument, NOT from the GPX content (default [1] = running). Returns { count, routes: [{ id, name, activities, segments }], check: { verified, watchEnabled, distanceM, pointsInFile, pointsInRoute, note? } }. Imports are queued one at a time with a short pause and each route is read back from Suunto (point count against the file), so many calls at once are safe; expect roughly 3 s per route. verified:false with a note means the import went through but the read-back did not match — say so to the user instead of reporting success. A route cannot be deleted through this server — remove it in the Suunto app. Requires the Route API on the Suunto subscription (list_routes shows existing routes). Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -793,14 +793,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (!gpx.subarray(0, 4096).toString("utf8").includes("<gpx")) {
           return text("Error: the file does not look like GPX (no <gpx> element).", true);
         }
-        const { items } = await suunto.importRoute(gpx, a.activities ?? [1]);
+        const { items, check } = await suunto.importRouteVerified(gpx, a.activities ?? [1]);
         const routes = items.map((r: any) => ({
           id: r.id ?? null,
           name: r.description ?? null,
           activities: r.activities ?? null,
           segments: Array.isArray(r.segments) ? r.segments.length : null,
         }));
-        return text(JSON.stringify({ count: routes.length, routes }));
+        return text(JSON.stringify({ count: routes.length, routes, check }));
       }
       case "upload_workout": {
         const { readFile } = await import("node:fs/promises");
