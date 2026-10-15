@@ -2,6 +2,9 @@
 
 Versions on npm: 0.14.1, 0.14.4, 0.15.1 and later. The tags v0.14.0, v0.14.2, v0.14.3, v0.14.5 and v0.15.0 exist on GitHub but were never published to npm. Pre-0.15.1 notes are in the GitHub Releases.
 
+## 0.19.1
+- Fix: `export_route` always failed with a 500 because it did not ask Suunto for GPX; it now sends `Accept: application/gpx+xml` and returns the track.
+
 ## 0.19.0
 - New tool `upload_route`: imports a `.gpx` file as a route via `POST /v2/route/import` (verified live). Each `<rte>`/`<trk>` becomes its own PRIVATE route, named from the file; `activities` (default `[1]`) is set by the call, not by the GPX. Only real `.gpx` files up to 10 MB are accepted. Routes can't be deleted through the API — remove them in the Suunto app.
 
