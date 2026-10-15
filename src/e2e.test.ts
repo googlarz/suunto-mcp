@@ -29,6 +29,9 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
       SUUNTO_CLIENT_SECRET: "sec",
       SUUNTO_SUBSCRIPTION_KEY: "key",
       SUUNTO_TOKEN_PATH: tokenPath,
+      // real defaults pause 2 s between imports and 3 s before the read-back
+      SUUNTO_ROUTE_IMPORT_GAP_MS: "0",
+      SUUNTO_ROUTE_VERIFY_DELAY_MS: "0",
     };
     return await fn({ cwd, env });
   } finally {
@@ -38,8 +41,9 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
 
 type Call = (name: string, args?: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>;
 
-async function withMcp(fn: (call: Call) => Promise<void>) {
-  await withStubbedEnv(async ({ cwd, env }) => {
+async function withMcp(fn: (call: Call) => Promise<void>, extraEnv: Record<string, string> = {}) {
+  await withStubbedEnv(async ({ cwd, env: baseEnv }) => {
+    const env = { ...baseEnv, ...extraEnv };
     const child = spawn(process.execPath, ["--import", stub, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
     const pending = new Map<number, (msg: any) => void>();
     const noise: string[] = [];
@@ -236,16 +240,18 @@ const gpxFile = async (body: string, name = "route.gpx") => {
 
 test("e2e upload_route: one route per <rte>/<trk>, named from the file, with the requested activities", async () => {
   await withMcp(async (call) => {
-    const path = await gpxFile(`<?xml version="1.0"?><gpx version="1.1"><rte><name>Morning loop</name><rtept lat="1" lon="2"/></rte><trk><name>Long ride</name><trkseg/></trk></gpx>`);
+    const path = await gpxFile(`<?xml version="1.0"?><gpx version="1.1"><rte><name>Morning loop</name><rtept lat="1" lon="2"/></rte><trk><name>Long ride</name><trkseg><trkpt lat="1" lon="2"/></trkseg></trk></gpx>`);
     const r = await call("upload_route", { filePath: path, activities: [3, 5] });
     assert.equal(r.isError, false, r.text);
-    assert.deepEqual(JSON.parse(r.text), {
+    const { check: _check, ...listed } = JSON.parse(r.text);
+    assert.deepEqual(listed, {
       count: 2,
       routes: [
         { id: "route0", name: "Morning loop", activities: [3, 5], segments: 1 },
         { id: "route1", name: "Long ride", activities: [3, 5], segments: 1 },
       ],
     });
+    assert.deepEqual(JSON.parse(r.text).check, { verified: true, watchEnabled: true, distanceM: 2469, pointsInFile: 2, pointsInRoute: 2 });
     const dflt = JSON.parse((await call("upload_route", { filePath: path })).text);
     assert.deepEqual(dflt.routes[0].activities, [1], "running is the default");
   });
@@ -276,4 +282,31 @@ test("e2e export_route: asks for GPX explicitly and returns the track", async ()
     assert.equal(r.isError, false, r.text);
     assert.match(r.text, /<gpx[^>]*>[\s\S]*<name>Stub route<\/name>/);
   });
+});
+
+test("e2e upload_route: simultaneous calls are queued, so none of them collides", async () => {
+  await withMcp(async (call) => {
+    const path = await gpxFile(`<?xml version="1.0"?><gpx version="1.1"><rte><name>One</name><rtept lat="1" lon="2"/></rte></gpx>`);
+    const results = await Promise.all([1, 2, 3, 4].map(() => call("upload_route", { filePath: path })));
+    for (const r of results) {
+      assert.equal(r.isError, false, r.text);
+      assert.equal(JSON.parse(r.text).check.verified, true);
+    }
+  });
+});
+
+test("e2e upload_route: a route that is read back disabled for the watch is reported, not hidden", async () => {
+  await withMcp(
+    async (call) => {
+      const path = await gpxFile(`<?xml version="1.0"?><gpx version="1.1"><rte><name>One</name><rtept lat="1" lon="2"/></rte></gpx>`);
+      const r = await call("upload_route", { filePath: path });
+      assert.equal(r.isError, false, r.text);
+      const out = JSON.parse(r.text);
+      assert.equal(out.count, 1, "the import itself went through");
+      assert.equal(out.check.verified, false);
+      assert.equal(out.check.watchEnabled, false);
+      assert.match(out.check.note, /not enabled for the watch/);
+    },
+    { STUB_ROUTE_WATCH: "off" },
+  );
 });

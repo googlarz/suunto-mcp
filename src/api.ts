@@ -93,6 +93,30 @@ function workoutPath(workoutKey: string): string {
   return `/v3/workouts/${workoutKey}`;
 }
 
+// Route imports are one at a time per process, with a pause between them and a
+// read-back afterwards. Seven imports fired in the same second left the watch
+// with 3 of 7 routes; the same files imported one by one (with this pause and
+// read-back) all arrived (2026-10-15). Whether the order or the pause is what
+// matters is not established, so the server does both — callers may fire any
+// number of upload_route calls at once.
+let routeImportQueue: Promise<unknown> = Promise.resolve();
+let lastRouteImportAt = 0;
+const envMs = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const countPoints = (gpx: string) => (gpx.match(/<(?:rtept|trkpt)\s/g) ?? []).length;
+
+export interface RouteImportCheck {
+  verified: boolean;
+  watchEnabled: boolean | null;
+  distanceM: number | null;
+  pointsInFile: number;
+  pointsInRoute: number | null;
+  note?: string;
+}
+
 export class SuuntoClient {
   constructor(private readonly cfg: Config) {}
 
@@ -362,6 +386,65 @@ export class SuuntoClient {
     }
     const json = (await res.json()) as any;
     return { items: Array.isArray(json?.items) ? json.items : [] };
+  }
+
+  getRoute(routeId: string) {
+    return this.json<any>(`/v2/route/${encodeURIComponent(routeId)}`);
+  }
+
+  // Serialized import + read-back. Never throws for a failed read-back: the
+  // import itself succeeded, so the result says verified:false and why.
+  importRouteVerified(gpx: Buffer, activities: number[]): Promise<{ items: any[]; check: RouteImportCheck }> {
+    // Only the import and the pause are queued; the read-back of one route runs
+    // while the next one is already importing (it only reads).
+    const imported = routeImportQueue.then(async () => {
+      const wait = lastRouteImportAt + envMs("SUUNTO_ROUTE_IMPORT_GAP_MS", 2000) - Date.now();
+      if (wait > 0) await sleepMs(wait);
+      try {
+        return await this.importRoute(gpx, activities);
+      } finally {
+        lastRouteImportAt = Date.now();
+      }
+    });
+    routeImportQueue = imported.catch(() => undefined);
+    return imported.then(async ({ items }) => ({ items, check: await this.verifyRoutes(items, countPoints(gpx.toString("utf8"))) }));
+  }
+
+  private async verifyRoutes(items: any[], pointsInFile: number): Promise<RouteImportCheck> {
+    const base: RouteImportCheck = { verified: false, watchEnabled: null, distanceM: null, pointsInFile, pointsInRoute: null };
+    if (items.length === 0) return { ...base, note: "Suunto returned no route for this file (does it contain a <rte> or <trk> with points?)." };
+    await sleepMs(envMs("SUUNTO_ROUTE_VERIFY_DELAY_MS", 3000));
+    let watchEnabled = true;
+    let distanceM = 0;
+    let points = 0;
+    try {
+      for (const item of items) {
+        let meta: any;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            meta = await this.getRoute(item.id);
+            break;
+          } catch (err) {
+            if (attempt >= 2) throw err;
+            await sleepMs(envMs("SUUNTO_ROUTE_VERIFY_DELAY_MS", 3000));
+          }
+        }
+        watchEnabled = watchEnabled && meta.watchEnabled === true;
+        distanceM += Number(meta.totalDistance) || 0;
+        points += countPoints((await this.exportRoute(item.id)).toString("utf8"));
+      }
+    } catch (err: any) {
+      return { ...base, note: `Imported, but reading the route back failed: ${err?.message ?? err}` };
+    }
+    const verified = watchEnabled && points === pointsInFile;
+    return {
+      verified,
+      watchEnabled,
+      distanceM: Math.round(distanceM),
+      pointsInFile,
+      pointsInRoute: points,
+      ...(verified ? {} : { note: `Read-back differs: ${points} points in the route vs ${pointsInFile} in the file${watchEnabled ? "" : ", and the route is not enabled for the watch"}.` }),
+    };
   }
 
   getUploadStatus(uploadId: string) {
