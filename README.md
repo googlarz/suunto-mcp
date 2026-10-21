@@ -635,7 +635,8 @@ Claude picks the right tool automatically — you don't need to know these. For 
 
 | Tool | What it does |
 |------|-------------|
-| `list_routes` | Saved routes on your account |
+| `list_routes` | Your newest saved routes (Suunto returns at most 5) |
+| `get_route` | One route by its ID — works for routes `list_routes` doesn't show |
 | `export_route` | Export a route as GPX |
 
 **Uploads & guided workouts** *(write — send data back to your account)*

@@ -44,6 +44,10 @@ globalThis.fetch = async (input, init = {}) => {
   const url = new URL(String(input));
   const path = url.pathname;
 
+  if (path === "/v2/route/6acd201e1cc20768cf51aa4f" || path === "/v2/route/000000000000000000000000") {
+    if (path.endsWith("0000")) return res({ statusCode: 404, message: "Resource not found" }, 404);
+    return res({ id: "6acd201e1cc20768cf51aa4f", description: "Wasserfallsteig near Bad Urach", visibility: "PRIVATE", activityIds: [11], startPoint: { altitude: 456.57, latitude: 48.49514, longitude: 9.37211 }, totalDistance: 9669.2, created: 1791827998437, modified: 1791827998463, watchEnabled: true, turnWaypointsEnabled: false });
+  }
   if (/^\/v2\/route\/route\d+$/.test(path) && (init.method ?? "GET") === "GET") {
     return res({ id: path.split("/").pop(), description: "Stub", watchEnabled: process.env.STUB_ROUTE_WATCH !== "off", totalDistance: 1234.5 });
   }

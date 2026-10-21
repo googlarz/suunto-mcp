@@ -38,6 +38,7 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_daily_activity_statistics: { title: "Get daily activity statistics", annotations: READ },
   list_subscriptions: { title: "List webhook subscriptions", annotations: READ },
   list_routes: { title: "List routes", annotations: READ },
+  get_route: { title: "Get route", annotations: READ },
   export_route: { title: "Export route as GPX", annotations: READ },
   get_upload_status: { title: "Get workout upload status", annotations: READ },
   list_guides: { title: "List SuuntoPlus guides", annotations: READ },

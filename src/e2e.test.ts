@@ -310,3 +310,17 @@ test("e2e upload_route: a route that is read back disabled for the watch is repo
     { STUB_ROUTE_WATCH: "off" },
   );
 });
+
+test("e2e get_route: one route by id with its flags; an unknown id is an error", async () => {
+  await withMcp(async (call) => {
+    const r = await call("get_route", { routeId: "6acd201e1cc20768cf51aa4f" });
+    assert.equal(r.isError, false, r.text);
+    const route = JSON.parse(r.text);
+    assert.deepEqual([route.description, route.totalDistance, route.watchEnabled, route.activityIds], ["Wasserfallsteig near Bad Urach", 9669.2, true, [11]]);
+    const missing = await call("get_route", { routeId: "000000000000000000000000" });
+    assert.equal(missing.isError, true);
+    assert.match(missing.text, /404/);
+    const noId = await call("get_route", {});
+    assert.equal(noId.isError, true, "routeId is required");
+  });
+});
