@@ -391,8 +391,24 @@ const toolDefs = [
   {
     name: "list_routes",
     description:
-      "Returns all routes saved in the user's Suunto account. Each route: id, description, visibility, distance (m), start/end coordinates, waypoint count. Use export_route to get the GPX track for navigation. Read-only.",
+      "Returns the user's saved Suunto routes — at most 5 of them (Suunto's list endpoint ignores limit/offset and appears to return the newest, unverified), so an account with more routes is NOT fully listed; look a route up by id with get_route (ids come from upload_route results, the Suunto app or the route webhook). Each route: id, description, visibility, activityIds, startPoint/centerPoint/endPoint, totalDistance (m), created/modified (epoch ms), watchEnabled. Use export_route for the GPX track. Read-only.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_route",
+    description:
+      "Returns one saved Suunto route by id: { id, description, visibility, activityIds, startPoint, centerPoint, endPoint (latitude, longitude, altitude), totalDistance (m), averageSpeed, created, modified (epoch ms), watchEnabled (true = offered to the watch), turnWaypointsEnabled }. Works for any route, including ones list_routes does not show (it returns at most 5). Whether the route is actually on the watch cannot be seen here — that is decided by the Suunto app's sync. Use export_route for the track. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        routeId: {
+          type: "string",
+          minLength: 1,
+          description: "Route ID, e.g. from upload_route or list_routes.",
+        },
+      },
+      required: ["routeId"],
+    },
   },
   {
     name: "export_route",
@@ -770,6 +786,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "list_subscriptions": {
         const data = await suunto.subscriptions();
         return text(JSON.stringify(data));
+      }
+      case "get_route": {
+        return text(JSON.stringify(await suunto.getRoute(a.routeId)));
       }
       case "list_routes": {
         const data = await suunto.listRoutes();

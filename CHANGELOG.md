@@ -2,6 +2,9 @@
 
 Versions on npm: 0.14.1, 0.14.4, 0.15.1 and later. The tags v0.14.0, v0.14.2, v0.14.3, v0.14.5 and v0.15.0 exist on GitHub but were never published to npm. Pre-0.15.1 notes are in the GitHub Releases.
 
+## Unreleased
+- New tool `get_route`: one route by id (distance, start/end, activities, `watchEnabled`), including routes beyond the 5 that `list_routes` returns. `list_routes` now says so in its description.
+
 ## 0.19.2
 - `upload_route` imports one route at a time with a short pause and reads each route back from Suunto (point count against the file, `watchEnabled`), returning `check: { verified, … }`. Seven routes sent in the same second had left the watch with 3 of 7; the same files imported one by one all arrived. Several `upload_route` calls at once are queued by the server, so callers don't have to take care of it. `verified: false` carries a note instead of a silent success.
 
