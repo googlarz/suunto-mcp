@@ -1,0 +1,83 @@
+{
+  "workoutKey": "5e1f7c0de000000000000005",
+  "guide": {
+    "id": "synth005",
+    "name": "LEGS E"
+  },
+  "status": "ok",
+  "format": "strength-perSet",
+  "restMode": "countdown",
+  "complete": true,
+  "reliable": false,
+  "note": "Positional mapping is unreliable (duplicate-rest); exercises, sets and rests below are best effort.",
+  "checks": [
+    {
+      "code": "duplicate-rest",
+      "detail": "laps 5 and 6 are both \"Next: set 3/3\" — a set lap is missing or a rest was split"
+    },
+    {
+      "code": "duplicate-rest",
+      "detail": "laps 6 and 7 are both \"Next: set 3/3\" — a set lap is missing or a rest was split"
+    }
+  ],
+  "lapCount": 13,
+  "baselineHr": 90,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [
+    {
+      "n": 1,
+      "name": "Goblet Squat",
+      "detail": "28kg 3x10",
+      "plan": null,
+      "planned": {
+        "sets": 3,
+        "restS": 150
+      },
+      "prep": [1, 70, 94, 87],
+      "sets": [
+        [1, 2, 40.2, 101, 119],
+        [2, 4, 41.5, 106, 123],
+        [3, 8, 42.8, 110, 127]
+      ],
+      "rests": [
+        [2, 3, 150, 150, 133, 97, 36, 7],
+        [3, 5, 150, 150, 136, 101, 35, 11]
+      ]
+    },
+    {
+      "n": 2,
+      "name": "Cable Fly",
+      "detail": "20kg 2x12",
+      "plan": null,
+      "planned": {
+        "sets": 2,
+        "restS": 60
+      },
+      "prep": [9, 96.3, 129, 95],
+      "sets": [
+        [1, 10, 35, 101, 115],
+        [2, 12, 36.2, 104, 118]
+      ],
+      "rests": [
+        [2, 11, 60, 60, 122, 100, 22, 10]
+      ]
+    }
+  ],
+  "afterComplete": [],
+  "unattributed": [],
+  "deviations": [
+    {
+      "code": "rest-split",
+      "basis": "labels",
+      "ex": 1,
+      "plan": null,
+      "laps": [5, 6, 7],
+      "detail": "the rest before set 3 spans 3 laps: a lap was pressed during a countdown rest (a set done inside the rest looks like this)"
+    }
+  ]
+}

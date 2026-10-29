@@ -1,0 +1,33 @@
+{
+  "workoutKey": "5e1f7c0de000000000000008",
+  "activityId": 23,
+  "startTime": 1791475200000,
+  "totalTimeS": 989.6,
+  "guide": {
+    "id": "synth008",
+    "name": "CONDITIONING H"
+  },
+  "tss": [
+    {
+      "method": "HR",
+      "value": 8.2
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [495, 346, 148, 0, 0],
+  "feeling": null,
+  "lapCount": 5,
+  "checks": [],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 58, 89, 93, 86, 5, "step", "24kg 4x15 | Kettlebell Swing"],
+      [2, 58, 412.6, 128, 151, 95, 48, "step", "Kettlebell Swing | 24kg 4x15"],
+      [3, 470.6, 135.2, 121, 149, 104, 15, "step", "2x32kg 3x40m | Farmer Carry"],
+      [4, 605.8, 380.9, 131, 155, 99, 45, "step", "Farmer Carry | 2x32kg 3x40m"],
+      [5, 986.7, 2.9, 134, 136, 132, 0, "done", "Session complete"]
+    ]
+  }
+}

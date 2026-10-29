@@ -1,0 +1,57 @@
+{
+  "workoutKey": "5e1f7c0de000000000000008",
+  "guide": {
+    "id": "synth008",
+    "name": "CONDITIONING H"
+  },
+  "status": "ok",
+  "format": "strength-perExercise",
+  "restMode": null,
+  "complete": true,
+  "reliable": true,
+  "note": null,
+  "checks": [],
+  "lapCount": 5,
+  "baselineHr": 89,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [
+    {
+      "n": 1,
+      "name": "Kettlebell Swing",
+      "detail": "24kg 4x15",
+      "plan": null,
+      "planned": {
+        "sets": 4,
+        "restS": null
+      },
+      "prep": [1, 58, 93, 86],
+      "sets": [
+        [null, 2, 412.6, 128, 151]
+      ],
+      "rests": []
+    },
+    {
+      "n": 2,
+      "name": "Farmer Carry",
+      "detail": "2x32kg 3x40m",
+      "plan": null,
+      "planned": {
+        "sets": 3,
+        "restS": null
+      },
+      "prep": [3, 135.2, 149, 104],
+      "sets": [
+        [null, 4, 380.9, 131, 155]
+      ],
+      "rests": []
+    }
+  ],
+  "afterComplete": [],
+  "unattributed": [],
+  "deviations": []
+}

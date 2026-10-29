@@ -1,0 +1,112 @@
+{
+  "workoutKey": "5e1f7c0de000000000000007",
+  "guide": {
+    "id": "synth007",
+    "name": "CIRCUIT G"
+  },
+  "status": "ok",
+  "format": "workout",
+  "restMode": null,
+  "complete": true,
+  "reliable": true,
+  "note": null,
+  "checks": [],
+  "lapCount": 8,
+  "baselineHr": null,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [
+    {
+      "n": 1,
+      "name": "Push-Up",
+      "detail": "BW 3x15",
+      "plan": 1,
+      "planned": {
+        "sets": 3,
+        "restS": null
+      },
+      "prep": null,
+      "sets": [
+        [null, 1, 245, 112, 138]
+      ],
+      "rests": []
+    },
+    {
+      "n": 2,
+      "name": "Dumbbell Curl",
+      "detail": "12kg 3x12",
+      "plan": 2,
+      "planned": {
+        "sets": 3,
+        "restS": null
+      },
+      "prep": [2, 95.4, 136, 101],
+      "sets": [
+        [null, 3, 268.3, 110, 131]
+      ],
+      "rests": []
+    },
+    {
+      "n": 3,
+      "name": "Plank",
+      "detail": "3x45s",
+      "plan": 0,
+      "planned": {
+        "sets": 3,
+        "restS": null
+      },
+      "prep": [4, 80.2, 128, 99],
+      "sets": [
+        [null, 5, 215.7, 108, 124]
+      ],
+      "rests": []
+    },
+    {
+      "n": 4,
+      "name": "Side Plank",
+      "detail": "2x30s/side",
+      "plan": null,
+      "planned": {
+        "sets": 2,
+        "restS": null
+      },
+      "prep": [6, 61, 121, 100],
+      "sets": [
+        [null, 7, 190.4, 106, 120]
+      ],
+      "rests": []
+    }
+  ],
+  "afterComplete": [],
+  "unattributed": [],
+  "deviations": [
+    {
+      "code": "extra-exercise",
+      "basis": "plan",
+      "ex": 4,
+      "plan": null,
+      "laps": [],
+      "detail": "\"Side Plank\" is not in the plan"
+    },
+    {
+      "code": "order-differs",
+      "basis": "plan",
+      "ex": null,
+      "plan": null,
+      "laps": [],
+      "detail": "plan entries in session order: 1, 2, 0"
+    },
+    {
+      "code": "missing-exercise",
+      "basis": "plan",
+      "ex": null,
+      "plan": 3,
+      "laps": [],
+      "detail": "\"Dead Bug\" is not in this session"
+    }
+  ]
+}

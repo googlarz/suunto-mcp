@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Deadlift",
+    "sets": 3,
+    "restSec": 150
+  },
+  {
+    "name": "Barbell Row",
+    "sets": 3,
+    "restSec": 90
+  },
+  {
+    "name": "Hanging Leg Raise",
+    "sets": 3,
+    "restSec": 60
+  }
+]

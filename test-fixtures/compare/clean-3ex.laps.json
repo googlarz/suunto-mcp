@@ -1,0 +1,45 @@
+{
+  "workoutKey": "5e1f7c0de000000000000001",
+  "activityId": 23,
+  "startTime": 1790870400000,
+  "totalTimeS": 1134.1,
+  "guide": {
+    "id": "synth001",
+    "name": "PUSH PULL A"
+  },
+  "tss": [
+    {
+      "method": "HR",
+      "value": 9.5
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [567, 397, 170, 0, 0],
+  "feeling": null,
+  "lapCount": 17,
+  "checks": [],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 95, 92, 98, 88, 8, "step", "2x20/side | Back Squat"],
+      [2, 95, 28.4, 104, 121, 93, 3, "step", "Back Squat | 100kg 3x5"],
+      [3, 123.4, 120, 118, 138, 101, 13, "rest", "Next: set 2/3"],
+      [4, 243.4, 30.1, 110, 126, 99, 3, "step", "Back Squat | 100kg 3x5"],
+      [5, 273.5, 120, 121, 142, 104, 13, "rest", "Next: set 3/3"],
+      [6, 393.5, 31.7, 113, 130, 102, 3, "step", "Back Squat | 100kg 3x5"],
+      [7, 425.2, 148.2, 108, 140, 96, 15, "step", "70kg 3x8 | Bench Press"],
+      [8, 573.4, 35.5, 105, 119, 97, 3, "step", "Bench Press | 70kg 3x8"],
+      [9, 608.9, 90, 114, 131, 102, 9, "rest", "Next: set 2/3"],
+      [10, 698.9, 37, 109, 124, 100, 4, "step", "Bench Press | 70kg 3x8"],
+      [11, 735.9, 90, 117, 134, 105, 10, "rest", "Next: set 3/3"],
+      [12, 825.9, 39.8, 112, 128, 103, 4, "step", "Bench Press | 70kg 3x8"],
+      [13, 865.7, 121.6, 106, 133, 95, 12, "step", "55kg 2x12 | Seated Cable Row"],
+      [14, 987.3, 41.2, 103, 116, 96, 4, "step", "Seated Cable Row | 55kg 2x12"],
+      [15, 1028.5, 60, 110, 124, 101, 6, "rest", "Next: set 2/2"],
+      [16, 1088.5, 43, 107, 120, 99, 4, "step", "Seated Cable Row | 55kg 2x12"],
+      [17, 1131.5, 2.6, 112, 114, 110, 0, "done", "Session complete"]
+    ]
+  }
+}
