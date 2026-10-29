@@ -32,6 +32,9 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
       // real defaults pause 2 s between imports and 3 s before the read-back
       SUUNTO_ROUTE_IMPORT_GAP_MS: "0",
       SUUNTO_ROUTE_VERIFY_DELAY_MS: "0",
+      // real defaults pause 2 s between guide pushes / uploads and between upload status polls
+      SUUNTO_WRITE_GAP_MS: "0",
+      SUUNTO_UPLOAD_POLL_MS: "0",
     };
     return await fn({ cwd, env });
   } finally {
@@ -309,6 +312,91 @@ test("e2e upload_route: a route that is read back disabled for the watch is repo
     },
     { STUB_ROUTE_WATCH: "off" },
   );
+});
+
+const guidePushes: [string, Record<string, unknown>][] = [
+  ["push_workout_guide", { title: "Push A", date: "2026-10-29", exercises: [{ name: "Bench press", detail: "60kg 3x10" }] }],
+  ["push_interval_guide", { title: "Intervals", date: "2026-10-29", blocks: [{ segments: [{ label: "Work", durationSec: 60 }] }] }],
+  ["push_strength_guide", { title: "Gym B", date: "2026-10-29", exercises: [{ name: "Squat", detail: "80kg 3x5", sets: 3, restSec: 90 }] }],
+];
+
+test("e2e push_*_guide: simultaneous pushes are queued and each is read back from the guide list", async () => {
+  await withMcp(
+    async (call) => {
+      const results = await Promise.all([...guidePushes, ...guidePushes].map(([name, args]) => call(name, args)));
+      const ids = new Set<string>();
+      for (const r of results) {
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.deepEqual(out.check, { verified: true });
+        assert.match(out.nextStep, /next normal Suunto app sync/, "existing fields are kept");
+        ids.add(out.id);
+      }
+      assert.equal(ids.size, 6);
+      const updated = JSON.parse((await call("push_workout_guide", { ...guidePushes[0][1], guideId: "guide0" })).text);
+      assert.deepEqual([updated.id, updated.check], ["guide0", { verified: true }]);
+    },
+    { SUUNTO_APP_NAME: "app" },
+  );
+});
+
+test("e2e push_*_guide: a guide missing from the read-back is reported, not hidden", async () => {
+  await withMcp(
+    async (call) => {
+      for (const [name, args] of guidePushes) {
+        const r = await call(name, args);
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.ok(out.id, "the push itself went through");
+        assert.equal(out.check.verified, false);
+        assert.match(out.check.note, /is not in the guide list/);
+      }
+    },
+    { SUUNTO_APP_NAME: "app", STUB_GUIDE_LIST: "empty" },
+  );
+});
+
+test("e2e push_*_guide: without an id in the response the guide is matched by name", async () => {
+  await withMcp(
+    async (call) => {
+      const out = JSON.parse((await call(...guidePushes[2])).text);
+      assert.deepEqual(out.check, { verified: true });
+    },
+    { SUUNTO_APP_NAME: "app", STUB_GUIDE_NO_ID: "1" },
+  );
+});
+
+test("e2e upload_workout: simultaneous uploads are queued and polled until Suunto has processed them", async () => {
+  await withMcp(async (call) => {
+    const filePath = await gpxFile("not really FIT", "w.fit");
+    const results = await Promise.all([1, 2, 3, 4].map(() => call("upload_workout", { filePath })));
+    const ids = new Set<string>();
+    for (const r of results) {
+      assert.equal(r.isError, false, r.text);
+      const out = JSON.parse(r.text);
+      assert.equal(out.status, "Processed");
+      assert.deepEqual(out.check, { verified: true });
+      assert.match(out.message, /Upload initiated/, "existing fields are kept");
+      ids.add(out.uploadId);
+    }
+    assert.equal(ids.size, 4);
+  });
+});
+
+test("e2e upload_workout: an Error status or unfinished processing is verified:false with a note", async () => {
+  for (const [status, note] of [["Error", /finished processing with status "Error"/], ["Processing", /had not finished after 10 status checks/]] as const) {
+    await withMcp(
+      async (call) => {
+        const r = await call("upload_workout", { filePath: await gpxFile("x", "w.fit") });
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.equal(out.status, status);
+        assert.equal(out.check.verified, false);
+        assert.match(out.check.note, note);
+      },
+      { STUB_UPLOAD_STATUS: status },
+    );
+  }
 });
 
 test("e2e get_route: one route by id with its flags; an unknown id is an error", async () => {

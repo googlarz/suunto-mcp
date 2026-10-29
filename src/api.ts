@@ -98,14 +98,41 @@ function workoutPath(workoutKey: string): string {
 // with 3 of 7 routes; the same files imported one by one (with this pause and
 // read-back) all arrived (2026-10-15). Whether the order or the pause is what
 // matters is not established, so the server does both — callers may fire any
-// number of upload_route calls at once.
-let routeImportQueue: Promise<unknown> = Promise.resolve();
-let lastRouteImportAt = 0;
+// number of upload_route calls at once. Guide pushes and workout uploads get
+// the same treatment (each its own queue, SUUNTO_WRITE_GAP_MS apart): a weekly
+// review pushes several guides at once, and they had the same exposure.
 const envMs = (name: string, fallback: number) => {
   const n = Number(process.env[name]);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 };
 const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Runs the calls given to it one at a time, process-wide and in call order,
+// each starting at least `gapEnv` ms (read per call) after the previous one
+// ended. A failed call does not stop the queue.
+function serialQueue(gapEnv: string, fallbackMs: number) {
+  let tail: Promise<unknown> = Promise.resolve();
+  let lastEndAt = 0;
+  return <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = tail.then(async () => {
+      const wait = lastEndAt + envMs(gapEnv, fallbackMs) - Date.now();
+      if (wait > 0) await sleepMs(wait);
+      try {
+        return await fn();
+      } finally {
+        lastEndAt = Date.now();
+      }
+    });
+    tail = run.catch(() => undefined);
+    return run;
+  };
+}
+const routeImportQueue = serialQueue("SUUNTO_ROUTE_IMPORT_GAP_MS", 2000);
+const guidePushQueue = serialQueue("SUUNTO_WRITE_GAP_MS", 2000);
+const workoutUploadQueue = serialQueue("SUUNTO_WRITE_GAP_MS", 2000);
+// Upload status is polled up to this many times, SUUNTO_UPLOAD_POLL_MS apart
+// (default 2 s, so about 20 s in all) before giving up on a terminal status.
+const MAX_UPLOAD_POLLS = 10;
 const countPoints = (gpx: string) => (gpx.match(/<(?:rtept|trkpt)\s/g) ?? []).length;
 
 export interface RouteImportCheck {
@@ -115,6 +142,20 @@ export interface RouteImportCheck {
   pointsInFile: number;
   pointsInRoute: number | null;
   note?: string;
+}
+
+export interface WriteCheck {
+  verified: boolean;
+  note?: string;
+}
+
+// The Guide list's wrapper is not documented here: accept a bare array or one
+// under items/payload.
+function guideRows(list: any): any[] {
+  if (Array.isArray(list)) return list;
+  if (Array.isArray(list?.items)) return list.items;
+  if (Array.isArray(list?.payload)) return list.payload;
+  return [];
 }
 
 export class SuuntoClient {
@@ -397,16 +438,7 @@ export class SuuntoClient {
   importRouteVerified(gpx: Buffer, activities: number[]): Promise<{ items: any[]; check: RouteImportCheck }> {
     // Only the import and the pause are queued; the read-back of one route runs
     // while the next one is already importing (it only reads).
-    const imported = routeImportQueue.then(async () => {
-      const wait = lastRouteImportAt + envMs("SUUNTO_ROUTE_IMPORT_GAP_MS", 2000) - Date.now();
-      if (wait > 0) await sleepMs(wait);
-      try {
-        return await this.importRoute(gpx, activities);
-      } finally {
-        lastRouteImportAt = Date.now();
-      }
-    });
-    routeImportQueue = imported.catch(() => undefined);
+    const imported = routeImportQueue(() => this.importRoute(gpx, activities));
     return imported.then(async ({ items }) => ({ items, check: await this.verifyRoutes(items, countPoints(gpx.toString("utf8"))) }));
   }
 
@@ -449,6 +481,46 @@ export class SuuntoClient {
 
   getUploadStatus(uploadId: string) {
     return this.json<any>(`/v2/upload/${encodeURIComponent(uploadId)}`);
+  }
+
+  // Serialized upload, then status polling until a terminal status. Never
+  // throws once the file is uploaded: processing that failed or did not finish
+  // in time is verified:false with a note.
+  async uploadWorkoutVerified(
+    fileBytes: Buffer,
+    contentType: string,
+    opts: Parameters<SuuntoClient["initiateUpload"]>[0],
+  ): Promise<{ uploadId: string; status: string | null; check: WriteCheck }> {
+    const { uploadId } = await workoutUploadQueue(async () => {
+      const started = await this.initiateUpload(opts);
+      await this.uploadFile(started.uploadUrl, fileBytes, contentType);
+      return started;
+    });
+    let status: string | null = null;
+    let lastError = "";
+    for (let poll = 0; poll < MAX_UPLOAD_POLLS; poll++) {
+      await sleepMs(envMs("SUUNTO_UPLOAD_POLL_MS", 2000));
+      try {
+        const res = await this.getUploadStatus(uploadId);
+        status = typeof res?.status === "string" ? res.status : null;
+        lastError = "";
+      } catch (err: any) {
+        lastError = err?.message ?? String(err);
+        continue;
+      }
+      // Documented: Queued, Processing, Processed, Error. Anything not still
+      // pending counts as final.
+      if (status !== null && !/queued|pending|processing|progress/i.test(status)) {
+        const check = /^processed$/i.test(status)
+          ? { verified: true }
+          : { verified: false, note: `Uploaded, but Suunto finished processing with status "${status}".` };
+        return { uploadId, status, check };
+      }
+    }
+    const note = lastError
+      ? `Uploaded, but reading the upload status failed: ${lastError}`
+      : `Uploaded, but processing had not finished after ${MAX_UPLOAD_POLLS} status checks (last status: ${status ?? "none"}). Check again with get_upload_status.`;
+    return { uploadId, status, check: { verified: false, note } };
   }
 
   // ---------- SuuntoPlus Guides ----------
@@ -505,6 +577,25 @@ export class SuuntoClient {
 
   listGuides() {
     return this.json<any>(`/v2/guides/items`);
+  }
+
+  // Serialized create/update, then a read-back from the guide list. Never
+  // throws once the push succeeded: a guide that is not listed is
+  // verified:false with a note. Matched by id (the returned one, else the one
+  // updated); by name only when there is no id at all.
+  async pushGuideVerified(zip: Buffer, name: string, guideId?: string): Promise<{ data: any; check: WriteCheck }> {
+    const data = await guidePushQueue(() => (guideId ? this.updateGuide(guideId, zip) : this.createGuide(zip)));
+    const id = data?.id ?? guideId;
+    let rows: any[];
+    try {
+      rows = guideRows(await this.listGuides());
+    } catch (err: any) {
+      return { data, check: { verified: false, note: `Pushed, but reading the guide list back failed: ${err?.message ?? err}` } };
+    }
+    const found = id !== undefined ? rows.some((g) => String(g?.id) === String(id)) : rows.some((g) => g?.name === name);
+    if (found) return { data, check: { verified: true } };
+    const what = id !== undefined ? `guide ${id}` : `a guide named "${name}"`;
+    return { data, check: { verified: false, note: `Pushed, but ${what} is not in the guide list read back from Suunto.` } };
   }
 
   async deleteGuide(guideId: string): Promise<void> {

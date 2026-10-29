@@ -40,9 +40,50 @@ function recoveryRows(url) {
   return rows.filter((r) => inWindow(Date.parse(r.timestamp), url));
 }
 
+// Like route imports below: two writes of one kind in flight at once are not reliable.
+const inFlight = {};
+async function overlapped(kind) {
+  inFlight[kind] = (inFlight[kind] ?? 0) + 1;
+  await new Promise((r) => setTimeout(r, 40));
+  const overlap = inFlight[kind] > 1;
+  inFlight[kind]--;
+  return overlap;
+}
+const guides = new Map(); // id -> name, what /v2/guides/items lists
+const uploadPolls = new Map(); // uploadId -> status polls so far
+
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(String(input));
   const path = url.pathname;
+
+  if ((path === "/v2/guides/files" && init.method === "POST") || (/^\/v2\/guides\/files\/[^/]+$/.test(path) && init.method === "PUT")) {
+    if (await overlapped("guide")) return res("General error", 500);
+    // the zip is stored uncompressed and manifest.json comes first
+    const name = /"name":"([^"]*)"/.exec(new TextDecoder().decode(init.body))?.[1] ?? "";
+    const id = init.method === "PUT" ? path.split("/").pop() : `guide${guides.size}`;
+    guides.set(id, name);
+    return res(process.env.STUB_GUIDE_NO_ID ? { name } : { id, name });
+  }
+  if (path === "/v2/guides/items") {
+    return res(process.env.STUB_GUIDE_LIST === "empty" ? [] : [...guides].map(([id, name]) => ({ id, name })));
+  }
+  if (path === "/v2/upload" && init.method === "POST") {
+    if (await overlapped("upload")) return res("General error", 500);
+    const uploadId = `upload${uploadPolls.size}`;
+    uploadPolls.set(uploadId, 0);
+    return res({ uploadId, uploadUrl: `https://uploads.stub.test/${uploadId}` });
+  }
+  if (url.host === "uploads.stub.test" && init.method === "PUT") {
+    if (await overlapped("upload")) return res("General error", 500);
+    return res("", 201);
+  }
+  if (/^\/v2\/upload\/upload\d+$/.test(path)) {
+    const id = path.split("/").pop();
+    const polls = uploadPolls.get(id) + 1;
+    uploadPolls.set(id, polls);
+    const status = process.env.STUB_UPLOAD_STATUS ?? (polls === 1 ? "Processing" : "Processed");
+    return res(status === "Processed" ? { uploadId: id, status, workoutKey: KEY } : { uploadId: id, status });
+  }
 
   if (path === "/v2/route/6acd201e1cc20768cf51aa4f" || path === "/v2/route/000000000000000000000000") {
     if (path.endsWith("0000")) return res({ statusCode: 404, message: "Resource not found" }, 404);
