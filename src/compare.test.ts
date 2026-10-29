@@ -275,6 +275,17 @@ test("short-set and long-set edges", () => {
   assert.deepEqual(sets(80, 40), ["long-set"]);
   assert.deepEqual(sets(50, 25), [], "50 is 2x25 but only 25 s more");
   assert.deepEqual(sets(55, 25), ["long-set"]);
+  // where the ratio, not the absolute limit, is what decides
+  assert.deepEqual(sets(10, 100), [], "d < 10 is needed even when d is far below a quarter of the median");
+  assert.deepEqual(sets(7.4, 30), ["short-set"]);
+  assert.deepEqual(sets(7.5, 30), [], "exactly a quarter of the median is not short");
+  assert.deepEqual(sets(195, 100), [], "1.95x the median is not twice the median");
+  assert.deepEqual(sets(200, 100), ["long-set"]);
+});
+
+test("a stopwatch rest cut by the end of the recording is not judged", () => {
+  const out = compareWorkout(table([["100kg 3x5 | Squat", 60], ["Squat | 100kg 3x5", 30], ["90s target · Next: set 2/3", 30]]));
+  assert.deepEqual(out.deviations.map((d) => d.code), ["ended-early", "missing-set"]);
 });
 
 test("short-set and long-set are not judged on the last lap of an unfinished guide", () => {
