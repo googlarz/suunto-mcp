@@ -30,6 +30,7 @@ import { generateDigest } from "./daily-digest.js";
 import { validateAgainstSchema } from "./schema-validate.js";
 import { TOOL_META } from "./tool-meta.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
+import { compareWorkout } from "./compare.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
 import { buildTrainingLoad } from "./training-load.js";
 
@@ -220,7 +221,7 @@ const toolDefs = [
   {
     name: "get_workout_laps",
     description:
-      "Returns the manual laps of one workout as a compact table, plus its training-load fields — the way to read back a guided gym session set by set (push_strength_guide records one lap per set and per rest; push_workout_guide one lap per exercise and one per rest between exercises). A session from push_interval_guide auto-advances and is expected to record no manual laps (unverified), so it should return an empty table. About 2.5 KB for a 35-lap strength session, versus ~550 KB for get_workout_fit full=true. Output: { workoutKey, activityId, startTime (epoch ms), totalTimeS, guide: { id, name } | null (the guide that ran, as recorded by Suunto — not looked up in list_guides, because guides are often deleted afterwards), tss: [{ method (seen so far: 'HR', 'MET'), value }], pte, peakEpoc, recoveryTime (from the workout's summary extension; units not verified, and it can differ from the recoveryTime that list_workouts and get_workout carry), hrZoneTimeS: [zone1..zone5 seconds], feeling (the answer to the watch's 'How was it?' question, passed through as Suunto sends it; null when skipped), lapCount, checks: [{ code, detail }], laps: { cols, rows } }. checks lists reasons not to trust positional reading of the table (empty when clean): 'duplicate-rest' (the same rest label twice in a row — a set lap is missing or a rest was split), 'no-session-complete' (a guided table without its final lap — session ended early, buttons locked or watch restarted), 'unlabelled-laps' (some laps have no guide label), 'no-heart-rate' (no lap has heart rate, e.g. battery mode Tour). laps.cols = [i (1-based), startOffsetS (from workout start), durationS, hrAvg, hrMax, hrMin (bpm), kcal, kind, label]; each row is an array in that order. label is the text of the guide step that was active during the lap (lines joined with ' | '), or null when no guide ran. kind is 'rest' when the label contains 'Next:' at its start or after a '·' (a per-set rest lap reads 'Next: set k/S', or '<restSec>s target · Next: set k/S' with restMode 'stopwatch'), 'done' for the final 'Session complete' lap, 'step' for any other labelled lap, null when there is no label. A per-set strength guide yields, per exercise, a prep lap, then set 1, rest, set 2, rest, … — 2 × sets laps — and one trailing 'Session complete' lap for the whole session; a prep lap and a set lap look alike in the label, so tell them apart by position. Real sessions can deviate (skipped or repeated rest laps), so check the labels rather than only counting. A workout without manual laps (unguided gym, cycling) returns lapCount 0 and laps.rows [] — not an error. Call list_workouts first for the workoutKey.",
+      "Returns the manual laps of one workout as a compact table, plus its training-load fields — the way to read back a guided gym session set by set (push_strength_guide records one lap per set and per rest; push_workout_guide one lap per exercise and one per rest between exercises). A session from push_interval_guide auto-advances and is expected to record no manual laps (unverified), so it should return an empty table. About 2.5 KB for a 35-lap strength session, versus ~550 KB for get_workout_fit full=true. Output: { workoutKey, activityId, startTime (epoch ms), totalTimeS, guide: { id, name } | null (the guide that ran, as recorded by Suunto — not looked up in list_guides, because guides are often deleted afterwards), tss: [{ method (seen so far: 'HR', 'MET'), value }], pte, peakEpoc, recoveryTime (from the workout's summary extension; units not verified, and it can differ from the recoveryTime that list_workouts and get_workout carry), hrZoneTimeS: [zone1..zone5 seconds], feeling (the answer to the watch's 'How was it?' question, passed through as Suunto sends it; null when skipped), lapCount, checks: [{ code, detail }], laps: { cols, rows } }. checks lists reasons not to trust positional reading of the table (empty when clean): 'duplicate-rest' (the same rest label twice in a row — a set lap is missing or a rest was split), 'no-session-complete' (a guided table without its final lap — session ended early, buttons locked or watch restarted), 'unlabelled-laps' (some laps have no guide label), 'no-heart-rate' (no lap has heart rate, e.g. battery mode Tour). laps.cols = [i (1-based), startOffsetS (from workout start), durationS, hrAvg, hrMax, hrMin (bpm), kcal, kind, label]; each row is an array in that order. label is the text of the guide step that was active during the lap (lines joined with ' | '), or null when no guide ran. kind is 'rest' when the label contains 'Next:' at its start or after a '·' (a per-set rest lap reads 'Next: set k/S', or '<restSec>s target · Next: set k/S' with restMode 'stopwatch'), 'done' for the final 'Session complete' lap, 'step' for any other labelled lap, null when there is no label. A per-set strength guide yields, per exercise, a prep lap, then set 1, rest, set 2, rest, … — 2 × sets laps — and one trailing 'Session complete' lap for the whole session; a prep lap's label reads '<plates or detail> | <name>' and a set lap's '<name> | <detail>' (the halves are swapped, but the text is not always decisive, e.g. a name equal to the detail or a label cut at 40 characters), so tell them apart by position. Real sessions can deviate (skipped or repeated rest laps), so check the labels rather than only counting. A workout without manual laps (unguided gym, cycling) returns lapCount 0 and laps.rows [] — not an error. Call list_workouts first for the workoutKey.",
     inputSchema: {
       type: "object",
       properties: {
@@ -228,6 +229,36 @@ const toolDefs = [
           type: "string",
           minLength: 1,
           description: "The 24-character workoutKey returned by list_workouts. Anything else fails with a not-found error without calling Suunto.",
+        },
+      },
+      required: ["workoutKey"],
+    },
+  },
+  {
+    name: "compare_workout_to_plan",
+    description:
+      "Compares one guided gym session with its plan: maps the manual laps (the same data get_workout_laps returns) to exercises, sets and rests, and reports planned vs actual with honest deviations. Works for sessions pushed with push_strength_guide (lapGranularity perSet or perExercise, restMode countdown or stopwatch) and push_workout_guide. The plan — exercise order, set counts, rest targets — is read from the lap labels, so `plan` is optional; pass the exercises array you pushed to also check the session against it (missing, extra or reordered exercises, set counts, rest targets). Output: { workoutKey, guide, status ('ok' | 'no-laps' | 'no-guide-labels' | 'unknown-label-format'), format ('strength-perSet' | 'strength-perExercise' | 'workout'), restMode ('countdown' | 'stopwatch' | null), complete (the guide's 'Session complete' lap was reached), reliable, note, checks (get_workout_laps' checks, passed through), lapCount, baselineHr (heart rate of lap 1, the first prep — null for workout guides), cols, exercises: [{ n, name, detail, plan (index into plan or null), planned: { sets, restS }, prep, sets, rests }], afterComplete, unattributed, deviations: [{ code, basis ('labels' | 'plan' | 'heuristic'), ex, plan, laps, detail }] }. prep, sets, rests, afterComplete and unattributed rows are arrays in the column order given by cols. A rest row's peak is the rest lap's max HR and end its min HR (optical HR lags 20–30 s, so the peak lands in the rest, not in the set); endVsBaseline is end minus baselineHr. Deviation codes: unexpected-sequence, rest-split, rest-short, rest-long, short-set, long-set, missing-set, extra-set, rest-target-mismatch, extra-exercise, ended-early, unlabelled-lap, after-complete, order-differs, missing-exercise. reliable is false when checks has an entry other than no-heart-rate (which only nulls the heart-rate fields) or the laps break the guide's step order; the mapping is then best effort and note says why. With restMode countdown a rest lap always lasts exactly its target (the watch advances by itself), so extra rest ends up inside the next set's lap and is not measurable. About 1–4 KB. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutKey: {
+          type: "string",
+          minLength: 1,
+          description: "The 24-character workoutKey returned by list_workouts. Anything else fails with a not-found error without calling Suunto.",
+        },
+        plan: {
+          type: "array",
+          minItems: 1,
+          description: "Optional: what the session was meant to be, in order. Pass the exercises array given to push_strength_guide or push_workout_guide as-is — only name, sets and restSec are read. Without it the plan is read from the lap labels alone.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1, description: "Exercise name as pushed to the guide, e.g. 'Back Squat'." },
+              sets: { type: "integer", minimum: 1, maximum: 100, description: "Planned number of sets." },
+              restSec: { type: "integer", minimum: 1, description: "Planned rest between sets, in seconds." },
+            },
+            required: ["name"],
+          },
         },
       },
       required: ["workoutKey"],
@@ -812,6 +843,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "get_workout_laps": {
         const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
         return text(JSON.stringify(shapeLaps(data)));
+      }
+      case "compare_workout_to_plan": {
+        const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
+        return text(JSON.stringify(compareWorkout(shapeLaps(data), a.plan)));
       }
       case "export_workout_gpx": {
         const bytes = await suunto.getWorkoutGpx(a.workoutKey);

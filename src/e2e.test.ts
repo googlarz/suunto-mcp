@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -44,7 +45,7 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
 
 type Call = (name: string, args?: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>;
 
-async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>) => Promise<void>, extraEnv: Record<string, string> = {}) {
+async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>, toolDefs: () => Promise<any[]>) => Promise<void>, extraEnv: Record<string, string> = {}) {
   await withStubbedEnv(async ({ cwd, env: baseEnv }) => {
     const env = { ...baseEnv, ...extraEnv };
     const child = spawn(process.execPath, ["--import", stub, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
@@ -75,7 +76,7 @@ async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>) => P
       await fn(async (name, args = {}) => {
         const r = (await rpc("tools/call", { name, arguments: args })).result;
         return { text: r.content[0].text, isError: r.isError === true };
-      }, async () => (await rpc("tools/list")).result.tools.map((t: { name: string }) => t.name));
+      }, async () => (await rpc("tools/list")).result.tools.map((t: { name: string }) => t.name), async () => (await rpc("tools/list")).result.tools);
       assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     } finally {
       child.kill();
@@ -112,6 +113,69 @@ test("e2e get_workout_laps: an unknown key and a malformed key fail cleanly", as
     const malformed = await call("get_workout_laps", { workoutKey: "abc" });
     assert.equal(malformed.isError, true);
     assert.match(malformed.text, /not a workout key/);
+  });
+});
+
+const CLEAN_KEY = "5e1f7c0de000000000000001";
+const fixture = (name: string) => JSON.parse(readFileSync(new URL(`../test-fixtures/compare/${name}`, import.meta.url), "utf8"));
+
+test("e2e compare_workout_to_plan: the clean fixture session with its plan matches the expected output", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("compare_workout_to_plan", { workoutKey: CLEAN_KEY, plan: fixture("clean-3ex.plan.json") });
+    assert.equal(isError, false, text);
+    assert.ok(!text.includes("\n"), "compact JSON, no pretty-printing");
+    assert.deepEqual(JSON.parse(text), fixture("clean-3ex.expected.json"));
+  });
+});
+
+test("e2e compare_workout_to_plan: without a plan the plan is read from the labels alone", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("compare_workout_to_plan", { workoutKey: CLEAN_KEY });
+    assert.equal(isError, false, text);
+    const out = JSON.parse(text);
+    const expected = fixture("clean-3ex.expected.json");
+    assert.ok(out.exercises.every((e: any) => e.plan === null));
+    assert.ok(out.deviations.every((d: any) => d.basis !== "plan"));
+    expected.exercises.forEach((e: any) => (e.plan = null));
+    expected.deviations = expected.deviations.filter((d: any) => d.basis !== "plan");
+    assert.deepEqual(out, expected);
+  });
+});
+
+test("e2e compare_workout_to_plan: the stub's 4-lap session is flagged unreliable", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("compare_workout_to_plan", { workoutKey: KEY });
+    assert.equal(isError, false, text);
+    const out = JSON.parse(text);
+    assert.equal(out.reliable, false);
+    assert.deepEqual(out.deviations.map((d: any) => d.code), ["unexpected-sequence", "rest-short", "missing-set"]);
+  });
+});
+
+test("e2e compare_workout_to_plan: invalid input is rejected before any request", async () => {
+  await withMcp(async (call) => {
+    const bad: Record<string, unknown>[] = [
+      { workoutKey: CLEAN_KEY, plan: [] },
+      { workoutKey: CLEAN_KEY, plan: [{ sets: 3 }] },
+      { workoutKey: CLEAN_KEY, plan: [{ name: "x", sets: 0 }] },
+    ];
+    for (const args of bad) {
+      const r = await call("compare_workout_to_plan", args);
+      assert.equal(r.isError, true, JSON.stringify(args));
+      assert.match(r.text, /Invalid arguments for compare_workout_to_plan/);
+    }
+    const malformed = await call("compare_workout_to_plan", { workoutKey: "abc" });
+    assert.equal(malformed.isError, true);
+    assert.match(malformed.text, /not a workout key/);
+  });
+});
+
+test("e2e tools/list: compare_workout_to_plan is listed as read-only", async () => {
+  await withMcp(async (_call, _names, toolDefs) => {
+    const tool = (await toolDefs()).find((t: any) => t.name === "compare_workout_to_plan");
+    assert.ok(tool, "listed");
+    assert.equal(tool.annotations.readOnlyHint, true);
+    assert.equal(tool.title, "Compare workout to plan");
   });
 });
 
