@@ -408,7 +408,7 @@ This keeps the evening wrap-up convention: per exercise sets (time, HR avg/max) 
 
 ## 5. How `checks` propagate (e)
 
-`checks` is copied verbatim. If it is non-empty, or any `unexpected-sequence` was emitted, then `reliable:false` and `note` names the reasons. The output is still produced in full. The positional rules are applied regardless, and `rest-split` merging and `unattributed` keep the mapping usable.
+`checks` is copied verbatim. If it holds anything other than `no-heart-rate` (which only nulls HR fields — decided in §8 Q1), or any `unexpected-sequence` was emitted, then `reliable:false` and `note` names the reasons. The output is still produced in full. The positional rules are applied regardless, and `rest-split` merging and `unattributed` keep the mapping usable.
 
 - `duplicate-rest` → merged gap and `rest-split`.
 - `unlabelled-laps` → `unattributed` and `unlabelled-lap`.
@@ -434,7 +434,7 @@ Non-ok statuses have `reliable:false` and the status note. Checks are still pass
 | last set cut by the stop | Not judged by short-set/long-set |
 | name ≥ 40 chars (strength) / ≥ 54 (workout) | Shown cut. Plan matching falls back to a prefix match |
 | `name === detail`, or both halves truncated alike | Position still decides prep vs set; the link check passes (equal) |
-| no heart rate | HR fields null; `reliable:false` via the `no-heart-rate` check (§8 Q1) |
+| no heart rate | HR fields null; `reliable` stays true (the `no-heart-rate` check is passed through in `checks` but exempt, §8 Q1) |
 | HR null on lap 1 only | `baselineHr` null, `endVsBaseline` null |
 | `plan` with an unmatched duplicate | `missing-exercise` for the leftover entry |
 | work done after "Session complete" without a lap press | Hidden in the closing lap, which is not reported. `get_workout_laps` shows it |

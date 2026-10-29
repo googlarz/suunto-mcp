@@ -27,9 +27,10 @@ export function cleanLabel(raw: unknown): string | null {
 
 // Rest laps carry "Next: ..." — at the start, or after "<restSec>s target · "
 // when the guide was pushed with restMode "stopwatch". The final step of a
-// pushed guide is "Session complete". Prep and set laps both look like
-// "<name> | <detail>" and cannot be told apart by text — only by their position
-// after a rest or the exercise start.
+// pushed guide is "Session complete" (laps pressed after it carry that label
+// too). Prep and set labels have their halves swapped ("<load> | <name>" vs
+// "<name> | <detail>") but are still told apart only by position — after a rest
+// or the exercise start — because the text can be cut or identical.
 export function lapKind(label: string | null): LapKind | null {
   if (label === null) return null;
   if (/(^|·\s*)Next:/.test(label)) return "rest";
