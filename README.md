@@ -419,7 +419,7 @@ CLI: `suunto-mcp daily-digest 2026-04-20 [--seed-ctl 42 --seed-atl 38]`. MCP too
 | "Token request failed" or "400 error" | Client Secret or Redirect URI don't match apizone | Go to apizone → profile → OAuth application settings and confirm both values match exactly |
 | "401" error on every request | Usually the subscription key is wrong or incomplete | Go to apizone → profile → Subscriptions, reveal and re-copy the Primary Key |
 | "401" with "RateLimitExceeded" | Suunto's gateway reports a rate limit as 401 | Wait about 2 minutes and ask again — the key is fine |
-| "401" with "OperationNotFound", or a tool marked "currently unavailable" | Suunto no longer serves that endpoint (`get_workout_samples`, `export_workout_gpx`, `list_subscriptions`) | Nothing to fix on your side; re-pairing will not help |
+| "401" with "OperationNotFound", or an error from a hidden legacy tool | Suunto no longer serves that endpoint (`get_workout_samples`, `export_workout_gpx`, `list_subscriptions` — hidden unless `SUUNTO_ENABLE_LEGACY_TOOLS=1`) | Nothing to fix on your side; re-pairing will not help |
 | "403 Forbidden" on workouts | Developer API subscription isn't active | Sign in to apizone and confirm it's listed as Active |
 | Sleep / recovery / activity returns "not found" | Those need separate subscriptions | Go to apizone and subscribe to the Sleep, Recovery, or Daily Activity API |
 | Laps missing, doubled or out of order in a guided gym session | The watch's buttons were locked, the exercise was restarted, or a lap was pressed outside the guide | Ask for `get_workout_laps` and read its `checks` list — it says which of these happened; don't trust set-by-set reading while `checks` is non-empty |
