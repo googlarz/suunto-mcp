@@ -74,6 +74,8 @@ globalThis.fetch = async (input, init = {}) => {
   if (path === "/v3/workouts/") {
     const total = Number(process.env.STUB_WORKOUTS ?? 3);
     const pad = "x".repeat(Number(process.env.STUB_PAD ?? 0));
+    // opt-in, so the other tests keep their TSS-less workouts
+    const load = process.env.STUB_WORKOUT_TSS ? { totalTime: 1800, tss: { trainingStressScore: Number(process.env.STUB_WORKOUT_TSS) } } : {};
     const offset = Number(url.searchParams.get("offset") ?? 0);
     const limit = Number(url.searchParams.get("limit") ?? 50);
     const all = Array.from({ length: total }, (_, i) => ({
@@ -82,6 +84,7 @@ globalThis.fetch = async (input, init = {}) => {
       startTime: START - i * 3 * HOUR,
       timeOffsetInMinutes: 120,
       pad,
+      ...load,
     }));
     return res({ payload: all.slice(offset, offset + limit), metadata: { count: total } });
   }

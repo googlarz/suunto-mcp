@@ -2,6 +2,10 @@
 
 Versions on npm: 0.14.1, 0.14.4, 0.15.1 and later. The tags v0.14.0, v0.14.2, v0.14.3, v0.14.5 and v0.15.0 exist on GitHub but were never published to npm. Pre-0.15.1 notes are in the GitHub Releases.
 
+## Unreleased
+- New tool `get_training_load` (read-only): Fitness (CTL), Fatigue (ATL) and Form (TSB) per day for up to 120 days ending at `date` (default 28), with weekly totals, the 7-day ramp rate and `notes`. Computed from workout TSS with the digest's model; reads 120 days of warm-up before the window so it isn't cold-started from 0, or starts from `seedCtl`/`seedAtl`. CTL can be about 1 point off the watch. Reports when the 500-workout limit is reached instead of hiding it.
+- The digest's CTL/ATL maths moved to `src/training-load.ts`, shared by both; digest output is unchanged.
+
 ## 0.20.0
 - New tool `get_route`: one route by id (distance, start/end, activities, `watchEnabled`), including routes beyond the 5 that `list_routes` returns. `list_routes` now says so in its description.
 

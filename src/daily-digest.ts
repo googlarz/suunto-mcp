@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
 import { dayFetchBounds, workoutDate, type SuuntoClient } from "./api.js";
 import { SuuntoApiError, SuuntoEmptyResponseError } from "./errors.js";
+import { rollCtlAtl, workoutTss } from "./training-load.js";
 
 // ---------- Sidecar state (CTL/ATL/baselines — Suunto's API has no endpoint for these) ----------
 
@@ -113,21 +114,8 @@ export function pruneHistory(history: Record<string, number>, keepDays: number):
 
 // ---------- Pure math ----------
 
-// Standard TrainingPeaks-style exponential time constants: CTL = 42-day
-// decay, ATL = 7-day decay. Verified: 1 - e^(-1/42) = 0.02353, 1 - e^(-1/7) = 0.13353.
-const K_CTL = 1 - Math.exp(-1 / 42);
-const K_ATL = 1 - Math.exp(-1 / 7);
-
-export function rollCtlAtl(
-  prevCtl: number,
-  prevAtl: number,
-  todayTss: number,
-): { ctl: number; atl: number } {
-  return {
-    ctl: prevCtl * (1 - K_CTL) + todayTss * K_CTL,
-    atl: prevAtl * (1 - K_ATL) + todayTss * K_ATL,
-  };
-}
+// The CTL/ATL model lives in training-load.ts, shared with get_training_load.
+export { rollCtlAtl };
 
 export function updateBaseline(old: Baseline, value: number): Baseline {
   return { avg: (old.avg * old.n + value) / (old.n + 1), n: old.n + 1 };
@@ -514,10 +502,7 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
     const d = workoutDate(w);
     return d === "" || d === date;
   });
-  const todayTss = todaysWorkouts.reduce(
-    (sum, w) => sum + (w?.tss?.trainingStressScore ?? 0),
-    0,
-  );
+  const todayTss = todaysWorkouts.reduce((sum, w) => sum + workoutTss(w), 0);
   const hadWorkout = todaysWorkouts.length > 0;
 
   // --- Party night detection (before baseline updates, so the sample goes
@@ -632,7 +617,7 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
     for (const w of todaysWorkouts) {
       const minutes = Math.round((w.totalTime ?? 0) / 60);
       const avgHr = w?.hrdata?.avg ?? "?";
-      const tss = (w?.tss?.trainingStressScore ?? 0).toFixed(1);
+      const tss = workoutTss(w).toFixed(1);
       // No workout endpoint ever returns a "sport" field (confirmed live) —
       // only activityId, a numeric code with no documented name mapping.
       // Show it honestly rather than silently reading undefined as "unknown".

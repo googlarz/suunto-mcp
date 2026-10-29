@@ -617,6 +617,7 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `list_workouts` | Recent workouts, filtered by date |
 | `get_workout` | Summary numbers for one workout (no laps — use `get_workout_laps`) |
 | `get_daily_snapshot` | One call for a whole day: last night's sleep (main sleep, naps), the day's lowest and highest recovery balance (and the value on waking and at bedtime), steps, energy and workouts. Pass `to` for up to 14 days in one request |
+| `get_training_load` | Fitness (CTL), Fatigue (ATL) and Form (TSB) day by day, plus weekly totals and the 7-day ramp rate, computed from workout TSS (Suunto's API has no such numbers). Up to 120 days ending at `date`; CTL can be about 1 point off the watch. Read-only — doesn't touch the digest files |
 | `get_workout_laps` | Lap-by-lap table for one workout: time, heart rate, calories and the guide step of each lap — the way to read back a guided gym session set by set; it also reports when the table looks unreliable (a missing or doubled lap, no heart rate) |
 | `get_workout_fit` | Raw FIT file decoded to structured data (large — `full: true` is about 550 KB for a strength session) |
 | `get_workout_samples` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026); use `get_workout_fit` |
