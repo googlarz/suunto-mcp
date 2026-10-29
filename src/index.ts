@@ -31,6 +31,7 @@ import { validateAgainstSchema } from "./schema-validate.js";
 import { TOOL_META } from "./tool-meta.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
+import { buildTrainingLoad } from "./training-load.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -175,6 +176,42 @@ const toolDefs = [
           maxLength: 10,
           examples: ["2026-04-26"],
           description: "Optional last day of a range (inclusive, at most 14 days from `date`). The result is then { from, to, days: [one entry per day, in the shape above without errors], errors } — one request per section for the whole range, so prefer it to calling this once per day.",
+        },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "get_training_load",
+    description:
+      "Fitness (CTL, 42-day), Fatigue (ATL, 7-day) and Form (TSB = CTL - ATL) day by day up to `date`. Suunto's API has no endpoint for these, so they are computed from each workout's TSS (tss.trainingStressScore, 0 when Suunto has none) with the standard exponential model — the same maths as generate_daily_digest. The result can be about 1 point off the watch for CTL (compared once with the Suunto app: ATL and TSB matched, CTL was about 0.9 lower). Without seeds, workouts from 120 days before the window are read as warm-up and CTL/ATL start from 0 there, so the window is not cold-started; with little workout history CTL still reads low (it takes about 4-6 weeks to converge), which notes then says. Output (compact JSON, numbers to 1 decimal): { from, to, current: { ctl, atl, tsb, rampRate7d (CTL change over the last 7 days, null when not enough days) }, weeks: [{ weekStart (Monday), workouts, durationS, tss }] (only the days from..to count, so the first and last week can be partial), series: [{ date, tss, ctl, atl, tsb }] (values at the end of each day; tss 0 is a rest day, not missing data), notes: [caveats, plus: no workouts at all in the range, workouts without TSS, and when the workout limit was reached so numbers may be too low] }. Workouts are placed on their own local date. Read-only: it only reads workouts and never touches the digest's history or averages files.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-20"],
+          description: "The last local calendar day of the series, YYYY-MM-DD. Today works but its workouts may not have synced yet.",
+        },
+        days: {
+          type: "integer",
+          minimum: 1,
+          maximum: 120,
+          description: "How many days the series covers, ending at `date` (default 28).",
+        },
+        seedCtl: {
+          type: "number",
+          minimum: 0,
+          description: "Optional: Fitness (CTL) at the end of the day before the series starts, read off the watch or app, instead of computing it from a 120-day warm-up. Giving seedCtl or seedAtl skips the warm-up; a seed left out starts at 0.",
+        },
+        seedAtl: {
+          type: "number",
+          minimum: 0,
+          description: "Same as seedCtl but for Fatigue (ATL).",
         },
       },
       required: ["date"],
@@ -770,6 +807,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "get_daily_snapshot":
         return text(JSON.stringify(a.to && a.to !== a.date ? await buildSnapshotRange(suunto, a.date, a.to) : await buildSnapshot(suunto, a.date)));
+      case "get_training_load":
+        return text(JSON.stringify(await buildTrainingLoad(suunto, { date: a.date, days: a.days, seedCtl: a.seedCtl, seedAtl: a.seedAtl })));
       case "get_workout_laps": {
         const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
         return text(JSON.stringify(shapeLaps(data)));

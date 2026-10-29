@@ -170,6 +170,50 @@ test("e2e get_daily_snapshot: an invalid date is rejected before any request", a
   });
 });
 
+test("e2e get_training_load: the stub's three 50-TSS workouts on the 27th, rolled into CTL/ATL/TSB", async () => {
+  await withMcp(
+    async (call) => {
+      const { text, isError } = await call("get_training_load", { date: "2026-09-28", days: 7 });
+      assert.equal(isError, false, text);
+      assert.ok(!text.includes("\n"), "compact JSON");
+      const out = JSON.parse(text);
+      assert.deepEqual([out.from, out.to, out.series.length], ["2026-09-22", "2026-09-28", 7]);
+      // 150·K_CTL = 3.53, 150·K_ATL = 19.97; a rest day later 3.45 / 17.31
+      assert.deepEqual(out.series.slice(-2), [
+        { date: "2026-09-27", tss: 150, ctl: 3.5, atl: 20, tsb: -16.4 },
+        { date: "2026-09-28", tss: 0, ctl: 3.4, atl: 17.3, tsb: -13.9 },
+      ]);
+      assert.deepEqual(out.current, { ctl: 3.4, atl: 17.3, tsb: -13.9, rampRate7d: 3.4 });
+      assert.deepEqual(out.weeks, [
+        { weekStart: "2026-09-21", workouts: 3, durationS: 5400, tss: 150 },
+        { weekStart: "2026-09-28", workouts: 0, durationS: 0, tss: 0 },
+      ]);
+      assert.ok(out.notes.some((n: string) => /Little history/.test(n)));
+      assert.ok(!out.notes.some((n: string) => /limit/.test(n)));
+
+      const empty = JSON.parse((await call("get_training_load", { date: "2026-06-01" })).text);
+      assert.ok(empty.notes.some((n: string) => /No workouts at all/.test(n)), "the stub's workouts are after the window");
+
+      for (const args of [{ date: "2026-02-30" }, { date: "2026-09-28", days: 121 }, { date: "2026-09-28", seedCtl: -1 }]) {
+        const bad = await call("get_training_load", args);
+        assert.equal(bad.isError, true, JSON.stringify(args));
+        assert.match(bad.text, /Invalid arguments/);
+      }
+    },
+    { STUB_WORKOUT_TSS: "50" },
+  );
+});
+
+test("e2e get_training_load: reaching the workout limit is reported", async () => {
+  await withMcp(
+    async (call) => {
+      const out = JSON.parse((await call("get_training_load", { date: "2026-09-28" })).text);
+      assert.ok(out.notes.some((n: string) => /Reached the 500-workout limit/.test(n)));
+    },
+    { STUB_WORKOUTS: "600" },
+  );
+});
+
 test("e2e get_recovery: exactly the local day's 48 half-hour rows, in order", async () => {
   await withMcp(async (call) => {
     const rows = JSON.parse((await call("get_recovery", { date: "2026-09-27" })).text);
