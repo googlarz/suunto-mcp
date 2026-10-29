@@ -1,0 +1,45 @@
+{
+  "workoutKey": "5e1f7c0de000000000000002",
+  "activityId": 23,
+  "startTime": 1790956800000,
+  "totalTimeS": 1279.7,
+  "guide": {
+    "id": "synth002",
+    "name": "LEGS B"
+  },
+  "tss": [
+    {
+      "method": "HR",
+      "value": 10.7
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [640, 448, 192, 0, 0],
+  "feeling": null,
+  "lapCount": 17,
+  "checks": [],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 88, 90, 96, 86, 7, "step", "1x20+1x15/side | Romanian Deadlift"],
+      [2, 88, 34.2, 101, 117, 92, 3, "step", "Romanian Deadlift | 90kg 3x8"],
+      [3, 122.2, 120, 115, 135, 99, 13, "rest", "Next: set 2/3"],
+      [4, 242.2, 36, 108, 124, 98, 4, "step", "Romanian Deadlift | 90kg 3x8"],
+      [5, 278.2, 120, 118, 138, 102, 13, "rest", "Next: set 3/3"],
+      [6, 398.2, 88.5, 124, 141, 104, 10, "step", "Romanian Deadlift | 90kg 3x8"],
+      [7, 486.7, 132.4, 112, 139, 98, 13, "step", "160kg 4x10 | Leg Press"],
+      [8, 619.1, 42, 106, 121, 98, 4, "step", "Leg Press | 160kg 4x10"],
+      [9, 661.1, 90, 116, 133, 103, 9, "rest", "Next: set 2/4"],
+      [10, 751.1, 44.1, 111, 127, 101, 4, "step", "Leg Press | 160kg 4x10"],
+      [11, 795.2, 90, 119, 136, 106, 10, "rest", "Next: set 3/4"],
+      [12, 885.2, 45.3, 114, 131, 104, 5, "step", "Leg Press | 160kg 4x10"],
+      [13, 930.5, 90, 121, 139, 108, 10, "rest", "Next: set 4/4"],
+      [14, 1020.5, 46, 116, 134, 106, 5, "step", "Leg Press | 160kg 4x10"],
+      [15, 1066.5, 175, 112, 136, 97, 18, "done", "Session complete"],
+      [16, 1241.5, 36.4, 109, 122, 101, 4, "done", "Session complete"],
+      [17, 1277.9, 1.8, 118, 118, 117, 0, "done", "Session complete"]
+    ]
+  }
+}

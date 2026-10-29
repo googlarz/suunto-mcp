@@ -1,0 +1,84 @@
+{
+  "workoutKey": "5e1f7c0de000000000000004",
+  "guide": {
+    "id": "synth004",
+    "name": "PRESS D"
+  },
+  "status": "ok",
+  "format": "strength-perSet",
+  "restMode": "stopwatch",
+  "complete": true,
+  "reliable": true,
+  "note": null,
+  "checks": [],
+  "lapCount": 13,
+  "baselineHr": 91,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [
+    {
+      "n": 1,
+      "name": "Overhead Press",
+      "detail": "45kg 3x6",
+      "plan": null,
+      "planned": {
+        "sets": 3,
+        "restS": 90
+      },
+      "prep": [1, 64, 95, 88],
+      "sets": [
+        [1, 2, 24.8, 99, 114],
+        [2, 4, 26, 101, 117],
+        [3, 6, 27.1, 104, 120]
+      ],
+      "rests": [
+        [2, 3, 142.3, 90, 131, 96, 35, 5],
+        [3, 5, 95.6, 90, 128, 98, 30, 7]
+      ]
+    },
+    {
+      "n": 2,
+      "name": "Pull-Up",
+      "detail": "BW 3x8",
+      "plan": null,
+      "planned": {
+        "sets": 3,
+        "restS": 120
+      },
+      "prep": [7, 118.9, 126, 94],
+      "sets": [
+        [1, 8, 22.4, 103, 121],
+        [2, 10, 23.5, 107, 125],
+        [3, 12, 21.9, 109, 126]
+      ],
+      "rests": [
+        [2, 9, 70.2, 120, 135, 104, 31, 13],
+        [3, 11, 128, 120, 133, 100, 33, 9]
+      ]
+    }
+  ],
+  "afterComplete": [],
+  "unattributed": [],
+  "deviations": [
+    {
+      "code": "rest-long",
+      "basis": "labels",
+      "ex": 1,
+      "plan": null,
+      "laps": [3],
+      "detail": "rest before set 2: 142.3 s against a 90 s target"
+    },
+    {
+      "code": "rest-short",
+      "basis": "labels",
+      "ex": 2,
+      "plan": null,
+      "laps": [9],
+      "detail": "rest before set 2: 70.2 s against a 120 s target"
+    }
+  ]
+}

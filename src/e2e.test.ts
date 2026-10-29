@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -32,6 +33,9 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
       // real defaults pause 2 s between imports and 3 s before the read-back
       SUUNTO_ROUTE_IMPORT_GAP_MS: "0",
       SUUNTO_ROUTE_VERIFY_DELAY_MS: "0",
+      // real defaults pause 2 s between guide pushes / uploads and between upload status polls
+      SUUNTO_WRITE_GAP_MS: "0",
+      SUUNTO_UPLOAD_POLL_MS: "0",
     };
     return await fn({ cwd, env });
   } finally {
@@ -41,7 +45,7 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
 
 type Call = (name: string, args?: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>;
 
-async function withMcp(fn: (call: Call) => Promise<void>, extraEnv: Record<string, string> = {}) {
+async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>, toolDefs: () => Promise<any[]>, rpc: (method: string, params?: unknown) => Promise<any>) => Promise<void>, extraEnv: Record<string, string> = {}) {
   await withStubbedEnv(async ({ cwd, env: baseEnv }) => {
     const env = { ...baseEnv, ...extraEnv };
     const child = spawn(process.execPath, ["--import", stub, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
@@ -72,7 +76,7 @@ async function withMcp(fn: (call: Call) => Promise<void>, extraEnv: Record<strin
       await fn(async (name, args = {}) => {
         const r = (await rpc("tools/call", { name, arguments: args })).result;
         return { text: r.content[0].text, isError: r.isError === true };
-      });
+      }, async () => (await rpc("tools/list")).result.tools.map((t: { name: string }) => t.name), async () => (await rpc("tools/list")).result.tools, rpc);
       assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     } finally {
       child.kill();
@@ -109,6 +113,69 @@ test("e2e get_workout_laps: an unknown key and a malformed key fail cleanly", as
     const malformed = await call("get_workout_laps", { workoutKey: "abc" });
     assert.equal(malformed.isError, true);
     assert.match(malformed.text, /not a workout key/);
+  });
+});
+
+const CLEAN_KEY = "5e1f7c0de000000000000001";
+const fixture = (name: string) => JSON.parse(readFileSync(new URL(`../test-fixtures/compare/${name}`, import.meta.url), "utf8"));
+
+test("e2e compare_workout_to_plan: the clean fixture session with its plan matches the expected output", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("compare_workout_to_plan", { workoutKey: CLEAN_KEY, plan: fixture("clean-3ex.plan.json") });
+    assert.equal(isError, false, text);
+    assert.ok(!text.includes("\n"), "compact JSON, no pretty-printing");
+    assert.deepEqual(JSON.parse(text), fixture("clean-3ex.expected.json"));
+  });
+});
+
+test("e2e compare_workout_to_plan: without a plan the plan is read from the labels alone", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("compare_workout_to_plan", { workoutKey: CLEAN_KEY });
+    assert.equal(isError, false, text);
+    const out = JSON.parse(text);
+    const expected = fixture("clean-3ex.expected.json");
+    assert.ok(out.exercises.every((e: any) => e.plan === null));
+    assert.ok(out.deviations.every((d: any) => d.basis !== "plan"));
+    expected.exercises.forEach((e: any) => (e.plan = null));
+    expected.deviations = expected.deviations.filter((d: any) => d.basis !== "plan");
+    assert.deepEqual(out, expected);
+  });
+});
+
+test("e2e compare_workout_to_plan: the stub's 4-lap session is flagged unreliable", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("compare_workout_to_plan", { workoutKey: KEY });
+    assert.equal(isError, false, text);
+    const out = JSON.parse(text);
+    assert.equal(out.reliable, false);
+    assert.deepEqual(out.deviations.map((d: any) => d.code), ["unexpected-sequence", "rest-short", "missing-set"]);
+  });
+});
+
+test("e2e compare_workout_to_plan: invalid input is rejected before any request", async () => {
+  await withMcp(async (call) => {
+    const bad: Record<string, unknown>[] = [
+      { workoutKey: CLEAN_KEY, plan: [] },
+      { workoutKey: CLEAN_KEY, plan: [{ sets: 3 }] },
+      { workoutKey: CLEAN_KEY, plan: [{ name: "x", sets: 0 }] },
+    ];
+    for (const args of bad) {
+      const r = await call("compare_workout_to_plan", args);
+      assert.equal(r.isError, true, JSON.stringify(args));
+      assert.match(r.text, /Invalid arguments for compare_workout_to_plan/);
+    }
+    const malformed = await call("compare_workout_to_plan", { workoutKey: "abc" });
+    assert.equal(malformed.isError, true);
+    assert.match(malformed.text, /not a workout key/);
+  });
+});
+
+test("e2e tools/list: compare_workout_to_plan is listed as read-only", async () => {
+  await withMcp(async (_call, _names, toolDefs) => {
+    const tool = (await toolDefs()).find((t: any) => t.name === "compare_workout_to_plan");
+    assert.ok(tool, "listed");
+    assert.equal(tool.annotations.readOnlyHint, true);
+    assert.equal(tool.title, "Compare workout to plan");
   });
 });
 
@@ -167,6 +234,50 @@ test("e2e get_daily_snapshot: an invalid date is rejected before any request", a
   });
 });
 
+test("e2e get_training_load: the stub's three 50-TSS workouts on the 27th, rolled into CTL/ATL/TSB", async () => {
+  await withMcp(
+    async (call) => {
+      const { text, isError } = await call("get_training_load", { date: "2026-09-28", days: 7 });
+      assert.equal(isError, false, text);
+      assert.ok(!text.includes("\n"), "compact JSON");
+      const out = JSON.parse(text);
+      assert.deepEqual([out.from, out.to, out.series.length], ["2026-09-22", "2026-09-28", 7]);
+      // 150·K_CTL = 3.53, 150·K_ATL = 19.97; a rest day later 3.45 / 17.31
+      assert.deepEqual(out.series.slice(-2), [
+        { date: "2026-09-27", tss: 150, ctl: 3.5, atl: 20, tsb: -16.4 },
+        { date: "2026-09-28", tss: 0, ctl: 3.4, atl: 17.3, tsb: -13.9 },
+      ]);
+      assert.deepEqual(out.current, { ctl: 3.4, atl: 17.3, tsb: -13.9, rampRate7d: 3.4 });
+      assert.deepEqual(out.weeks, [
+        { weekStart: "2026-09-21", workouts: 3, durationS: 5400, tss: 150 },
+        { weekStart: "2026-09-28", workouts: 0, durationS: 0, tss: 0 },
+      ]);
+      assert.ok(out.notes.some((n: string) => /Little history/.test(n)));
+      assert.ok(!out.notes.some((n: string) => /limit/.test(n)));
+
+      const empty = JSON.parse((await call("get_training_load", { date: "2026-06-01" })).text);
+      assert.ok(empty.notes.some((n: string) => /No workouts at all/.test(n)), "the stub's workouts are after the window");
+
+      for (const args of [{ date: "2026-02-30" }, { date: "2026-09-28", days: 121 }, { date: "2026-09-28", seedCtl: -1 }]) {
+        const bad = await call("get_training_load", args);
+        assert.equal(bad.isError, true, JSON.stringify(args));
+        assert.match(bad.text, /Invalid arguments/);
+      }
+    },
+    { STUB_WORKOUT_TSS: "50" },
+  );
+});
+
+test("e2e get_training_load: reaching the workout limit is reported", async () => {
+  await withMcp(
+    async (call) => {
+      const out = JSON.parse((await call("get_training_load", { date: "2026-09-28" })).text);
+      assert.ok(out.notes.some((n: string) => /Reached the 600-workout limit/.test(n)));
+    },
+    { STUB_WORKOUTS: "700" },
+  );
+});
+
 test("e2e get_recovery: exactly the local day's 48 half-hour rows, in order", async () => {
   await withMcp(async (call) => {
     const rows = JSON.parse((await call("get_recovery", { date: "2026-09-27" })).text);
@@ -191,6 +302,35 @@ test("e2e list_subscriptions: a removed endpoint is reported as such, not as an 
     assert.equal(r.isError, true);
     assert.match(r.text, /no longer serves this endpoint/);
     assert.match(r.text, /not an authentication problem/);
+  }, { SUUNTO_ENABLE_LEGACY_TOOLS: "1" });
+});
+
+const LEGACY = ["get_workout_samples", "export_workout_gpx", "list_subscriptions"];
+
+test("e2e tools/list: the dead legacy tools are hidden by default", async () => {
+  await withMcp(async (_call, listTools) => {
+    const names = await listTools();
+    assert.ok(names.includes("list_workouts"));
+    for (const n of LEGACY) assert.ok(!names.includes(n), `${n} should be hidden`);
+  });
+});
+
+test("e2e tools/list: SUUNTO_ENABLE_LEGACY_TOOLS=1 brings the legacy tools back", async () => {
+  await withMcp(async (_call, listTools) => {
+    const names = await listTools();
+    for (const n of LEGACY) assert.ok(names.includes(n), `${n} should be listed`);
+  }, { SUUNTO_ENABLE_LEGACY_TOOLS: "1" });
+});
+
+test("e2e: calling a hidden legacy tool explains why and how to re-enable it", async () => {
+  await withMcp(async (call) => {
+    for (const n of LEGACY) {
+      const r = await call(n, n === "list_subscriptions" ? {} : { workoutKey: KEY });
+      assert.equal(r.isError, true);
+      assert.match(r.text, /no longer serves this endpoint \(OperationNotFound\)/);
+      assert.match(r.text, /not an authentication problem/);
+      assert.match(r.text, /SUUNTO_ENABLE_LEGACY_TOOLS=1/);
+    }
   });
 });
 
@@ -311,6 +451,91 @@ test("e2e upload_route: a route that is read back disabled for the watch is repo
   );
 });
 
+const guidePushes: [string, Record<string, unknown>][] = [
+  ["push_workout_guide", { title: "Push A", date: "2026-10-29", exercises: [{ name: "Bench press", detail: "60kg 3x10" }] }],
+  ["push_interval_guide", { title: "Intervals", date: "2026-10-29", blocks: [{ segments: [{ label: "Work", durationSec: 60 }] }] }],
+  ["push_strength_guide", { title: "Gym B", date: "2026-10-29", exercises: [{ name: "Squat", detail: "80kg 3x5", sets: 3, restSec: 90 }] }],
+];
+
+test("e2e push_*_guide: simultaneous pushes are queued and each is read back from the guide list", async () => {
+  await withMcp(
+    async (call) => {
+      const results = await Promise.all([...guidePushes, ...guidePushes].map(([name, args]) => call(name, args)));
+      const ids = new Set<string>();
+      for (const r of results) {
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.deepEqual(out.check, { verified: true });
+        assert.match(out.nextStep, /next normal Suunto app sync/, "existing fields are kept");
+        ids.add(out.id);
+      }
+      assert.equal(ids.size, 6);
+      const updated = JSON.parse((await call("push_workout_guide", { ...guidePushes[0][1], guideId: "guide0" })).text);
+      assert.deepEqual([updated.id, updated.check], ["guide0", { verified: true }]);
+    },
+    { SUUNTO_APP_NAME: "app" },
+  );
+});
+
+test("e2e push_*_guide: a guide missing from the read-back is reported, not hidden", async () => {
+  await withMcp(
+    async (call) => {
+      for (const [name, args] of guidePushes) {
+        const r = await call(name, args);
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.ok(out.id, "the push itself went through");
+        assert.equal(out.check.verified, false);
+        assert.match(out.check.note, /is not in the guide list/);
+      }
+    },
+    { SUUNTO_APP_NAME: "app", STUB_GUIDE_LIST: "empty" },
+  );
+});
+
+test("e2e push_*_guide: without an id in the response the guide is matched by name", async () => {
+  await withMcp(
+    async (call) => {
+      const out = JSON.parse((await call(...guidePushes[2])).text);
+      assert.deepEqual(out.check, { verified: true });
+    },
+    { SUUNTO_APP_NAME: "app", STUB_GUIDE_NO_ID: "1" },
+  );
+});
+
+test("e2e upload_workout: simultaneous uploads are queued and polled until Suunto has processed them", async () => {
+  await withMcp(async (call) => {
+    const filePath = await gpxFile("not really FIT", "w.fit");
+    const results = await Promise.all([1, 2, 3, 4].map(() => call("upload_workout", { filePath })));
+    const ids = new Set<string>();
+    for (const r of results) {
+      assert.equal(r.isError, false, r.text);
+      const out = JSON.parse(r.text);
+      assert.equal(out.status, "Processed");
+      assert.deepEqual(out.check, { verified: true });
+      assert.match(out.message, /Upload initiated/, "existing fields are kept");
+      ids.add(out.uploadId);
+    }
+    assert.equal(ids.size, 4);
+  });
+});
+
+test("e2e upload_workout: an Error status or unfinished processing is verified:false with a note", async () => {
+  for (const [status, note] of [["Error", /finished processing with status "Error"/], ["Processing", /had not finished after 10 status checks/]] as const) {
+    await withMcp(
+      async (call) => {
+        const r = await call("upload_workout", { filePath: await gpxFile("x", "w.fit") });
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.equal(out.status, status);
+        assert.equal(out.check.verified, false);
+        assert.match(out.check.note, note);
+      },
+      { STUB_UPLOAD_STATUS: status },
+    );
+  }
+});
+
 test("e2e get_route: one route by id with its flags; an unknown id is an error", async () => {
   await withMcp(async (call) => {
     const r = await call("get_route", { routeId: "6acd201e1cc20768cf51aa4f" });
@@ -322,5 +547,44 @@ test("e2e get_route: one route by id with its flags; an unknown id is an error",
     assert.match(missing.text, /404/);
     const noId = await call("get_route", {});
     assert.equal(noId.isError, true, "routeId is required");
+  });
+});
+
+test("e2e push_*_guide: a same-named guide last modified a week ago does not count as this push arriving", async () => {
+  await withMcp(
+    async (call) => {
+      for (const [name, args] of guidePushes) {
+        const r = await call(name, args);
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.equal(out.check.verified, false);
+        assert.match(out.check.note, /not modified by this push/);
+      }
+    },
+    { SUUNTO_APP_NAME: "app", STUB_GUIDE_STALE: "1", STUB_GUIDE_NO_ID: "1" },
+  );
+});
+
+test("e2e prompts: list, get, invalid params, and every tool named in a prompt exists", async () => {
+  await withMcp(async (_call, listTools, _defs, rpc) => {
+    const list = (await rpc("prompts/list")).result.prompts;
+    assert.deepEqual(
+      list.map((p: any) => [p.name, p.arguments.map((a: any) => a.name)]),
+      [["suunto-morning", ["date"]], ["suunto-weekly", ["endDate"]], ["suunto-gym-today", ["date"]]],
+    );
+    const tools = new Set(await listTools());
+    for (const p of list) {
+      const arg = p.arguments[0].name;
+      const r = (await rpc("prompts/get", { name: p.name, arguments: { [arg]: "2026-10-28" } })).result;
+      assert.equal(r.messages.length, 1);
+      assert.equal(r.messages[0].role, "user");
+      assert.equal(r.messages[0].content.type, "text");
+      const named = r.messages[0].content.text.match(/\b(?:get|list|compare)_[a-z_]+\b/g) ?? [];
+      assert.ok(named.length > 0, `${p.name} names no tool`);
+      for (const n of named) assert.ok(tools.has(n), `${p.name} names ${n}, which tools/list does not have`);
+    }
+    const bad = await rpc("prompts/get", { name: "suunto-morning", arguments: { date: "2026-02-30" } });
+    assert.equal(bad.error.code, -32602);
+    assert.equal((await rpc("prompts/get", { name: "nope" })).error.code, -32602);
   });
 });

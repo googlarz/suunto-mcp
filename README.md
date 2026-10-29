@@ -372,6 +372,18 @@ This pairs naturally with a coaching workflow: describe your goals, equipment, a
 
 ---
 
+## Prompts
+
+MCP clients that support prompts (for example Claude Desktop) list these as one-click workflows. Each fills in the exact dates and tells Claude which tools to call.
+
+| Prompt | What it does | Optional argument |
+|---|---|---|
+| `suunto-morning` | Morning briefing: last night's sleep, recovery on waking, yesterday's load and workouts, how ready today is | `date` (YYYY-MM-DD, default today) |
+| `suunto-weekly` | Weekly review: sleep, HRV, recovery and training load against the week before, each gym session against its plan | `endDate` (YYYY-MM-DD, default yesterday) |
+| `suunto-gym-today` | Readiness gate: cut planned intensity 20-30% if HRV is clearly below your recent level or sleep score is low, otherwise train as planned | `date` (YYYY-MM-DD, default today) |
+
+---
+
 ## Daily health digest
 
 Ask Claude *"generate my daily digest for yesterday"* and it writes a color-coded markdown summary — steps, sleep, recovery balance, HRV, and a training-load model (Fitness/Fatigue/Form) — appended to `SUUNTO_HISTORY.md` in the folder the server runs from (set `SUUNTO_DIGEST_HISTORY_PATH` to choose another file).
@@ -407,7 +419,7 @@ CLI: `suunto-mcp daily-digest 2026-04-20 [--seed-ctl 42 --seed-atl 38]`. MCP too
 | "Token request failed" or "400 error" | Client Secret or Redirect URI don't match apizone | Go to apizone → profile → OAuth application settings and confirm both values match exactly |
 | "401" error on every request | Usually the subscription key is wrong or incomplete | Go to apizone → profile → Subscriptions, reveal and re-copy the Primary Key |
 | "401" with "RateLimitExceeded" | Suunto's gateway reports a rate limit as 401 | Wait about 2 minutes and ask again — the key is fine |
-| "401" with "OperationNotFound", or a tool marked "currently unavailable" | Suunto no longer serves that endpoint (`get_workout_samples`, `export_workout_gpx`, `list_subscriptions`) | Nothing to fix on your side; re-pairing will not help |
+| "401" with "OperationNotFound", or an error from a hidden legacy tool | Suunto no longer serves that endpoint (`get_workout_samples`, `export_workout_gpx`, `list_subscriptions` — hidden unless `SUUNTO_ENABLE_LEGACY_TOOLS=1`) | Nothing to fix on your side; re-pairing will not help |
 | "403 Forbidden" on workouts | Developer API subscription isn't active | Sign in to apizone and confirm it's listed as Active |
 | Sleep / recovery / activity returns "not found" | Those need separate subscriptions | Go to apizone and subscribe to the Sleep, Recovery, or Daily Activity API |
 | Laps missing, doubled or out of order in a guided gym session | The watch's buttons were locked, the exercise was restarted, or a lap was pressed outside the guide | Ask for `get_workout_laps` and read its `checks` list — it says which of these happened; don't trust set-by-set reading while `checks` is non-empty |
@@ -617,10 +629,12 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `list_workouts` | Recent workouts, filtered by date |
 | `get_workout` | Summary numbers for one workout (no laps — use `get_workout_laps`) |
 | `get_daily_snapshot` | One call for a whole day: last night's sleep (main sleep, naps), the day's lowest and highest recovery balance (and the value on waking and at bedtime), steps, energy and workouts. Pass `to` for up to 14 days in one request |
+| `get_training_load` | Fitness (CTL), Fatigue (ATL) and Form (TSB) day by day, plus weekly totals and the 7-day ramp rate, computed from workout TSS (Suunto's API has no such numbers). Up to 120 days ending at `date`; CTL can be about 1 point off the watch. Read-only — doesn't touch the digest files |
 | `get_workout_laps` | Lap-by-lap table for one workout: time, heart rate, calories and the guide step of each lap — the way to read back a guided gym session set by set; it also reports when the table looks unreliable (a missing or doubled lap, no heart rate) |
+| `compare_workout_to_plan` | Reads a guided gym session back against its plan: maps the laps to exercises, sets and rests and lists deviations (missing or extra sets and exercises, short or long sets, rests off target, laps outside the guide), each marked with what it rests on (the labels, your plan, or a heuristic). Pass the exercises array you pushed as `plan` to also check order, set counts and rest targets. With restMode `countdown` rest overruns are not measurable. Read-only |
 | `get_workout_fit` | Raw FIT file decoded to structured data (large — `full: true` is about 550 KB for a strength session) |
-| `get_workout_samples` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026); use `get_workout_fit` |
-| `export_workout_gpx` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026) |
+| `get_workout_samples` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it; use `get_workout_fit` |
+| `export_workout_gpx` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it |
 
 **24/7 health** *(requires individual product subscriptions on apizone)*
 
@@ -656,7 +670,7 @@ Claude picks the right tool automatically — you don't need to know these. For 
 
 | Tool | What it does |
 |------|-------------|
-| `list_subscriptions` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026) |
+| `list_subscriptions` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it |
 | `generate_daily_digest` | Writes the daily health digest to `SUUNTO_HISTORY.md` (see *Daily health digest*) — a write tool |
 
 </details>

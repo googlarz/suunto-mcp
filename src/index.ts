@@ -19,18 +19,23 @@ import {
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "node:fs";
 import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
+import { PROMPTS, getPrompt } from "./prompts.js";
 import { buildGuideZip, buildIntervalGuideZip, buildStrengthGuideZip } from "./guide-zip.js";
 import { generateDigest } from "./daily-digest.js";
 import { validateAgainstSchema } from "./schema-validate.js";
 import { TOOL_META } from "./tool-meta.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
+import { compareWorkout } from "./compare.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
+import { buildTrainingLoad } from "./training-load.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -55,7 +60,7 @@ const MAX_GPX_BYTES = 10_000_000;
 
 const server = new Server(
   { name: "suunto-mcp", version: pkgVersion },
-  { capabilities: { tools: {}, resources: {} } },
+  { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -67,6 +72,14 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
   const contents = await readResource(req.params.uri, suunto);
   return { contents: [contents] };
 });
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: PROMPTS,
+}));
+
+server.setRequestHandler(GetPromptRequestSchema, async (req) =>
+  getPrompt(req.params.name, req.params.arguments),
+);
 
 const toolDefs = [
   {
@@ -181,9 +194,45 @@ const toolDefs = [
     },
   },
   {
+    name: "get_training_load",
+    description:
+      "Fitness (CTL, 42-day), Fatigue (ATL, 7-day) and Form (TSB = CTL - ATL) day by day up to `date`. Suunto's API has no endpoint for these, so they are computed from each workout's TSS (tss.trainingStressScore, 0 when Suunto has none) with the standard exponential model — the same maths as generate_daily_digest. The result can be about 1 point off the watch for CTL (compared once with the Suunto app: ATL and TSB matched, CTL was about 0.9 lower). Without seeds, workouts from 120 days before the window are read as warm-up and CTL/ATL start from 0 there, so the window is not cold-started; with little workout history CTL still reads low (it takes about 4-6 weeks to converge), which notes then says. Output (compact JSON, numbers to 1 decimal): { from, to, current: { ctl, atl, tsb, rampRate7d (CTL change over the last 7 days, null when not enough days) }, weeks: [{ weekStart (Monday), workouts, durationS, tss }] (only the days from..to count, so the first and last week can be partial), series: [{ date, tss, ctl, atl, tsb }] (values at the end of each day; tss 0 is a rest day, not missing data), notes: [caveats, plus: no workouts at all in the range, workouts without TSS, and when the workout limit was reached so numbers may be too low] }. Workouts are placed on their own local date. Read-only: it only reads workouts and never touches the digest's history or averages files.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-20"],
+          description: "The last local calendar day of the series, YYYY-MM-DD. Today works but its workouts may not have synced yet.",
+        },
+        days: {
+          type: "integer",
+          minimum: 1,
+          maximum: 120,
+          description: "How many days the series covers, ending at `date` (default 28).",
+        },
+        seedCtl: {
+          type: "number",
+          minimum: 0,
+          description: "Optional: Fitness (CTL) at the end of the day before the series starts, read off the watch or app, instead of computing it from a 120-day warm-up. Giving seedCtl or seedAtl skips the warm-up; a seed left out starts at 0.",
+        },
+        seedAtl: {
+          type: "number",
+          minimum: 0,
+          description: "Same as seedCtl but for Fatigue (ATL).",
+        },
+      },
+      required: ["date"],
+    },
+  },
+  {
     name: "get_workout_laps",
     description:
-      "Returns the manual laps of one workout as a compact table, plus its training-load fields — the way to read back a guided gym session set by set (push_strength_guide records one lap per set and per rest; push_workout_guide one lap per exercise and one per rest between exercises). A session from push_interval_guide auto-advances and is expected to record no manual laps (unverified), so it should return an empty table. About 2.5 KB for a 35-lap strength session, versus ~550 KB for get_workout_fit full=true. Output: { workoutKey, activityId, startTime (epoch ms), totalTimeS, guide: { id, name } | null (the guide that ran, as recorded by Suunto — not looked up in list_guides, because guides are often deleted afterwards), tss: [{ method (seen so far: 'HR', 'MET'), value }], pte, peakEpoc, recoveryTime (from the workout's summary extension; units not verified, and it can differ from the recoveryTime that list_workouts and get_workout carry), hrZoneTimeS: [zone1..zone5 seconds], feeling (the answer to the watch's 'How was it?' question, passed through as Suunto sends it; null when skipped), lapCount, checks: [{ code, detail }], laps: { cols, rows } }. checks lists reasons not to trust positional reading of the table (empty when clean): 'duplicate-rest' (the same rest label twice in a row — a set lap is missing or a rest was split), 'no-session-complete' (a guided table without its final lap — session ended early, buttons locked or watch restarted), 'unlabelled-laps' (some laps have no guide label), 'no-heart-rate' (no lap has heart rate, e.g. battery mode Tour). laps.cols = [i (1-based), startOffsetS (from workout start), durationS, hrAvg, hrMax, hrMin (bpm), kcal, kind, label]; each row is an array in that order. label is the text of the guide step that was active during the lap (lines joined with ' | '), or null when no guide ran. kind is 'rest' when the label contains 'Next:' at its start or after a '·' (a per-set rest lap reads 'Next: set k/S', or '<restSec>s target · Next: set k/S' with restMode 'stopwatch'), 'done' for the final 'Session complete' lap, 'step' for any other labelled lap, null when there is no label. A per-set strength guide yields, per exercise, a prep lap, then set 1, rest, set 2, rest, … — 2 × sets laps — and one trailing 'Session complete' lap for the whole session; a prep lap and a set lap look alike in the label, so tell them apart by position. Real sessions can deviate (skipped or repeated rest laps), so check the labels rather than only counting. A workout without manual laps (unguided gym, cycling) returns lapCount 0 and laps.rows [] — not an error. Call list_workouts first for the workoutKey.",
+      "Returns the manual laps of one workout as a compact table, plus its training-load fields — the way to read back a guided gym session set by set (push_strength_guide records one lap per set and per rest; push_workout_guide one lap per exercise and one per rest between exercises). A session from push_interval_guide auto-advances and is expected to record no manual laps (unverified), so it should return an empty table. About 2.5 KB for a 35-lap strength session, versus ~550 KB for get_workout_fit full=true. Output: { workoutKey, activityId, startTime (epoch ms), totalTimeS, guide: { id, name } | null (the guide that ran, as recorded by Suunto — not looked up in list_guides, because guides are often deleted afterwards), tss: [{ method (seen so far: 'HR', 'MET'), value }], pte, peakEpoc, recoveryTime (from the workout's summary extension; units not verified, and it can differ from the recoveryTime that list_workouts and get_workout carry), hrZoneTimeS: [zone1..zone5 seconds], feeling (the answer to the watch's 'How was it?' question, passed through as Suunto sends it; null when skipped), lapCount, checks: [{ code, detail }], laps: { cols, rows } }. checks lists reasons not to trust positional reading of the table (empty when clean): 'duplicate-rest' (the same rest label twice in a row — a set lap is missing or a rest was split), 'no-session-complete' (a guided table without its final lap — session ended early, buttons locked or watch restarted), 'unlabelled-laps' (some laps have no guide label), 'no-heart-rate' (no lap has heart rate, e.g. battery mode Tour). laps.cols = [i (1-based), startOffsetS (from workout start), durationS, hrAvg, hrMax, hrMin (bpm), kcal, kind, label]; each row is an array in that order. label is the text of the guide step that was active during the lap (lines joined with ' | '), or null when no guide ran. kind is 'rest' when the label contains 'Next:' at its start or after a '·' (a per-set rest lap reads 'Next: set k/S', or '<restSec>s target · Next: set k/S' with restMode 'stopwatch'), 'done' for the final 'Session complete' lap, 'step' for any other labelled lap, null when there is no label. A per-set strength guide yields, per exercise, a prep lap, then set 1, rest, set 2, rest, … — 2 × sets laps — and one trailing 'Session complete' lap for the whole session; a prep lap's label reads '<plates or detail> | <name>' and a set lap's '<name> | <detail>' (the halves are swapped, but the text is not always decisive, e.g. a name equal to the detail or a label cut at 40 characters), so tell them apart by position. Real sessions can deviate (skipped or repeated rest laps), so check the labels rather than only counting. A workout without manual laps (unguided gym, cycling) returns lapCount 0 and laps.rows [] — not an error. Call list_workouts first for the workoutKey.",
     inputSchema: {
       type: "object",
       properties: {
@@ -191,6 +240,36 @@ const toolDefs = [
           type: "string",
           minLength: 1,
           description: "The 24-character workoutKey returned by list_workouts. Anything else fails with a not-found error without calling Suunto.",
+        },
+      },
+      required: ["workoutKey"],
+    },
+  },
+  {
+    name: "compare_workout_to_plan",
+    description:
+      "Compares one guided gym session with its plan: maps the manual laps (the same data get_workout_laps returns) to exercises, sets and rests, and reports planned vs actual with honest deviations. Works for sessions pushed with push_strength_guide (lapGranularity perSet or perExercise, restMode countdown or stopwatch) and push_workout_guide. The plan — exercise order, set counts, rest targets — is read from the lap labels, so `plan` is optional; pass the exercises array you pushed to also check the session against it (missing, extra or reordered exercises, set counts, rest targets). Output: { workoutKey, guide, status ('ok' | 'no-laps' | 'no-guide-labels' | 'unknown-label-format'), format ('strength-perSet' | 'strength-perExercise' | 'workout'), restMode ('countdown' | 'stopwatch' | null), complete (the guide's 'Session complete' lap was reached), reliable, note, checks (get_workout_laps' checks, passed through), lapCount, baselineHr (heart rate of lap 1, the first prep — null for workout guides), cols, exercises: [{ n, name, detail, plan (index into plan or null), planned: { sets, restS }, prep, sets, rests }], afterComplete, unattributed, deviations: [{ code, basis ('labels' | 'plan' | 'heuristic'), ex, plan, laps, detail }] }. prep, sets, rests, afterComplete and unattributed rows are arrays in the column order given by cols. A rest row's peak is the rest lap's max HR and end its min HR (optical HR lags 20–30 s, so the peak lands in the rest, not in the set); endVsBaseline is end minus baselineHr. Deviation codes: unexpected-sequence, rest-split, rest-short, rest-long, short-set, long-set, missing-set, extra-set, rest-target-mismatch, extra-exercise, ended-early, unlabelled-lap, after-complete, order-differs, missing-exercise. reliable is false when checks has an entry other than no-heart-rate (which only nulls the heart-rate fields) or the laps break the guide's step order; the mapping is then best effort and note says why. With restMode countdown a rest lap always lasts exactly its target (the watch advances by itself), so extra rest ends up inside the next set's lap and is not measurable. About 1–4 KB. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutKey: {
+          type: "string",
+          minLength: 1,
+          description: "The 24-character workoutKey returned by list_workouts. Anything else fails with a not-found error without calling Suunto.",
+        },
+        plan: {
+          type: "array",
+          minItems: 1,
+          description: "Optional: what the session was meant to be, in order. Pass the exercises array given to push_strength_guide or push_workout_guide as-is — only name, sets and restSec are read. Without it the plan is read from the lap labels alone.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1, description: "Exercise name as pushed to the guide, e.g. 'Back Squat'." },
+              sets: { type: "integer", minimum: 1, maximum: 100, description: "Planned number of sets." },
+              restSec: { type: "integer", minimum: 1, description: "Planned rest between sets, in seconds." },
+            },
+            required: ["name"],
+          },
         },
       },
       required: ["workoutKey"],
@@ -453,7 +532,7 @@ const toolDefs = [
   {
     name: "upload_workout",
     description:
-      "Uploads a workout file to the user's Suunto account. Provide the absolute path to the file on disk. The file is pushed to Suunto and appears in the app after processing (usually a few seconds). Returns an uploadId you can poll with get_upload_status. Suunto's own upload API docs state only .fit (binary) is currently supported for this endpoint — a .gpx path is still accepted here (sent as application/gpx+xml) in case that changes, but treat it as unverified; use .fit for a workout that must reliably show up. Write operation.",
+      "Uploads a workout file to the user's Suunto account. Provide the absolute path to the file on disk. The file is pushed to Suunto and appears in the app after processing (usually a few seconds). Waits for Suunto to process the file (polling the upload status for up to about 20 s) and returns { uploadId, message, status, check: { verified, note? } }: verified is true when the status reaches 'Processed'; otherwise note says why (another final status such as 'Error', or processing not finished in time — then poll get_upload_status with the uploadId later). Uploads are queued one at a time with a short pause, so several calls at once are safe. Suunto's own upload API docs state only .fit (binary) is currently supported for this endpoint — a .gpx path is still accepted here (sent as application/gpx+xml) in case that changes, but treat it as unverified; use .fit for a workout that must reliably show up. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -483,7 +562,7 @@ const toolDefs = [
   {
     name: "push_workout_guide",
     description:
-      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. There is no live push to the watch itself — delivery depends on the phone's normal Suunto app sync. In testing it showed up on the watch after the next ordinary sync with no manual pinning needed; if it doesn't appear, check the Suunto app under SuuntoPlus Guides and pin it there. For gym sessions prefer push_strength_guide: it records one lap per set and per rest, which get_workout_laps can read back. Write operation.",
+      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. There is no live push to the watch itself — delivery depends on the phone's normal Suunto app sync. In testing it showed up on the watch after the next ordinary sync with no manual pinning needed; if it doesn't appear, check the Suunto app under SuuntoPlus Guides and pin it there. For gym sessions prefer push_strength_guide: it records one lap per set and per rest, which get_workout_laps can read back. Returns Suunto's response (including the guide id) plus nextStep and check: { verified, note? }: after the push the guide is looked up in the guide list (by id), and verified:false with a note means the push went through but the guide was not found there — say so to the user instead of reporting success. Pushes are queued one at a time with a short pause, so several calls at once are safe. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -521,7 +600,7 @@ const toolDefs = [
   {
     name: "push_interval_guide",
     description:
-      "Pushes an interval/cardio guide (warmup, timed or distance-based work intervals, recoveries, optional repeats) to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide (manual lap-per-exercise), interval segments auto-advance by elapsed time or distance — hands-off during a run or ride. Each segment can show a target heart-rate range alongside live HR. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
+      "Pushes an interval/cardio guide (warmup, timed or distance-based work intervals, recoveries, optional repeats) to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide (manual lap-per-exercise), interval segments auto-advance by elapsed time or distance — hands-off during a run or ride. Each segment can show a target heart-rate range alongside live HR. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Returns Suunto's response (including the guide id) plus nextStep and check: { verified, note? }: after the push the guide is looked up in the guide list (by id), and verified:false with a note means the push went through but the guide was not found there — say so to the user instead of reporting success. Pushes are queued one at a time with a short pause, so several calls at once are safe. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -581,7 +660,7 @@ const toolDefs = [
   {
     name: "push_strength_guide",
     description:
-      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API — the tool to use for gym sessions. Per exercise: a prep step (self-paced stopwatch showing the plate breakdown if given, otherwise the weight/sets detail, plus the exercise name and live HR; a lap press starts the exercise), then with lapGranularity 'perSet' (default) each set is its own step ended by a lap press, and each rest between sets is its own step showing 'Next: set k/S'. restMode 'countdown' (default) counts down restSec and auto-advances into the next set with a vibration; 'stopwatch' counts up and waits for a lap press. lapGranularity 'perExercise' gives one step per exercise after its prep, with no between-set rests and no per-set laps. Every prep, set and rest is its own lap and the guide ends with one extra 'Session complete' step, so a perSet session records 2 × (total sets) + 1 laps. Read them back after the workout with get_workout_laps — its labels are the step texts. Requires SUUNTO_APP_NAME to exactly match the app name registered on apizone.suunto.com. Without guideId a new guide is created on every call (see list_guides / delete_guide to tidy up); with guideId that guide is overwritten. There is no live push to the watch: it appears after the phone's next normal Suunto app sync. Write operation.",
+      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API — the tool to use for gym sessions. Per exercise: a prep step (self-paced stopwatch showing the plate breakdown if given, otherwise the weight/sets detail, plus the exercise name and live HR; a lap press starts the exercise), then with lapGranularity 'perSet' (default) each set is its own step ended by a lap press, and each rest between sets is its own step showing 'Next: set k/S'. restMode 'countdown' (default) counts down restSec and auto-advances into the next set with a vibration; 'stopwatch' counts up and waits for a lap press. lapGranularity 'perExercise' gives one step per exercise after its prep, with no between-set rests and no per-set laps. Every prep, set and rest is its own lap and the guide ends with one extra 'Session complete' step, so a perSet session records 2 × (total sets) + 1 laps. Read them back after the workout with get_workout_laps — its labels are the step texts. Requires SUUNTO_APP_NAME to exactly match the app name registered on apizone.suunto.com. Without guideId a new guide is created on every call (see list_guides / delete_guide to tidy up); with guideId that guide is overwritten. There is no live push to the watch: it appears after the phone's next normal Suunto app sync. Returns Suunto's response (including the guide id) plus nextStep and check: { verified, note? }: after the push the guide is looked up in the guide list (by id), and verified:false with a note means the push went through but the guide was not found there — say so to the user instead of reporting success. Pushes are queued one at a time with a short pause, so several calls at once are safe. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -711,7 +790,14 @@ const tools = toolDefs.map((t) => {
   return { ...t, ...meta };
 });
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+// Suunto's gateway answers these with 401 OperationNotFound; advertising them
+// only wastes tokens and invites failed calls.
+const LEGACY_TOOLS = new Set(["get_workout_samples", "export_workout_gpx", "list_subscriptions"]);
+const legacyEnabled = process.env.SUUNTO_ENABLE_LEGACY_TOOLS === "1";
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: legacyEnabled ? tools : tools.filter((t) => !LEGACY_TOOLS.has(t.name)),
+}));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
@@ -722,6 +808,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // masks a typo'd tool name.
     const tool = tools.find((t) => t.name === name);
     if (!tool) return text(`Unknown tool: ${name}`, true);
+    if (!legacyEnabled && LEGACY_TOOLS.has(name)) {
+      return text(
+        `${name} is hidden: Suunto no longer serves this endpoint (OperationNotFound). This is not an authentication problem. Set SUUNTO_ENABLE_LEGACY_TOOLS=1 to re-enable it.`,
+        true,
+      );
+    }
     // Each tool declares a full inputSchema, but the MCP SDK doesn't
     // enforce it — a call could otherwise pass e.g. limit: -1 straight
     // through to the API layer instead of being rejected up front.
@@ -757,9 +849,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "get_daily_snapshot":
         return text(JSON.stringify(a.to && a.to !== a.date ? await buildSnapshotRange(suunto, a.date, a.to) : await buildSnapshot(suunto, a.date)));
+      case "get_training_load":
+        return text(JSON.stringify(await buildTrainingLoad(suunto, { date: a.date, days: a.days, seedCtl: a.seedCtl, seedAtl: a.seedAtl })));
       case "get_workout_laps": {
         const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
         return text(JSON.stringify(shapeLaps(data)));
+      }
+      case "compare_workout_to_plan": {
+        const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
+        return text(JSON.stringify(compareWorkout(shapeLaps(data), a.plan)));
       }
       case "export_workout_gpx": {
         const bytes = await suunto.getWorkoutGpx(a.workoutKey);
@@ -832,14 +930,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
         const contentType = ext === ".gpx" ? "application/gpx+xml" : "application/octet-stream";
         const fileBytes = await readFile(filePath);
-        const { uploadId, uploadUrl } = await suunto.initiateUpload({
+        const { uploadId, status, check } = await suunto.uploadWorkoutVerified(fileBytes, contentType, {
           description: a.description,
           comment: a.comment,
           notifyUser: false,
           privacy: a.privacy ?? "DEFAULT",
         });
-        await suunto.uploadFile(uploadUrl, fileBytes, contentType);
-        return text(JSON.stringify({ uploadId, message: "Upload initiated. Use get_upload_status to check processing." }));
+        return text(JSON.stringify({ uploadId, message: "Upload initiated. Use get_upload_status to check processing.", status, check }));
       }
       case "push_workout_guide": {
         if (!cfg.appName) {
@@ -852,14 +949,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           { title: a.title, date: a.date, exercises: a.exercises },
           cfg.appName,
         );
-        const data = a.guideId
-          ? await suunto.updateGuide(a.guideId, zip)
-          : await suunto.createGuide(zip);
+        const { data, check } = await suunto.pushGuideVerified(zip, a.title, a.guideId);
         return text(
           JSON.stringify({
             ...data,
             nextStep:
               "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
+            check,
           }),
         );
       }
@@ -874,14 +970,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           { title: a.title, date: a.date, blocks: a.blocks },
           cfg.appName,
         );
-        const data = a.guideId
-          ? await suunto.updateGuide(a.guideId, zip)
-          : await suunto.createGuide(zip);
+        const { data, check } = await suunto.pushGuideVerified(zip, a.title, a.guideId);
         return text(
           JSON.stringify({
             ...data,
             nextStep:
               "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
+            check,
           }),
         );
       }
@@ -902,14 +997,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           },
           cfg.appName,
         );
-        const data = a.guideId
-          ? await suunto.updateGuide(a.guideId, zip)
-          : await suunto.createGuide(zip);
+        const { data, check } = await suunto.pushGuideVerified(zip, a.title, a.guideId);
         return text(
           JSON.stringify({
             ...data,
             nextStep:
               "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
+            check,
           }),
         );
       }

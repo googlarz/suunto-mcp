@@ -1,0 +1,28 @@
+{
+  "workoutKey": "5e1f7c0de000000000000010",
+  "activityId": 23,
+  "startTime": 1791648000000,
+  "totalTimeS": 890.7,
+  "guide": null,
+  "tss": [
+    {
+      "method": "HR",
+      "value": 7.4
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [445, 312, 134, 0, 0],
+  "feeling": null,
+  "lapCount": 3,
+  "checks": [],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 300, 104, 131, 88, 28, null, null],
+      [2, 300, 280.5, 112, 140, 95, 29, null, null],
+      [3, 580.5, 310.2, 109, 137, 93, 31, null, null]
+    ]
+  }
+}

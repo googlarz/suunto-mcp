@@ -2,6 +2,16 @@
 
 Versions on npm: 0.14.1, 0.14.4, 0.15.1 and later. The tags v0.14.0, v0.14.2, v0.14.3, v0.14.5 and v0.15.0 exist on GitHub but were never published to npm. Pre-0.15.1 notes are in the GitHub Releases.
 
+## Unreleased
+- MCP prompts (new `prompts` capability): `suunto-morning`, `suunto-weekly` and `suunto-gym-today`, one-click workflows in clients that show prompts. Each takes an optional date (`date` or `endDate`), validated as a real calendar date (invalid values are an invalid-params error), and writes the explicit dates and tool calls into the prompt text.
+- `get_workout_samples`, `export_workout_gpx` and `list_subscriptions` are no longer listed to the model: Suunto rejects them (OperationNotFound). Calling one by name returns an error saying so. Set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to bring them back. The CLI commands are unchanged.
+- `push_workout_guide`, `push_interval_guide`, `push_strength_guide` and `upload_workout` now report whether the write arrived, not only that it was sent. Guide pushes read the guide back from the guide list (by id, by name if Suunto returned no id) and add `check: { verified, note? }`. `upload_workout` polls the upload status for up to about 20 s and adds `status` and `check: { verified, note? }` (`verified` once the status is `Processed`). Existing result fields are unchanged.
+- Guide pushes and workout uploads are queued one at a time per process with a short pause (`SUUNTO_WRITE_GAP_MS`, default 2000), like route imports since 0.19.2, so several calls at once are safe. `SUUNTO_UPLOAD_POLL_MS` (default 2000) sets the pause between upload status polls.
+- New tool `get_training_load` (read-only): Fitness (CTL), Fatigue (ATL) and Form (TSB) per day for up to 120 days ending at `date` (default 28), with weekly totals, the 7-day ramp rate and `notes`. Computed from workout TSS with the digest's model; reads 120 days of warm-up before the window so it isn't cold-started from 0, or starts from `seedCtl`/`seedAtl`. CTL can be about 1 point off the watch. Reports when the 500-workout limit is reached instead of hiding it.
+- The digest's CTL/ATL maths moved to `src/training-load.ts`, shared by both; digest output is unchanged.
+- New tool `compare_workout_to_plan` (read-only): maps the laps of a guided gym session (`push_strength_guide` perSet or perExercise, countdown or stopwatch, and `push_workout_guide`) to exercises, sets and rests, and reports planned against actual with deviations that each name their basis (`labels`, `plan` or `heuristic`). The optional `plan` is the exercises array that was pushed (`name`, `sets`, `restSec` are read). `no-heart-rate` stays in `checks` but does not make the result unreliable. Stopwatch and workout-guide label formats are derived from the guide code and not yet checked against a real session.
+- `get_workout_laps`: the description and a code comment no longer say that prep and set labels look alike (their halves are swapped) or that laps after "Session complete" have no label (they carry it). Text only, no behaviour change.
+
 ## 0.20.0
 - New tool `get_route`: one route by id (distance, start/end, activities, `watchEnabled`), including routes beyond the 5 that `list_routes` returns. `list_routes` now says so in its description.
 

@@ -1,0 +1,41 @@
+{
+  "workoutKey": "5e1f7c0de000000000000003",
+  "activityId": 23,
+  "startTime": 1791043200000,
+  "totalTimeS": 784,
+  "guide": {
+    "id": "synth003",
+    "name": "UPPER C"
+  },
+  "tss": [
+    {
+      "method": "HR",
+      "value": 6.5
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [392, 274, 118, 0, 0],
+  "feeling": null,
+  "lapCount": 13,
+  "checks": [],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 76.3, 93, 99, 89, 6, "step", "26kg 3x10 | Incline DB Press"],
+      [2, 76.3, 37.9, 102, 118, 94, 4, "step", "Incline DB Press | 26kg 3x10"],
+      [3, 114.2, 90, 113, 130, 99, 9, "rest", "Next: set 2/3"],
+      [4, 204.2, 3.8, 100, 101, 99, 0, "step", "Incline DB Press | 26kg 3x10"],
+      [5, 208, 90, 104, 112, 96, 9, "rest", "Next: set 3/3"],
+      [6, 298, 40.1, 106, 123, 97, 4, "step", "Incline DB Press | 26kg 3x10"],
+      [7, 338.1, 140.7, 108, 128, 95, 14, "step", "65kg 3x10 | Lat Pulldown"],
+      [8, 478.8, 39.4, 104, 119, 96, 4, "step", "Lat Pulldown | 65kg 3x10"],
+      [9, 518.2, 90, 113, 131, 100, 9, "rest", "Next: set 2/3"],
+      [10, 608.2, 41, 108, 125, 99, 4, "step", "Lat Pulldown | 65kg 3x10"],
+      [11, 649.2, 90, 116, 134, 102, 9, "rest", "Next: set 3/3"],
+      [12, 739.2, 42.6, 111, 128, 101, 4, "step", "Lat Pulldown | 65kg 3x10"],
+      [13, 781.8, 2.2, 115, 116, 114, 0, "done", "Session complete"]
+    ]
+  }
+}

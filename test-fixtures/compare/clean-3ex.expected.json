@@ -1,0 +1,85 @@
+{
+  "workoutKey": "5e1f7c0de000000000000001",
+  "guide": {
+    "id": "synth001",
+    "name": "PUSH PULL A"
+  },
+  "status": "ok",
+  "format": "strength-perSet",
+  "restMode": "countdown",
+  "complete": true,
+  "reliable": true,
+  "note": null,
+  "checks": [],
+  "lapCount": 17,
+  "baselineHr": 92,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [
+    {
+      "n": 1,
+      "name": "Back Squat",
+      "detail": "100kg 3x5",
+      "plan": 0,
+      "planned": {
+        "sets": 3,
+        "restS": 120
+      },
+      "prep": [1, 95, 98, 88],
+      "sets": [
+        [1, 2, 28.4, 104, 121],
+        [2, 4, 30.1, 110, 126],
+        [3, 6, 31.7, 113, 130]
+      ],
+      "rests": [
+        [2, 3, 120, 120, 138, 101, 37, 9],
+        [3, 5, 120, 120, 142, 104, 38, 12]
+      ]
+    },
+    {
+      "n": 2,
+      "name": "Bench Press",
+      "detail": "70kg 3x8",
+      "plan": 1,
+      "planned": {
+        "sets": 3,
+        "restS": 90
+      },
+      "prep": [7, 148.2, 140, 96],
+      "sets": [
+        [1, 8, 35.5, 105, 119],
+        [2, 10, 37, 109, 124],
+        [3, 12, 39.8, 112, 128]
+      ],
+      "rests": [
+        [2, 9, 90, 90, 131, 102, 29, 10],
+        [3, 11, 90, 90, 134, 105, 29, 13]
+      ]
+    },
+    {
+      "n": 3,
+      "name": "Seated Cable Row",
+      "detail": "55kg 2x12",
+      "plan": 2,
+      "planned": {
+        "sets": 2,
+        "restS": 60
+      },
+      "prep": [13, 121.6, 133, 95],
+      "sets": [
+        [1, 14, 41.2, 103, 116],
+        [2, 16, 43, 107, 120]
+      ],
+      "rests": [
+        [2, 15, 60, 60, 124, 101, 23, 9]
+      ]
+    }
+  ],
+  "afterComplete": [],
+  "unattributed": [],
+  "deviations": []
+}

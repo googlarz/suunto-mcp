@@ -1,0 +1,84 @@
+{
+  "workoutKey": "5e1f7c0de000000000000003",
+  "guide": {
+    "id": "synth003",
+    "name": "UPPER C"
+  },
+  "status": "ok",
+  "format": "strength-perSet",
+  "restMode": "countdown",
+  "complete": true,
+  "reliable": true,
+  "note": null,
+  "checks": [],
+  "lapCount": 13,
+  "baselineHr": 93,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [
+    {
+      "n": 1,
+      "name": "Incline DB Press",
+      "detail": "26kg 3x10",
+      "plan": 0,
+      "planned": {
+        "sets": 3,
+        "restS": 90
+      },
+      "prep": [1, 76.3, 99, 89],
+      "sets": [
+        [1, 2, 37.9, 102, 118],
+        [2, 4, 3.8, 100, 101],
+        [3, 6, 40.1, 106, 123]
+      ],
+      "rests": [
+        [2, 3, 90, 90, 130, 99, 31, 6],
+        [3, 5, 90, 90, 112, 96, 16, 3]
+      ]
+    },
+    {
+      "n": 2,
+      "name": "Lat Pulldown",
+      "detail": "65kg 3x10",
+      "plan": 1,
+      "planned": {
+        "sets": 3,
+        "restS": 90
+      },
+      "prep": [7, 140.7, 128, 95],
+      "sets": [
+        [1, 8, 39.4, 104, 119],
+        [2, 10, 41, 108, 125],
+        [3, 12, 42.6, 111, 128]
+      ],
+      "rests": [
+        [2, 9, 90, 90, 131, 100, 31, 7],
+        [3, 11, 90, 90, 134, 102, 32, 9]
+      ]
+    }
+  ],
+  "afterComplete": [],
+  "unattributed": [],
+  "deviations": [
+    {
+      "code": "short-set",
+      "basis": "heuristic",
+      "ex": 1,
+      "plan": null,
+      "laps": [4],
+      "detail": "set 2 lasted 3.8 s against a median of 39 s for the other sets: likely an accidental double lap press, so the set may not have been done"
+    },
+    {
+      "code": "missing-set",
+      "basis": "plan",
+      "ex": 2,
+      "plan": 1,
+      "laps": [],
+      "detail": "3 of 4 planned sets recorded"
+    }
+  ]
+}

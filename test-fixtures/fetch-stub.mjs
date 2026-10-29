@@ -1,7 +1,12 @@
 // Preloaded with `node --import` into the real compiled server / CLI by
 // src/e2e.test.ts, so end-to-end tests run against canned Suunto responses
 // instead of the network. Never shipped: it lives outside src/ and dist/.
+import { readFileSync } from "node:fs";
+
 const KEY = "6aba8afee2ab172bb4c5fc8d";
+// The clean-3ex compare fixture, served back as a /v3/workouts response (compare_workout_to_plan e2e tests).
+const CLEAN_KEY = "5e1f7c0de000000000000001";
+const clean = JSON.parse(readFileSync(new URL("./compare/clean-3ex.laps.json", import.meta.url), "utf8"));
 const START = Date.UTC(2026, 8, 27, 6, 0, 0);
 const HOUR = 3_600_000;
 
@@ -40,9 +45,52 @@ function recoveryRows(url) {
   return rows.filter((r) => inWindow(Date.parse(r.timestamp), url));
 }
 
+// Like route imports below: two writes of one kind in flight at once are not reliable.
+const inFlight = {};
+async function overlapped(kind) {
+  inFlight[kind] = (inFlight[kind] ?? 0) + 1;
+  await new Promise((r) => setTimeout(r, 40));
+  const overlap = inFlight[kind] > 1;
+  inFlight[kind]--;
+  return overlap;
+}
+const guides = new Map(); // id -> name, what /v2/guides/items lists
+const uploadPolls = new Map(); // uploadId -> status polls so far
+
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(String(input));
   const path = url.pathname;
+
+  if ((path === "/v2/guides/files" && init.method === "POST") || (/^\/v2\/guides\/files\/[^/]+$/.test(path) && init.method === "PUT")) {
+    if (await overlapped("guide")) return res("General error", 500);
+    // the zip is stored uncompressed and manifest.json comes first
+    const name = /"name":"([^"]*)"/.exec(new TextDecoder().decode(init.body))?.[1] ?? "";
+    const id = init.method === "PUT" ? path.split("/").pop() : `guide${guides.size}`;
+    guides.set(id, name);
+    return res(process.env.STUB_GUIDE_NO_ID ? { name } : { id, name });
+  }
+  if (path === "/v2/guides/items") {
+    // STUB_GUIDE_STALE: listed rows carry an old modificationTime, like a guide of that name pushed a week ago
+    const modificationTime = process.env.STUB_GUIDE_STALE ? Date.now() - 7 * 864e5 : Date.now();
+    return res(process.env.STUB_GUIDE_LIST === "empty" ? [] : [...guides].map(([id, name]) => ({ id, name, modificationTime })));
+  }
+  if (path === "/v2/upload" && init.method === "POST") {
+    if (await overlapped("upload")) return res("General error", 500);
+    const uploadId = `upload${uploadPolls.size}`;
+    uploadPolls.set(uploadId, 0);
+    return res({ uploadId, uploadUrl: `https://uploads.stub.test/${uploadId}` });
+  }
+  if (url.host === "uploads.stub.test" && init.method === "PUT") {
+    if (await overlapped("upload")) return res("General error", 500);
+    return res("", 201);
+  }
+  if (/^\/v2\/upload\/upload\d+$/.test(path)) {
+    const id = path.split("/").pop();
+    const polls = uploadPolls.get(id) + 1;
+    uploadPolls.set(id, polls);
+    const status = process.env.STUB_UPLOAD_STATUS ?? (polls === 1 ? "Processing" : "Processed");
+    return res(status === "Processed" ? { uploadId: id, status, workoutKey: KEY } : { uploadId: id, status });
+  }
 
   if (path === "/v2/route/6acd201e1cc20768cf51aa4f" || path === "/v2/route/000000000000000000000000") {
     if (path.endsWith("0000")) return res({ statusCode: 404, message: "Resource not found" }, 404);
@@ -74,6 +122,8 @@ globalThis.fetch = async (input, init = {}) => {
   if (path === "/v3/workouts/") {
     const total = Number(process.env.STUB_WORKOUTS ?? 3);
     const pad = "x".repeat(Number(process.env.STUB_PAD ?? 0));
+    // opt-in, so the other tests keep their TSS-less workouts
+    const load = process.env.STUB_WORKOUT_TSS ? { totalTime: 1800, tss: { trainingStressScore: Number(process.env.STUB_WORKOUT_TSS) } } : {};
     const offset = Number(url.searchParams.get("offset") ?? 0);
     const limit = Number(url.searchParams.get("limit") ?? 50);
     const all = Array.from({ length: total }, (_, i) => ({
@@ -82,6 +132,7 @@ globalThis.fetch = async (input, init = {}) => {
       startTime: START - i * 3 * HOUR,
       timeOffsetInMinutes: 120,
       pad,
+      ...load,
     }));
     return res({ payload: all.slice(offset, offset + limit), metadata: { count: total } });
   }
@@ -102,6 +153,20 @@ globalThis.fetch = async (input, init = {}) => {
     }
     if (wanted.includes("SummaryExtension")) extensions.push({ type: "SummaryExtension", pte: 2, peakEpoc: 14, recoveryTime: 12360, apps: [{ name: "MONDAY", authorId: "a", id: "yn8oz6vu" }] });
     return res({ error: null, payload: { workoutKey: KEY, activityId: 23, startTime: START, totalTime: 128, tssList: [{ calculationMethod: "HR", trainingStressScore: 24.4 }], extensions }, metadata: {} });
+  }
+  if (path === `/v3/workouts/${CLEAN_KEY}`) {
+    const wanted = (url.searchParams.get("extensions") ?? "").split(",");
+    const extensions = [];
+    if (wanted.includes("ManualLapStreamExtension")) {
+      const markers = clean.laps.rows.map(([, startOffsetS, duration, avg, max, min, energy, , label]) => ({
+        startTime: clean.startTime + startOffsetS * 1000,
+        endTime: clean.startTime + (startOffsetS + duration) * 1000,
+        totals: { duration, energy, hr: { min, avg, max }, intervalNotes: label?.replaceAll(" | ", "\f") ?? null },
+      }));
+      extensions.push({ type: "ManualLapStreamExtension", markers });
+    }
+    if (wanted.includes("SummaryExtension")) extensions.push({ type: "SummaryExtension", apps: [{ id: clean.guide.id, name: clean.guide.name }] });
+    return res({ error: null, payload: { workoutKey: CLEAN_KEY, activityId: clean.activityId, startTime: clean.startTime, totalTime: clean.totalTimeS, extensions }, metadata: {} });
   }
   if (path === "/v3/workouts/000000000000000000000000") return res("", 200);
   if (path === "/247samples/sleep") return res(sleepRows(url));

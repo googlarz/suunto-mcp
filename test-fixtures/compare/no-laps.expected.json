@@ -1,0 +1,23 @@
+{
+  "workoutKey": "5e1f7c0de000000000000009",
+  "guide": null,
+  "status": "no-laps",
+  "format": null,
+  "restMode": null,
+  "complete": null,
+  "reliable": false,
+  "note": "No laps: the workout has no manual laps, so there is nothing to compare.",
+  "checks": [],
+  "lapCount": 0,
+  "baselineHr": null,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [],
+  "afterComplete": [],
+  "unattributed": [],
+  "deviations": []
+}

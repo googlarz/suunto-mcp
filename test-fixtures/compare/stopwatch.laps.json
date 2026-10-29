@@ -1,0 +1,41 @@
+{
+  "workoutKey": "5e1f7c0de000000000000004",
+  "activityId": 23,
+  "startTime": 1791129600000,
+  "totalTimeS": 767.8,
+  "guide": {
+    "id": "synth004",
+    "name": "PRESS D"
+  },
+  "tss": [
+    {
+      "method": "HR",
+      "value": 6.4
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [384, 269, 115, 0, 0],
+  "feeling": null,
+  "lapCount": 13,
+  "checks": [],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 64, 91, 95, 88, 5, "step", "1x10+1x2.5/side | Overhead Press"],
+      [2, 64, 24.8, 99, 114, 90, 2, "step", "Overhead Press | 45kg 3x6"],
+      [3, 88.8, 142.3, 112, 131, 96, 14, "rest", "90s target · Next: set 2/3"],
+      [4, 231.1, 26, 101, 117, 93, 2, "step", "Overhead Press | 45kg 3x6"],
+      [5, 257.1, 95.6, 110, 128, 98, 10, "rest", "90s target · Next: set 3/3"],
+      [6, 352.7, 27.1, 104, 120, 95, 3, "step", "Overhead Press | 45kg 3x6"],
+      [7, 379.8, 118.9, 105, 126, 94, 11, "step", "BW 3x8 | Pull-Up"],
+      [8, 498.7, 22.4, 103, 121, 95, 2, "step", "Pull-Up | BW 3x8"],
+      [9, 521.1, 70.2, 116, 135, 104, 7, "rest", "120s target · Next: set 2/3"],
+      [10, 591.3, 23.5, 107, 125, 99, 2, "step", "Pull-Up | BW 3x8"],
+      [11, 614.8, 128, 114, 133, 100, 13, "rest", "120s target · Next: set 3/3"],
+      [12, 742.8, 21.9, 109, 126, 101, 2, "step", "Pull-Up | BW 3x8"],
+      [13, 764.7, 3.1, 113, 115, 112, 0, "done", "Session complete"]
+    ]
+  }
+}

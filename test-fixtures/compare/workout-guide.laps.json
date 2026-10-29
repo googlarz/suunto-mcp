@@ -1,0 +1,36 @@
+{
+  "workoutKey": "5e1f7c0de000000000000007",
+  "activityId": 23,
+  "startTime": 1791388800000,
+  "totalTimeS": 1158.4,
+  "guide": {
+    "id": "synth007",
+    "name": "CIRCUIT G"
+  },
+  "tss": [
+    {
+      "method": "HR",
+      "value": 9.7
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [579, 405, 174, 0, 0],
+  "feeling": null,
+  "lapCount": 8,
+  "checks": [],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 245, 112, 138, 90, 25, "step", "Push-Up | BW 3x15"],
+      [2, 245, 95.4, 118, 136, 101, 10, "rest", "Next: Dumbbell Curl | 12kg 3x12"],
+      [3, 340.4, 268.3, 110, 131, 97, 27, "step", "Dumbbell Curl | 12kg 3x12"],
+      [4, 608.7, 80.2, 113, 128, 99, 8, "rest", "Next: Plank | 3x45s"],
+      [5, 688.9, 215.7, 108, 124, 96, 21, "step", "Plank | 3x45s"],
+      [6, 904.6, 61, 109, 121, 100, 6, "rest", "Next: Side Plank | 2x30s/side"],
+      [7, 965.6, 190.4, 106, 120, 95, 18, "step", "Side Plank | 2x30s/side"],
+      [8, 1156, 2.4, 107, 108, 106, 0, "done", "Session complete"]
+    ]
+  }
+}

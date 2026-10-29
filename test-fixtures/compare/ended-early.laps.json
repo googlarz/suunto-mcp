@@ -1,0 +1,44 @@
+{
+  "workoutKey": "5e1f7c0de000000000000006",
+  "activityId": 23,
+  "startTime": 1791302400000,
+  "totalTimeS": 846.2,
+  "guide": {
+    "id": "synth006",
+    "name": "PULL F"
+  },
+  "tss": [
+    {
+      "method": "HR",
+      "value": 7.1
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [423, 296, 127, 0, 0],
+  "feeling": null,
+  "lapCount": 11,
+  "checks": [
+    {
+      "code": "no-session-complete",
+      "detail": "the guide's final 'Session complete' lap is missing — the session ended early, the buttons were locked, or the watch restarted"
+    }
+  ],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 102.5, 94, 99, 90, 9, "step", "2x20+1x10/side | Deadlift"],
+      [2, 102.5, 26.3, 104, 122, 95, 2, "step", "Deadlift | 120kg 3x5"],
+      [3, 128.8, 150, 117, 139, 100, 16, "rest", "Next: set 2/3"],
+      [4, 278.8, 27.9, 109, 127, 99, 3, "step", "Deadlift | 120kg 3x5"],
+      [5, 306.7, 150, 120, 142, 103, 16, "rest", "Next: set 3/3"],
+      [6, 456.7, 29.4, 112, 131, 101, 3, "step", "Deadlift | 120kg 3x5"],
+      [7, 486.1, 160.8, 111, 140, 97, 16, "step", "1x20+1x5/side | Barbell Row"],
+      [8, 646.9, 33, 106, 121, 98, 3, "step", "Barbell Row | 70kg 3x8"],
+      [9, 679.9, 90, 115, 132, 102, 9, "rest", "Next: set 2/3"],
+      [10, 769.9, 34.6, 110, 126, 100, 3, "step", "Barbell Row | 70kg 3x8"],
+      [11, 804.5, 41.7, 116, 129, 109, 4, "rest", "Next: set 3/3"]
+    ]
+  }
+}
