@@ -441,3 +441,18 @@ test("e2e get_route: one route by id with its flags; an unknown id is an error",
     assert.equal(noId.isError, true, "routeId is required");
   });
 });
+
+test("e2e push_*_guide: a same-named guide last modified a week ago does not count as this push arriving", async () => {
+  await withMcp(
+    async (call) => {
+      for (const [name, args] of guidePushes) {
+        const r = await call(name, args);
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.equal(out.check.verified, false);
+        assert.match(out.check.note, /not modified by this push/);
+      }
+    },
+    { SUUNTO_APP_NAME: "app", STUB_GUIDE_STALE: "1", STUB_GUIDE_NO_ID: "1" },
+  );
+});

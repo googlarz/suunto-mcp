@@ -584,18 +584,32 @@ export class SuuntoClient {
   // verified:false with a note. Matched by id (the returned one, else the one
   // updated); by name only when there is no id at all.
   async pushGuideVerified(zip: Buffer, name: string, guideId?: string): Promise<{ data: any; check: WriteCheck }> {
+    const startedAt = Date.now();
     const data = await guidePushQueue(() => (guideId ? this.updateGuide(guideId, zip) : this.createGuide(zip)));
     const id = data?.id ?? guideId;
-    let rows: any[];
-    try {
-      rows = guideRows(await this.listGuides());
-    } catch (err: any) {
-      return { data, check: { verified: false, note: `Pushed, but reading the guide list back failed: ${err?.message ?? err}` } };
+    // Weekly plans reuse titles ("UPPER", "FRIDAY"), so an old guide of the same
+    // name must not count: the listed row has to have been modified by this push.
+    // modificationTime is epoch ms (live list, 2026-10-29); 5 min covers clock skew.
+    // A row without it (other shapes) is matched on id/name alone.
+    const fresh = (g: any) => typeof g?.modificationTime !== "number" || g.modificationTime >= startedAt - 5 * 60_000;
+    let rows: any[] = [];
+    let lastError = "";
+    // The list may lag the push: look up to 3 times, a pause apart.
+    for (let look = 0; look < 3; look++) {
+      if (look > 0) await sleepMs(envMs("SUUNTO_WRITE_GAP_MS", 2000));
+      try {
+        rows = guideRows(await this.listGuides());
+        lastError = "";
+      } catch (err: any) {
+        lastError = err?.message ?? String(err);
+        continue;
+      }
+      const found = rows.some((g) => (id !== undefined ? String(g?.id) === String(id) : g?.name === name) && fresh(g));
+      if (found) return { data, check: { verified: true } };
     }
-    const found = id !== undefined ? rows.some((g) => String(g?.id) === String(id)) : rows.some((g) => g?.name === name);
-    if (found) return { data, check: { verified: true } };
+    if (lastError) return { data, check: { verified: false, note: `Pushed, but reading the guide list back failed: ${lastError}` } };
     const what = id !== undefined ? `guide ${id}` : `a guide named "${name}"`;
-    return { data, check: { verified: false, note: `Pushed, but ${what} is not in the guide list read back from Suunto.` } };
+    return { data, check: { verified: false, note: `Pushed, but ${what} is not in the guide list read back from Suunto (or it was not modified by this push).` } };
   }
 
   async deleteGuide(guideId: string): Promise<void> {

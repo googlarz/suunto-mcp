@@ -65,7 +65,9 @@ globalThis.fetch = async (input, init = {}) => {
     return res(process.env.STUB_GUIDE_NO_ID ? { name } : { id, name });
   }
   if (path === "/v2/guides/items") {
-    return res(process.env.STUB_GUIDE_LIST === "empty" ? [] : [...guides].map(([id, name]) => ({ id, name })));
+    // STUB_GUIDE_STALE: listed rows carry an old modificationTime, like a guide of that name pushed a week ago
+    const modificationTime = process.env.STUB_GUIDE_STALE ? Date.now() - 7 * 864e5 : Date.now();
+    return res(process.env.STUB_GUIDE_LIST === "empty" ? [] : [...guides].map(([id, name]) => ({ id, name, modificationTime })));
   }
   if (path === "/v2/upload" && init.method === "POST") {
     if (await overlapped("upload")) return res("General error", 500);
