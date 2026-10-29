@@ -45,7 +45,7 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
 
 type Call = (name: string, args?: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>;
 
-async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>, toolDefs: () => Promise<any[]>) => Promise<void>, extraEnv: Record<string, string> = {}) {
+async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>, toolDefs: () => Promise<any[]>, rpc: (method: string, params?: unknown) => Promise<any>) => Promise<void>, extraEnv: Record<string, string> = {}) {
   await withStubbedEnv(async ({ cwd, env: baseEnv }) => {
     const env = { ...baseEnv, ...extraEnv };
     const child = spawn(process.execPath, ["--import", stub, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
@@ -76,7 +76,7 @@ async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>, tool
       await fn(async (name, args = {}) => {
         const r = (await rpc("tools/call", { name, arguments: args })).result;
         return { text: r.content[0].text, isError: r.isError === true };
-      }, async () => (await rpc("tools/list")).result.tools.map((t: { name: string }) => t.name), async () => (await rpc("tools/list")).result.tools);
+      }, async () => (await rpc("tools/list")).result.tools.map((t: { name: string }) => t.name), async () => (await rpc("tools/list")).result.tools, rpc);
       assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     } finally {
       child.kill();
@@ -563,4 +563,28 @@ test("e2e push_*_guide: a same-named guide last modified a week ago does not cou
     },
     { SUUNTO_APP_NAME: "app", STUB_GUIDE_STALE: "1", STUB_GUIDE_NO_ID: "1" },
   );
+});
+
+test("e2e prompts: list, get, invalid params, and every tool named in a prompt exists", async () => {
+  await withMcp(async (_call, listTools, _defs, rpc) => {
+    const list = (await rpc("prompts/list")).result.prompts;
+    assert.deepEqual(
+      list.map((p: any) => [p.name, p.arguments.map((a: any) => a.name)]),
+      [["suunto-morning", ["date"]], ["suunto-weekly", ["endDate"]], ["suunto-gym-today", ["date"]]],
+    );
+    const tools = new Set(await listTools());
+    for (const p of list) {
+      const arg = p.arguments[0].name;
+      const r = (await rpc("prompts/get", { name: p.name, arguments: { [arg]: "2026-10-28" } })).result;
+      assert.equal(r.messages.length, 1);
+      assert.equal(r.messages[0].role, "user");
+      assert.equal(r.messages[0].content.type, "text");
+      const named = r.messages[0].content.text.match(/\b(?:get|list|compare)_[a-z_]+\b/g) ?? [];
+      assert.ok(named.length > 0, `${p.name} names no tool`);
+      for (const n of named) assert.ok(tools.has(n), `${p.name} names ${n}, which tools/list does not have`);
+    }
+    const bad = await rpc("prompts/get", { name: "suunto-morning", arguments: { date: "2026-02-30" } });
+    assert.equal(bad.error.code, -32602);
+    assert.equal((await rpc("prompts/get", { name: "nope" })).error.code, -32602);
+  });
 });

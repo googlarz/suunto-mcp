@@ -19,12 +19,15 @@ import {
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "node:fs";
 import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
+import { PROMPTS, getPrompt } from "./prompts.js";
 import { buildGuideZip, buildIntervalGuideZip, buildStrengthGuideZip } from "./guide-zip.js";
 import { generateDigest } from "./daily-digest.js";
 import { validateAgainstSchema } from "./schema-validate.js";
@@ -57,7 +60,7 @@ const MAX_GPX_BYTES = 10_000_000;
 
 const server = new Server(
   { name: "suunto-mcp", version: pkgVersion },
-  { capabilities: { tools: {}, resources: {} } },
+  { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -69,6 +72,14 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
   const contents = await readResource(req.params.uri, suunto);
   return { contents: [contents] };
 });
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: PROMPTS,
+}));
+
+server.setRequestHandler(GetPromptRequestSchema, async (req) =>
+  getPrompt(req.params.name, req.params.arguments),
+);
 
 const toolDefs = [
   {

@@ -372,6 +372,18 @@ This pairs naturally with a coaching workflow: describe your goals, equipment, a
 
 ---
 
+## Prompts
+
+MCP clients that support prompts (for example Claude Desktop) list these as one-click workflows. Each fills in the exact dates and tells Claude which tools to call.
+
+| Prompt | What it does | Optional argument |
+|---|---|---|
+| `suunto-morning` | Morning briefing: last night's sleep, recovery on waking, yesterday's load and workouts, how ready today is | `date` (YYYY-MM-DD, default today) |
+| `suunto-weekly` | Weekly review: sleep, HRV, recovery and training load against the week before, each gym session against its plan | `endDate` (YYYY-MM-DD, default yesterday) |
+| `suunto-gym-today` | Readiness gate: cut planned intensity 20-30% if HRV is clearly below your recent level or sleep score is low, otherwise train as planned | `date` (YYYY-MM-DD, default today) |
+
+---
+
 ## Daily health digest
 
 Ask Claude *"generate my daily digest for yesterday"* and it writes a color-coded markdown summary — steps, sleep, recovery balance, HRV, and a training-load model (Fitness/Fatigue/Form) — appended to `SUUNTO_HISTORY.md` in the folder the server runs from (set `SUUNTO_DIGEST_HISTORY_PATH` to choose another file).
