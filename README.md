@@ -619,8 +619,8 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `get_daily_snapshot` | One call for a whole day: last night's sleep (main sleep, naps), the day's lowest and highest recovery balance (and the value on waking and at bedtime), steps, energy and workouts. Pass `to` for up to 14 days in one request |
 | `get_workout_laps` | Lap-by-lap table for one workout: time, heart rate, calories and the guide step of each lap — the way to read back a guided gym session set by set; it also reports when the table looks unreliable (a missing or doubled lap, no heart rate) |
 | `get_workout_fit` | Raw FIT file decoded to structured data (large — `full: true` is about 550 KB for a strength session) |
-| `get_workout_samples` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026); use `get_workout_fit` |
-| `export_workout_gpx` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026) |
+| `get_workout_samples` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it; use `get_workout_fit` |
+| `export_workout_gpx` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it |
 
 **24/7 health** *(requires individual product subscriptions on apizone)*
 
@@ -656,7 +656,7 @@ Claude picks the right tool automatically — you don't need to know these. For 
 
 | Tool | What it does |
 |------|-------------|
-| `list_subscriptions` | **Currently unavailable** — Suunto's servers reject this call (checked on one account, September 2026) |
+| `list_subscriptions` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it |
 | `generate_daily_digest` | Writes the daily health digest to `SUUNTO_HISTORY.md` (see *Daily health digest*) — a write tool |
 
 </details>
