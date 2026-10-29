@@ -453,7 +453,7 @@ const toolDefs = [
   {
     name: "upload_workout",
     description:
-      "Uploads a workout file to the user's Suunto account. Provide the absolute path to the file on disk. The file is pushed to Suunto and appears in the app after processing (usually a few seconds). Returns an uploadId you can poll with get_upload_status. Suunto's own upload API docs state only .fit (binary) is currently supported for this endpoint — a .gpx path is still accepted here (sent as application/gpx+xml) in case that changes, but treat it as unverified; use .fit for a workout that must reliably show up. Write operation.",
+      "Uploads a workout file to the user's Suunto account. Provide the absolute path to the file on disk. The file is pushed to Suunto and appears in the app after processing (usually a few seconds). Waits for Suunto to process the file (polling the upload status for up to about 20 s) and returns { uploadId, message, status, check: { verified, note? } }: verified is true when the status reaches 'Processed'; otherwise note says why (another final status such as 'Error', or processing not finished in time — then poll get_upload_status with the uploadId later). Uploads are queued one at a time with a short pause, so several calls at once are safe. Suunto's own upload API docs state only .fit (binary) is currently supported for this endpoint — a .gpx path is still accepted here (sent as application/gpx+xml) in case that changes, but treat it as unverified; use .fit for a workout that must reliably show up. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -483,7 +483,7 @@ const toolDefs = [
   {
     name: "push_workout_guide",
     description:
-      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. There is no live push to the watch itself — delivery depends on the phone's normal Suunto app sync. In testing it showed up on the watch after the next ordinary sync with no manual pinning needed; if it doesn't appear, check the Suunto app under SuuntoPlus Guides and pin it there. For gym sessions prefer push_strength_guide: it records one lap per set and per rest, which get_workout_laps can read back. Write operation.",
+      "Pushes a text-step workout guide to the user's Suunto account via the SuuntoPlus Guide Cloud API. Each exercise becomes one step, advanced by a lap-button press on the watch. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. There is no live push to the watch itself — delivery depends on the phone's normal Suunto app sync. In testing it showed up on the watch after the next ordinary sync with no manual pinning needed; if it doesn't appear, check the Suunto app under SuuntoPlus Guides and pin it there. For gym sessions prefer push_strength_guide: it records one lap per set and per rest, which get_workout_laps can read back. Returns Suunto's response (including the guide id) plus nextStep and check: { verified, note? }: after the push the guide is looked up in the guide list (by id), and verified:false with a note means the push went through but the guide was not found there — say so to the user instead of reporting success. Pushes are queued one at a time with a short pause, so several calls at once are safe. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -521,7 +521,7 @@ const toolDefs = [
   {
     name: "push_interval_guide",
     description:
-      "Pushes an interval/cardio guide (warmup, timed or distance-based work intervals, recoveries, optional repeats) to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide (manual lap-per-exercise), interval segments auto-advance by elapsed time or distance — hands-off during a run or ride. Each segment can show a target heart-rate range alongside live HR. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Write operation.",
+      "Pushes an interval/cardio guide (warmup, timed or distance-based work intervals, recoveries, optional repeats) to the user's Suunto account via the SuuntoPlus Guide Cloud API. Unlike push_workout_guide (manual lap-per-exercise), interval segments auto-advance by elapsed time or distance — hands-off during a run or ride. Each segment can show a target heart-rate range alongside live HR. Requires SUUNTO_APP_NAME env var to exactly match the app name registered on apizone.suunto.com. Same delivery caveat as push_workout_guide: appears after the phone's next normal Suunto app sync, no live push. Returns Suunto's response (including the guide id) plus nextStep and check: { verified, note? }: after the push the guide is looked up in the guide list (by id), and verified:false with a note means the push went through but the guide was not found there — say so to the user instead of reporting success. Pushes are queued one at a time with a short pause, so several calls at once are safe. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -581,7 +581,7 @@ const toolDefs = [
   {
     name: "push_strength_guide",
     description:
-      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API — the tool to use for gym sessions. Per exercise: a prep step (self-paced stopwatch showing the plate breakdown if given, otherwise the weight/sets detail, plus the exercise name and live HR; a lap press starts the exercise), then with lapGranularity 'perSet' (default) each set is its own step ended by a lap press, and each rest between sets is its own step showing 'Next: set k/S'. restMode 'countdown' (default) counts down restSec and auto-advances into the next set with a vibration; 'stopwatch' counts up and waits for a lap press. lapGranularity 'perExercise' gives one step per exercise after its prep, with no between-set rests and no per-set laps. Every prep, set and rest is its own lap and the guide ends with one extra 'Session complete' step, so a perSet session records 2 × (total sets) + 1 laps. Read them back after the workout with get_workout_laps — its labels are the step texts. Requires SUUNTO_APP_NAME to exactly match the app name registered on apizone.suunto.com. Without guideId a new guide is created on every call (see list_guides / delete_guide to tidy up); with guideId that guide is overwritten. There is no live push to the watch: it appears after the phone's next normal Suunto app sync. Write operation.",
+      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API — the tool to use for gym sessions. Per exercise: a prep step (self-paced stopwatch showing the plate breakdown if given, otherwise the weight/sets detail, plus the exercise name and live HR; a lap press starts the exercise), then with lapGranularity 'perSet' (default) each set is its own step ended by a lap press, and each rest between sets is its own step showing 'Next: set k/S'. restMode 'countdown' (default) counts down restSec and auto-advances into the next set with a vibration; 'stopwatch' counts up and waits for a lap press. lapGranularity 'perExercise' gives one step per exercise after its prep, with no between-set rests and no per-set laps. Every prep, set and rest is its own lap and the guide ends with one extra 'Session complete' step, so a perSet session records 2 × (total sets) + 1 laps. Read them back after the workout with get_workout_laps — its labels are the step texts. Requires SUUNTO_APP_NAME to exactly match the app name registered on apizone.suunto.com. Without guideId a new guide is created on every call (see list_guides / delete_guide to tidy up); with guideId that guide is overwritten. There is no live push to the watch: it appears after the phone's next normal Suunto app sync. Returns Suunto's response (including the guide id) plus nextStep and check: { verified, note? }: after the push the guide is looked up in the guide list (by id), and verified:false with a note means the push went through but the guide was not found there — say so to the user instead of reporting success. Pushes are queued one at a time with a short pause, so several calls at once are safe. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -845,14 +845,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
         const contentType = ext === ".gpx" ? "application/gpx+xml" : "application/octet-stream";
         const fileBytes = await readFile(filePath);
-        const { uploadId, uploadUrl } = await suunto.initiateUpload({
+        const { uploadId, status, check } = await suunto.uploadWorkoutVerified(fileBytes, contentType, {
           description: a.description,
           comment: a.comment,
           notifyUser: false,
           privacy: a.privacy ?? "DEFAULT",
         });
-        await suunto.uploadFile(uploadUrl, fileBytes, contentType);
-        return text(JSON.stringify({ uploadId, message: "Upload initiated. Use get_upload_status to check processing." }));
+        return text(JSON.stringify({ uploadId, message: "Upload initiated. Use get_upload_status to check processing.", status, check }));
       }
       case "push_workout_guide": {
         if (!cfg.appName) {
@@ -865,14 +864,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           { title: a.title, date: a.date, exercises: a.exercises },
           cfg.appName,
         );
-        const data = a.guideId
-          ? await suunto.updateGuide(a.guideId, zip)
-          : await suunto.createGuide(zip);
+        const { data, check } = await suunto.pushGuideVerified(zip, a.title, a.guideId);
         return text(
           JSON.stringify({
             ...data,
             nextStep:
               "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
+            check,
           }),
         );
       }
@@ -887,14 +885,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           { title: a.title, date: a.date, blocks: a.blocks },
           cfg.appName,
         );
-        const data = a.guideId
-          ? await suunto.updateGuide(a.guideId, zip)
-          : await suunto.createGuide(zip);
+        const { data, check } = await suunto.pushGuideVerified(zip, a.title, a.guideId);
         return text(
           JSON.stringify({
             ...data,
             nextStep:
               "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
+            check,
           }),
         );
       }
@@ -915,14 +912,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           },
           cfg.appName,
         );
-        const data = a.guideId
-          ? await suunto.updateGuide(a.guideId, zip)
-          : await suunto.createGuide(zip);
+        const { data, check } = await suunto.pushGuideVerified(zip, a.title, a.guideId);
         return text(
           JSON.stringify({
             ...data,
             nextStep:
               "It should appear on the watch after your phone's next normal Suunto app sync. If it doesn't, open the Suunto app > your watch > SuuntoPlus Guides and pin it manually.",
+            check,
           }),
         );
       }
