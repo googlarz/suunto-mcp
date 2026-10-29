@@ -711,7 +711,14 @@ const tools = toolDefs.map((t) => {
   return { ...t, ...meta };
 });
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+// Suunto's gateway answers these with 401 OperationNotFound; advertising them
+// only wastes tokens and invites failed calls.
+const LEGACY_TOOLS = new Set(["get_workout_samples", "export_workout_gpx", "list_subscriptions"]);
+const legacyEnabled = process.env.SUUNTO_ENABLE_LEGACY_TOOLS === "1";
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: legacyEnabled ? tools : tools.filter((t) => !LEGACY_TOOLS.has(t.name)),
+}));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
@@ -722,6 +729,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // masks a typo'd tool name.
     const tool = tools.find((t) => t.name === name);
     if (!tool) return text(`Unknown tool: ${name}`, true);
+    if (!legacyEnabled && LEGACY_TOOLS.has(name)) {
+      return text(
+        `${name} is hidden: Suunto no longer serves this endpoint (OperationNotFound). This is not an authentication problem. Set SUUNTO_ENABLE_LEGACY_TOOLS=1 to re-enable it.`,
+        true,
+      );
+    }
     // Each tool declares a full inputSchema, but the MCP SDK doesn't
     // enforce it — a call could otherwise pass e.g. limit: -1 straight
     // through to the API layer instead of being rejected up front.

@@ -41,7 +41,7 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
 
 type Call = (name: string, args?: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>;
 
-async function withMcp(fn: (call: Call) => Promise<void>, extraEnv: Record<string, string> = {}) {
+async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>) => Promise<void>, extraEnv: Record<string, string> = {}) {
   await withStubbedEnv(async ({ cwd, env: baseEnv }) => {
     const env = { ...baseEnv, ...extraEnv };
     const child = spawn(process.execPath, ["--import", stub, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
@@ -72,7 +72,7 @@ async function withMcp(fn: (call: Call) => Promise<void>, extraEnv: Record<strin
       await fn(async (name, args = {}) => {
         const r = (await rpc("tools/call", { name, arguments: args })).result;
         return { text: r.content[0].text, isError: r.isError === true };
-      });
+      }, async () => (await rpc("tools/list")).result.tools.map((t: { name: string }) => t.name));
       assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     } finally {
       child.kill();
@@ -191,6 +191,35 @@ test("e2e list_subscriptions: a removed endpoint is reported as such, not as an 
     assert.equal(r.isError, true);
     assert.match(r.text, /no longer serves this endpoint/);
     assert.match(r.text, /not an authentication problem/);
+  }, { SUUNTO_ENABLE_LEGACY_TOOLS: "1" });
+});
+
+const LEGACY = ["get_workout_samples", "export_workout_gpx", "list_subscriptions"];
+
+test("e2e tools/list: the dead legacy tools are hidden by default", async () => {
+  await withMcp(async (_call, listTools) => {
+    const names = await listTools();
+    assert.ok(names.includes("list_workouts"));
+    for (const n of LEGACY) assert.ok(!names.includes(n), `${n} should be hidden`);
+  });
+});
+
+test("e2e tools/list: SUUNTO_ENABLE_LEGACY_TOOLS=1 brings the legacy tools back", async () => {
+  await withMcp(async (_call, listTools) => {
+    const names = await listTools();
+    for (const n of LEGACY) assert.ok(names.includes(n), `${n} should be listed`);
+  }, { SUUNTO_ENABLE_LEGACY_TOOLS: "1" });
+});
+
+test("e2e: calling a hidden legacy tool explains why and how to re-enable it", async () => {
+  await withMcp(async (call) => {
+    for (const n of LEGACY) {
+      const r = await call(n, n === "list_subscriptions" ? {} : { workoutKey: KEY });
+      assert.equal(r.isError, true);
+      assert.match(r.text, /no longer serves this endpoint \(OperationNotFound\)/);
+      assert.match(r.text, /not an authentication problem/);
+      assert.match(r.text, /SUUNTO_ENABLE_LEGACY_TOOLS=1/);
+    }
   });
 });
 
