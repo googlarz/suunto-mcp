@@ -61,8 +61,9 @@ export function lapChecks(rows: any[][]): LapCheck[] {
     }
   }
 
-  // A lap pressed after the guide's final "Session complete" lap has no label by
-  // nature; only unlabelled laps before it point at a problem.
+  // A lap pressed after the guide's final "Session complete" lap carries that
+  // same label (kind "done"), so it is never unlabelled; unlabelled laps are only
+  // looked for before the first "Session complete".
   const doneAt = rows.findIndex((r) => r[KIND] === "done");
   const guided = doneAt === -1 ? rows : rows.slice(0, doneAt);
   const labelled = rows.filter((r) => r[LABEL] !== null).length;
