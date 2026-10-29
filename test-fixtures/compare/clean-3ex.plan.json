@@ -1,0 +1,21 @@
+[
+  {
+    "name": "Back Squat",
+    "detail": "100kg 3x5",
+    "sets": 3,
+    "restSec": 120,
+    "plates": "2x20/side"
+  },
+  {
+    "name": "Bench Press",
+    "detail": "70kg 3x8",
+    "sets": 3,
+    "restSec": 90
+  },
+  {
+    "name": "Seated Cable Row",
+    "detail": "55kg 2x12",
+    "sets": 2,
+    "restSec": 60
+  }
+]

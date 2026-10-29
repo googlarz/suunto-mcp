@@ -1,0 +1,50 @@
+{
+  "workoutKey": "5e1f7c0de000000000000005",
+  "activityId": 23,
+  "startTime": 1791216000000,
+  "totalTimeS": 724,
+  "guide": {
+    "id": "synth005",
+    "name": "LEGS E"
+  },
+  "tss": [
+    {
+      "method": "HR",
+      "value": 6
+    }
+  ],
+  "pte": 2,
+  "peakEpoc": 20,
+  "recoveryTime": 14400,
+  "hrZoneTimeS": [362, 253, 109, 0, 0],
+  "feeling": null,
+  "lapCount": 13,
+  "checks": [
+    {
+      "code": "duplicate-rest",
+      "detail": "laps 5 and 6 are both \"Next: set 3/3\" — a set lap is missing or a rest was split"
+    },
+    {
+      "code": "duplicate-rest",
+      "detail": "laps 6 and 7 are both \"Next: set 3/3\" — a set lap is missing or a rest was split"
+    }
+  ],
+  "laps": {
+    "cols": ["i", "startOffsetS", "durationS", "hrAvg", "hrMax", "hrMin", "kcal", "kind", "label"],
+    "rows": [
+      [1, 0, 70, 90, 94, 87, 6, "step", "28kg 3x10 | Goblet Squat"],
+      [2, 70, 40.2, 101, 119, 92, 4, "step", "Goblet Squat | 28kg 3x10"],
+      [3, 110.2, 150, 113, 133, 97, 15, "rest", "Next: set 2/3"],
+      [4, 260.2, 41.5, 106, 123, 96, 4, "step", "Goblet Squat | 28kg 3x10"],
+      [5, 301.7, 52, 114, 129, 104, 5, "rest", "Next: set 3/3"],
+      [6, 353.7, 33.5, 112, 127, 105, 3, "rest", "Next: set 3/3"],
+      [7, 387.2, 64.5, 118, 136, 101, 7, "rest", "Next: set 3/3"],
+      [8, 451.7, 42.8, 110, 127, 99, 4, "step", "Goblet Squat | 28kg 3x10"],
+      [9, 494.5, 96.3, 106, 129, 95, 9, "step", "20kg 2x12 | Cable Fly"],
+      [10, 590.8, 35, 101, 115, 96, 3, "step", "Cable Fly | 20kg 2x12"],
+      [11, 625.8, 60, 109, 122, 100, 6, "rest", "Next: set 2/2"],
+      [12, 685.8, 36.2, 104, 118, 98, 3, "step", "Cable Fly | 20kg 2x12"],
+      [13, 722, 2, 108, 109, 107, 0, "done", "Session complete"]
+    ]
+  }
+}

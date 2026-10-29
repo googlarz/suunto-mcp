@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Romanian Deadlift",
+    "sets": 3,
+    "restSec": 120
+  },
+  {
+    "name": "Leg Press",
+    "sets": 3,
+    "restSec": 90
+  }
+]

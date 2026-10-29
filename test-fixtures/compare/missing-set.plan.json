@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Incline DB Press",
+    "sets": 3,
+    "restSec": 90
+  },
+  {
+    "name": "Lat Pulldown",
+    "sets": 4,
+    "restSec": 90
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "workoutKey": "5e1f7c0de000000000000010",
+  "guide": null,
+  "status": "no-guide-labels",
+  "format": null,
+  "restMode": null,
+  "complete": null,
+  "reliable": false,
+  "note": "The laps carry no guide labels (no guide ran), so they cannot be mapped to exercises.",
+  "checks": [],
+  "lapCount": 3,
+  "baselineHr": null,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [],
+  "afterComplete": [],
+  "unattributed": [],
+  "deviations": []
+}

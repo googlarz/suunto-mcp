@@ -1,0 +1,97 @@
+{
+  "workoutKey": "5e1f7c0de000000000000002",
+  "guide": {
+    "id": "synth002",
+    "name": "LEGS B"
+  },
+  "status": "ok",
+  "format": "strength-perSet",
+  "restMode": "countdown",
+  "complete": true,
+  "reliable": true,
+  "note": null,
+  "checks": [],
+  "lapCount": 17,
+  "baselineHr": 90,
+  "cols": {
+    "prep": ["lap", "durationS", "hrMax", "hrMin"],
+    "set": ["k", "lap", "durationS", "hrAvg", "hrMax"],
+    "rest": ["k", "lap", "durationS", "targetS", "peak", "end", "drop", "endVsBaseline"],
+    "lap": ["lap", "durationS", "hrAvg", "hrMax"]
+  },
+  "exercises": [
+    {
+      "n": 1,
+      "name": "Romanian Deadlift",
+      "detail": "90kg 3x8",
+      "plan": 0,
+      "planned": {
+        "sets": 3,
+        "restS": 120
+      },
+      "prep": [1, 88, 96, 86],
+      "sets": [
+        [1, 2, 34.2, 101, 117],
+        [2, 4, 36, 108, 124],
+        [3, 6, 88.5, 124, 141]
+      ],
+      "rests": [
+        [2, 3, 120, 120, 135, 99, 36, 9],
+        [3, 5, 120, 120, 138, 102, 36, 12]
+      ]
+    },
+    {
+      "n": 2,
+      "name": "Leg Press",
+      "detail": "160kg 4x10",
+      "plan": 1,
+      "planned": {
+        "sets": 4,
+        "restS": 90
+      },
+      "prep": [7, 132.4, 139, 98],
+      "sets": [
+        [1, 8, 42, 106, 121],
+        [2, 10, 44.1, 111, 127],
+        [3, 12, 45.3, 114, 131],
+        [4, 14, 46, 116, 134]
+      ],
+      "rests": [
+        [2, 9, 90, 90, 133, 103, 30, 13],
+        [3, 11, 90, 90, 136, 106, 30, 16],
+        [4, 13, 90, 90, 139, 108, 31, 18]
+      ]
+    }
+  ],
+  "afterComplete": [
+    [15, 175, 112, 136],
+    [16, 36.4, 109, 122]
+  ],
+  "unattributed": [],
+  "deviations": [
+    {
+      "code": "long-set",
+      "basis": "heuristic",
+      "ex": 1,
+      "plan": null,
+      "laps": [6],
+      "detail": "set 3 lasted 88.5 s against a median of 35.1 s for the other sets: it may contain an extra set, or a lap press was forgotten"
+    },
+    {
+      "code": "extra-set",
+      "basis": "plan",
+      "ex": 2,
+      "plan": 1,
+      "laps": [14],
+      "detail": "4 sets recorded, the plan has 3"
+    },
+    {
+      "code": "after-complete",
+      "basis": "labels",
+      "ex": null,
+      "plan": null,
+      "laps": [15, 16],
+      "detail": "2 lap(s) pressed after 'Session complete': work after the guide ended (an extra set, say), not attributed to an exercise"
+    }
+  ]
+}
