@@ -208,9 +208,9 @@ test("e2e get_training_load: reaching the workout limit is reported", async () =
   await withMcp(
     async (call) => {
       const out = JSON.parse((await call("get_training_load", { date: "2026-09-28" })).text);
-      assert.ok(out.notes.some((n: string) => /Reached the 500-workout limit/.test(n)));
+      assert.ok(out.notes.some((n: string) => /Reached the 600-workout limit/.test(n)));
     },
-    { STUB_WORKOUTS: "600" },
+    { STUB_WORKOUTS: "700" },
   );
 });
 

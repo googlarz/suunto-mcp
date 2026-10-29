@@ -120,12 +120,13 @@ export function weeklyTotals(days: Map<string, DayLoad>, from: string, to: strin
 export const DEFAULT_DAYS = 28;
 export const MAX_DAYS = 120;
 // Without a seed, CTL/ATL start from 0 this many days before the window, so the
-// window itself isn't cold-started: e^(-120/42) leaves ~6% of the true starting CTL.
-export const WARMUP_DAYS = 120;
-// Warm-up plus the longest window is 240 days; 500 covers two workouts every
+// window itself isn't cold-started: e^(-180/42) leaves ~1.4% of the true starting CTL
+// (120 days left ~6%, which read CTL about 0.4 low against a full-history run on real data).
+export const WARMUP_DAYS = 180;
+// Warm-up plus the longest window is 300 days; 600 covers two workouts every
 // day. listWorkouts pages 50 at a time and stops at the first short page, so a
-// lighter history costs fewer requests.
-export const WORKOUT_LIMIT = 500;
+// lighter history costs fewer requests (about 2-3 for a typical year).
+export const WORKOUT_LIMIT = 600;
 
 const r1 = (n: number): number => Math.round(n * 10) / 10;
 

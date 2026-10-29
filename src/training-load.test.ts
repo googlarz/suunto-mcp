@@ -116,12 +116,12 @@ function fakeClient(payload: any[]) {
   };
 }
 
-test("buildTrainingLoad: reads a 120-day warm-up, so a workout before the window carries into it", async () => {
+test("buildTrainingLoad: reads a 180-day warm-up, so a workout before the window carries into it", async () => {
   const { client, calls } = fakeClient([withTss("2026-01-10T08:00:00", 100), withTss("2026-03-05T08:00:00", 50)]);
   const out = await buildTrainingLoad(client, { date: "2026-03-10", days: 7 });
   assert.equal(out.from, "2026-03-04");
   assert.equal(out.to, "2026-03-10");
-  const bounds = dayFetchBounds("2025-11-04", "2026-03-10");
+  const bounds = dayFetchBounds("2025-09-05", "2026-03-10"); // 2026-03-04 minus 180 days
   assert.deepEqual(calls, [{ since: bounds.from, until: bounds.to, limit: WORKOUT_LIMIT }]);
   assert.equal(out.series.length, 7);
   assert.deepEqual(out.series.map((p) => p.tss), [0, 50, 0, 0, 0, 0, 0]);
@@ -134,7 +134,7 @@ test("buildTrainingLoad: reads a 120-day warm-up, so a workout before the window
   assert.notEqual(out.current.rampRate7d, null, "the warm-up has a CTL 7 days before `to`");
   assert.ok(out.notes.some((n) => /about 1 point off/.test(n)));
   assert.ok(out.notes.some((n) => /tss 0: a rest day/.test(n)));
-  assert.ok(out.notes.some((n) => /start from 0 on 2025-11-04/.test(n)));
+  assert.ok(out.notes.some((n) => /start from 0 on 2025-09-05/.test(n)));
   assert.ok(!out.notes.some((n) => /Little history/.test(n)), "history starts 53 days before the window");
   assert.ok(!out.notes.some((n) => /limit/.test(n)));
 });
@@ -193,7 +193,7 @@ test("buildTrainingLoad: reaching the workout limit is reported in notes", async
   const rows = Array.from({ length: WORKOUT_LIMIT }, () => withTss("2026-03-10T08:00:00", 1));
   const { client } = fakeClient(rows);
   const out = await buildTrainingLoad(client, { date: "2026-03-10", days: 1 });
-  assert.ok(out.notes.some((n) => /Reached the 500-workout limit/.test(n)));
+  assert.ok(out.notes.some((n) => /Reached the 600-workout limit/.test(n)));
 });
 
 test("buildTrainingLoad: an invalid date or day count is refused before any request", async () => {
