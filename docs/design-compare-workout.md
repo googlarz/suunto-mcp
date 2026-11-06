@@ -50,7 +50,7 @@ Prep and set labels are not the same text. Their halves are swapped (`load | nam
 | Sets done, per-set time and HR, rest time and HR | lap rows | — |
 | Whether the guide ran to the end | presence of a `Session complete` lap | — |
 | Work after the guide ended | laps after the first `Session complete`, except the last | — |
-| Exercises the guide had but the session never reached | **not derivable** | A prep label does not carry the exercise count (`i/N` is in the step title, which is not in `intervalNotes`) |
+| Exercises the guide had but the session never reached | **not derivable** | A prep label does not carry the exercise count (the exercise counter, `E<i>/<N>`, is in the step title, which is not in `intervalNotes`) |
 
 ### 1.3 The optional `plan`
 

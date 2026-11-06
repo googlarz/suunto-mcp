@@ -28,6 +28,7 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_workout_fit: { title: "Get workout FIT data", annotations: READ },
   get_workout_laps: { title: "Get workout laps", annotations: READ },
   compare_workout_to_plan: { title: "Compare workout to plan", annotations: READ },
+  get_workout_rest_profile: { title: "Get workout rest recovery profile", annotations: READ },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },
   export_workout_gpx: { title: "Export workout as GPX", annotations: READ },

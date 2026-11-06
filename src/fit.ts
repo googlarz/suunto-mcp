@@ -9,6 +9,40 @@ export interface ParsedFit {
   records?: any[];
   events?: any[];
   device_infos?: any[];
+  developer_data_ids?: any[];
+  field_descriptions?: any[];
+}
+
+export interface DeveloperInfo {
+  apps: { devIdx?: number; developerId?: number; applicationId?: string; manufacturerId?: unknown; version?: number }[];
+  fields: { name: string; units: string; devIdx: number; fieldNo: number; baseType: number }[];
+  devChannels: string[]; // developer fields that carry a value in at least one record
+}
+
+const defined = <T extends object>(o: T): T => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+const hex = (bytes: unknown): string | undefined =>
+  Array.isArray(bytes) ? bytes.map((b) => Number(b).toString(16).padStart(2, "0")).join("") : typeof bytes === "string" ? bytes : undefined;
+
+// SuuntoPlus apps can write extra channels into the FIT as developer fields.
+// fit-file-parser lists them in developer_data_ids / field_descriptions and puts
+// each value in the record under the field's own name. Null when there are none.
+export function developerInfo(parsed: ParsedFit): DeveloperInfo | null {
+  const ids = parsed.developer_data_ids ?? [];
+  const descriptions = parsed.field_descriptions ?? [];
+  if (ids.length === 0 && descriptions.length === 0) return null;
+  const apps = ids.map((a: any) =>
+    defined({ devIdx: a.developer_data_index, developerId: a.developer_id, applicationId: hex(a.application_id), manufacturerId: a.manufacturer_id, version: a.application_version }),
+  );
+  const fields = descriptions.map((d: any) => ({
+    name: d.field_name as string,
+    units: (d.units ?? "") as string,
+    devIdx: d.developer_data_index as number,
+    fieldNo: d.field_definition_number as number,
+    baseType: d.fit_base_type_id as number,
+  }));
+  const records = parsed.records ?? [];
+  const devChannels = fields.map((f) => f.name).filter((name) => records.some((r) => r?.[name] !== undefined && r[name] !== null));
+  return { apps, fields, devChannels };
 }
 
 export async function parseFit(bytes: Buffer): Promise<ParsedFit> {
@@ -61,5 +95,7 @@ export function summarizeFit(parsed: ParsedFit) {
     training_effect: session.total_training_effect,
     laps: parsed.laps?.length ?? 0,
     records_sample: sample,
+    // SuuntoPlus app channels written into the FIT as developer fields; null when there are none.
+    developer: developerInfo(parsed),
   };
 }

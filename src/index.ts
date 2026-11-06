@@ -34,6 +34,7 @@ import { validateAgainstSchema } from "./schema-validate.js";
 import { TOOL_META } from "./tool-meta.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 import { compareWorkout } from "./compare.js";
+import { buildRestProfile } from "./rest-profile.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
 import { buildTrainingLoad } from "./training-load.js";
 
@@ -249,6 +250,36 @@ const toolDefs = [
     name: "compare_workout_to_plan",
     description:
       "Compares one guided gym session with its plan: maps the manual laps (the same data get_workout_laps returns) to exercises, sets and rests, and reports planned vs actual with honest deviations. Works for sessions pushed with push_strength_guide (lapGranularity perSet or perExercise, restMode countdown or stopwatch) and push_workout_guide. The plan — exercise order, set counts, rest targets — is read from the lap labels, so `plan` is optional; pass the exercises array you pushed to also check the session against it (missing, extra or reordered exercises, set counts, rest targets). Output: { workoutKey, guide, status ('ok' | 'no-laps' | 'no-guide-labels' | 'unknown-label-format'), format ('strength-perSet' | 'strength-perExercise' | 'workout'), restMode ('countdown' | 'stopwatch' | null), complete (the guide's 'Session complete' lap was reached), reliable, note, checks (get_workout_laps' checks, passed through), lapCount, baselineHr (heart rate of lap 1, the first prep — null for workout guides), cols, exercises: [{ n, name, detail, plan (index into plan or null), planned: { sets, restS }, prep, sets, rests }], afterComplete, unattributed, deviations: [{ code, basis ('labels' | 'plan' | 'heuristic'), ex, plan, laps, detail }] }. prep, sets, rests, afterComplete and unattributed rows are arrays in the column order given by cols. A rest row's peak is the rest lap's max HR and end its min HR (optical HR lags 20–30 s, so the peak lands in the rest, not in the set); endVsBaseline is end minus baselineHr. Deviation codes: unexpected-sequence, rest-split, rest-short, rest-long, short-set, long-set, missing-set, extra-set, rest-target-mismatch, extra-exercise, ended-early, unlabelled-lap, after-complete, order-differs, missing-exercise. reliable is false when checks has an entry other than no-heart-rate (which only nulls the heart-rate fields) or the laps break the guide's step order; the mapping is then best effort and note says why. With restMode countdown a rest lap always lasts exactly its target (the watch advances by itself), so extra rest ends up inside the next set's lap and is not measurable. About 1–4 KB. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutKey: {
+          type: "string",
+          minLength: 1,
+          description: "The 24-character workoutKey returned by list_workouts. Anything else fails with a not-found error without calling Suunto.",
+        },
+        plan: {
+          type: "array",
+          minItems: 1,
+          description: "Optional: what the session was meant to be, in order. Pass the exercises array given to push_strength_guide or push_workout_guide as-is — only name, sets and restSec are read. Without it the plan is read from the lap labels alone.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1, description: "Exercise name as pushed to the guide, e.g. 'Back Squat'." },
+              sets: { type: "integer", minimum: 1, maximum: 100, description: "Planned number of sets." },
+              restSec: { type: "integer", minimum: 1, description: "Planned rest between sets, in seconds." },
+            },
+            required: ["name"],
+          },
+        },
+      },
+      required: ["workoutKey"],
+    },
+  },
+  {
+    name: "get_workout_rest_profile",
+    description:
+      "Per-rest heart-rate recovery of one guided gym session, from the FIT file's record-level heart rate joined to the guide's lap labels (the same exercise/set mapping as compare_workout_to_plan). compare_workout_to_plan reports only a rest lap's max and min HR, and with restMode countdown the lap lasts exactly its target, so how far and how fast the heart rate fell is invisible there; this tool reads it from the individual HR samples. Output: { workoutKey, status ('ok' | 'no-laps' | 'no-guide-labels' | 'unknown-label-format', passed through from compare_workout_to_plan; any other status returns empty rests), restMode, reliable, note, rests: [{ exercise, exerciseN, set (the set after which the rest happened), plannedRestS, actualDurationS, peakHr, peakAtS, endHr, dropTotal, t10S, t20S, t30S, recoveryBpmPerMin, sampleCount, coverage, note }], perExercise: [{ name, n, medianT20S, medianEndHr, medianRecoveryBpmPerMin }], developer: { apps, fields: [{ name, units, devIdx, fieldNo, baseType }], devChannels } | null, alignment: { workoutStartSource ('session.start_time' | 'laps.startTime' | 'first-record'), lapStartTimeMs, fitStartMs, startSkewS } }. Units: heart rate in bpm; peakAtS in seconds from the start of the rest (negative when the peak came before it); t10S, t20S and t30S in seconds after the peak until the 3-sample-smoothed HR first reached peakHr minus 10, 20 or 30 bpm (null if it never did within the rest); endHr is the mean of the last 5 s of the rest; dropTotal is peakHr minus endHr; recoveryBpmPerMin is the fall (smoothed) over the first 60 s after the peak (or what the rest has left of it); coverage is the fraction of the rest's seconds that have an HR sample (0 to 1). peakHr is the highest 3-sample-smoothed value from 15 s before the rest to 30 s after it started (clipped to the rest), because optical HR lags the effort by 20-30 s and keeps rising into the rest; a single spike does not set it, and a sharp peak reads a little lower than its raw sample. Samples outside 30-250 bpm are ignored. A rest with fewer than 5 HR samples returns nulls with a note instead of failing. In a workout guide (push_workout_guide) the rest lap before an exercise counts as the rest after the previous exercise; a strength guide with lapGranularity perExercise has no between-set rests, so rests is empty. Caveats: the rest windows come from the lap table's startOffsetS (seconds from the workout start) and are placed on the FIT's timeline from its session start_time (else the lap table's startTime, else its first record); that this lines up exactly was not checked against a real workout, and alignment.startSkewS (FIT session start minus the lap table's startTime) plus the note flag a disagreement of more than 2 s, and reliable is false beyond 60 s. A rest with a lap pressed during it (rest-split) carries a note. After an exercise's last set the transition into the next exercise's prep lap is not profiled. developer lists the SuuntoPlus app's developer fields in the FIT and which of them carry values; it is null or devChannels is empty when the app writes none (whether Suunto's FIT files carry them is unverified). Downloads the FIT file (about 550 KB for a 35-lap session) but returns only a few KB. Optional plan is the same as for compare_workout_to_plan. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -660,7 +691,7 @@ const toolDefs = [
   {
     name: "push_strength_guide",
     description:
-      "Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API — the tool to use for gym sessions. Per exercise: a prep step (self-paced stopwatch showing the plate breakdown if given, otherwise the weight/sets detail, plus the exercise name and live HR; a lap press starts the exercise), then with lapGranularity 'perSet' (default) each set is its own step ended by a lap press, and each rest between sets is its own step showing 'Next: set k/S'. restMode 'countdown' (default) counts down restSec and auto-advances into the next set with a vibration; 'stopwatch' counts up and waits for a lap press. lapGranularity 'perExercise' gives one step per exercise after its prep, with no between-set rests and no per-set laps. Every prep, set and rest is its own lap and the guide ends with one extra 'Session complete' step, so a perSet session records 2 × (total sets) + 1 laps. Read them back after the workout with get_workout_laps — its labels are the step texts. Requires SUUNTO_APP_NAME to exactly match the app name registered on apizone.suunto.com. Without guideId a new guide is created on every call (see list_guides / delete_guide to tidy up); with guideId that guide is overwritten. There is no live push to the watch: it appears after the phone's next normal Suunto app sync. Returns Suunto's response (including the guide id) plus nextStep and check: { verified, note? }: after the push the guide is looked up in the guide list (by id), and verified:false with a note means the push went through but the guide was not found there — say so to the user instead of reporting success. Pushes are queued one at a time with a short pause, so several calls at once are safe. Write operation.",
+      "The guide's icon in the Suunto app's guide list is a blue-violet gradient with a barbell. Pushes a resistance-training guide to the user's Suunto account via the SuuntoPlus Guide Cloud API — the tool to use for gym sessions. Step titles show where you are: a prep step is '<i>/<N>' (exercise i of N), a set step '<i>/<N> - <k>/<S>' (exercise i of N, set k of S), and a rest '<i>/<N> REST'; with lapGranularity 'perExercise' the work step is '<i>/<N>'. Set popups read 'SET k/S' with '<name> - <detail>'; the last set of an exercise pops 'LAST SET' with 'Next: <next exercise>' (or its own name and detail for the final exercise); perExercise keeps 'GO'. Text lines are cut to the watch's 40 characters by shortening the exercise name, never the weight/plates line. (Titles and popups are not part of the lap labels, so get_workout_laps and compare_workout_to_plan are unaffected.) The guide's list description names the day's exercises ('Bench · Row · ...', cut at 60 characters). Per exercise: a prep step (self-paced stopwatch showing the plate breakdown if given, otherwise the weight/sets detail, plus the exercise name and live HR; a lap press starts the exercise), then with lapGranularity 'perSet' (default) each set is its own step ended by a lap press, and each rest between sets is its own step showing 'Next: set k/S' (plus, when the exercise sets restTargetHr, a heart-rate gauge up to that bpm). restMode 'countdown' (default) counts down restSec and auto-advances into the next set with a vibration; 'stopwatch' counts up and waits for a lap press. lapGranularity 'perExercise' gives one step per exercise after its prep, with no between-set rests and no per-set laps. Every prep, set and rest is its own lap and the guide ends with one extra 'Session complete' step, so a perSet session records 2 × (total sets) + 1 laps. Read them back after the workout with get_workout_laps — its labels are the step texts. Requires SUUNTO_APP_NAME to exactly match the app name registered on apizone.suunto.com. Without guideId a new guide is created on every call (see list_guides / delete_guide to tidy up); with guideId that guide is overwritten. There is no live push to the watch: it appears after the phone's next normal Suunto app sync. Returns Suunto's response (including the guide id) plus nextStep and check: { verified, note? }: after the push the guide is looked up in the guide list (by id), and verified:false with a note means the push went through but the guide was not found there — say so to the user instead of reporting success. Pushes are queued one at a time with a short pause, so several calls at once are safe. Write operation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -692,6 +723,12 @@ const toolDefs = [
               plates: {
                 type: "string",
                 description: "Per-side plate breakdown for barbell exercises, e.g. '2x20+1x5/side' — shown on the prep screen instead of detail, since that's when the bar actually gets loaded. Omit for non-barbell exercises (dumbbell, machine, bodyweight, cable); compute the math yourself before calling this tool, it isn't done here.",
+              },
+              restTargetHr: {
+                type: "integer",
+                minimum: 40,
+                maximum: 200,
+                description: "Optional target heart rate to recover to during this exercise's rests between sets, in bpm (40-200). Adds a gauge from 40 to this value right after the live HR on every rest step of this exercise (both restModes); it is a visual target only and does not end the rest. Not shown on prep or set steps. Omit for no gauge.",
               },
             },
             required: ["name", "detail", "sets", "restSec"],
@@ -858,6 +895,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "compare_workout_to_plan": {
         const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
         return text(JSON.stringify(compareWorkout(shapeLaps(data), a.plan)));
+      }
+      case "get_workout_rest_profile": {
+        // one after the other: the laps call also rejects a malformed key before the FIT download
+        const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
+        const parsed = await parseFit(await suunto.getWorkoutFit(a.workoutKey));
+        return text(JSON.stringify(buildRestProfile(shapeLaps(data), parsed, a.plan)));
       }
       case "export_workout_gpx": {
         const bytes = await suunto.getWorkoutGpx(a.workoutKey);
