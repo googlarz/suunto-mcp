@@ -44,6 +44,7 @@ const WRITE_EFFECT: Record<string, string> = {
   push_interval_guide: "build the interval guide and push it to your Suunto account",
   push_strength_guide: "build the strength guide and push it to your Suunto account",
   delete_guide: "permanently delete that guide from your Suunto account",
+  log_session: "save what you say happened in that session to your local training journal",
   generate_daily_digest: "compute the day's digest, append it to your history file and update the averages file",
 };
 

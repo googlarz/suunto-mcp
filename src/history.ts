@@ -6,7 +6,7 @@
 // guide's text, so they are what was planned unless the journal (journal.ts) says otherwise.
 import type { SuuntoClient } from "./api.js";
 import { dayFetchBounds, localDate, workoutDate } from "./api.js";
-import { readCache, writeCache } from "./cache.js";
+import { cacheEnabled, readCache, writeCache } from "./cache.js";
 import { STRENGTH_CUT_MIN, WORKOUT_CAP, compareWorkout, norm } from "./compare.js";
 import { parseFit, type ParsedFit } from "./fit.js";
 import { loadJournal, type JournalEntry } from "./journal.js";
@@ -177,7 +177,11 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
   const notes = [
     "Weights and reps come from the guide's text, i.e. what was PLANNED, unless a journal entry (log_session) says otherwise (loadSource 'journal'); the watch does not record them. Sessions with reliable false are included but their mapping or rest profile is best effort.",
   ];
-  if (pending > 0) notes.push(`${pending} older session(s) are not read yet (at most ${MAX_FETCH} uncached ones are fetched per call): call again until pending is 0.`);
+  if (pending > 0 && !cacheEnabled() && process.env.SUUNTO_DEMO !== "1") {
+    notes.push(`${pending} older session(s) are not read: the cache is off (SUUNTO_CACHE=off), so each call reads only the ${MAX_FETCH} newest sessions and calling again will not reach the older ones.`);
+  } else if (pending > 0) {
+    notes.push(`${pending} older session(s) are not read yet (at most ${MAX_FETCH} uncached ones are fetched per call): call again until pending is 0.`);
+  }
   if (listed.length >= WORKOUT_LIMIT) notes.push(`Reached the ${WORKOUT_LIMIT}-workout limit; older sessions in the range may be missing.`);
   if (journalError) notes.push(`The journal could not be read (${journalError}); loads are from the labels only.`);
 

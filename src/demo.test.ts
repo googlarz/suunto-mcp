@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -125,6 +125,8 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
     ...(Object.fromEntries(Object.entries(process.env).filter(([k, v]) => v !== undefined && !k.startsWith("SUUNTO_") && k !== "PORT")) as Record<string, string>),
     SUUNTO_DEMO: "1",
     FETCH_LOG: fetchLogPath,
+    SUUNTO_CACHE_DIR: join(cwd, "cache"),
+    SUUNTO_JOURNAL_PATH: join(cwd, "journal.json"),
   };
   const child = spawn(process.execPath, ["--import", throwingFetch, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
   const pending = new Map<number, (msg: any) => void>();
@@ -164,6 +166,8 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
       return { text, isError: r.isError === true, json };
     };
     await fn(call, rpc, () => readFile(fetchLogPath, "utf8").catch(() => ""));
+    // demo data must never reach the cache or the journal
+    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => x === "cache" || x === "journal.json")), []);
     assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     assert.equal(await readFile(fetchLogPath, "utf8").catch(() => ""), "", "demo mode made a network call");
   } finally {
@@ -288,6 +292,7 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
       ["push_strength_guide", { title: "T", date: today(), exercises: [{ name: "A", detail: "x", sets: 3, restSec: 60 }] }],
       ["delete_guide", { guideId: "demo0001" }],
       ["generate_daily_digest", { date: localDate(1) }],
+      ["log_session", { workoutKey: "0123456789abcdef01234567", note: "x" }],
     ];
     const tools: any[] = (await rpc("tools/list")).result.tools;
     const nonRead = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
@@ -369,4 +374,19 @@ test("e2e demo: the demo marker is not added when SUUNTO_DEMO is unset (real mod
     child.kill();
     await rm(cwd, { recursive: true, force: true });
   }
+});
+
+test("e2e demo: exercise history works across the demo sessions and caches nothing", async () => {
+  await withDemo(async (call) => {
+    let index: any;
+    for (let i = 0; i < 6; i++) {
+      index = JSON.parse((await call("get_exercise_history", { weeks: 8 })).text);
+      if (index.pending === 0) break;
+    }
+    assert.equal(index.demo, true);
+    assert.ok(index.exercises.length >= 3, "the demo gym sessions share exercises");
+    assert.equal(index.pending, 0, "repeated calls converge: demo sessions are kept in memory, never on disk");
+    assert.ok(index.sessions > 8);
+    assert.ok(index.exercises[0].sessions >= 6);
+  });
 });

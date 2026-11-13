@@ -17,7 +17,11 @@ export const MIN_AGE_MS = 24 * 3_600_000;
 
 const WORKOUT_KEY = /^[0-9a-f]{24}$/i;
 
-export const cacheEnabled = (): boolean => process.env.SUUNTO_CACHE !== "off";
+// Demo mode never caches on disk: its synthetic workouts must not sit next to real ones.
+// It keeps them in memory for the life of the process instead, so repeated calls still converge.
+const isDemo = (): boolean => process.env.SUUNTO_DEMO === "1";
+const demoMemory = new Map<string, unknown>();
+export const cacheEnabled = (): boolean => process.env.SUUNTO_CACHE !== "off" && process.env.SUUNTO_DEMO !== "1";
 export const cacheDir = (): string => process.env.SUUNTO_CACHE_DIR ?? join(homedir(), ".suunto-mcp", "cache");
 
 // The key becomes part of a path, so anything but 24 hex characters is refused.
@@ -29,6 +33,7 @@ function fileOf(workoutKey: string): string {
 // The cached record, or null: no entry, caching off, an unreadable file or another schema.
 export async function readCache<T>(workoutKey: string): Promise<T | null> {
   const file = fileOf(workoutKey);
+  if (isDemo()) return (demoMemory.get(workoutKey.toLowerCase()) as T | undefined) ?? null;
   if (!cacheEnabled()) return null;
   try {
     const entry = JSON.parse(await readFile(file, "utf8"));
@@ -43,6 +48,10 @@ export async function readCache<T>(workoutKey: string): Promise<T | null> {
 // the cache is only an optimisation.
 export async function writeCache(workoutKey: string, startMs: number | null, data: unknown, now = Date.now()): Promise<boolean> {
   const file = fileOf(workoutKey);
+  if (isDemo()) {
+    if (startMs !== null && Number.isFinite(startMs) && now - startMs >= MIN_AGE_MS) demoMemory.set(workoutKey.toLowerCase(), data);
+    return false;
+  }
   if (!cacheEnabled() || startMs === null || !Number.isFinite(startMs) || now - startMs < MIN_AGE_MS) return false;
   // Temp file + rename: a crash mid-write must not leave a truncated entry.
   const tmp = `${file}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
