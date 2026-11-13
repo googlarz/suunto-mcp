@@ -281,7 +281,7 @@ test("e2e demo: rest profile, FIT, sleep, recovery, activity, routes, guides all
     // the real list is { error, payload, metadata } and each guide carries all of Suunto's fields
     const guides = await ok(call, "list_guides");
     assert.equal(guides.error, null);
-    assert.equal(typeof guides.metadata.ts, "number");
+    assert.equal(typeof guides.metadata.ts, "string");
     assert.equal(guides.payload.length, 3);
     const keys = ["id", "username", "type", "modificationTime", "fileModificationTime", "name", "description", "shortDescription", "owner", "url", "iconUrl", "backgroundUrl", "richText", "activities", "localDate", "usage", "pinned", "externalId", "ownerId", "catalogueId", "extended"];
     for (const g of guides.payload) {
