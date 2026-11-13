@@ -20,11 +20,11 @@ A workout guide (`push_workout_guide`) has no rest rows; the rest lap before exe
 
 Lap `startOffsetS` is seconds from the workout `startTime` of the Suunto API (`shapeLaps`: `(marker.startTime - payload.startTime) / 1000`). The HR series needs the same time zero. `hrSeries` takes it, in this order:
 
-1. the FIT's first `sessions[].start_time` (`alignment.workoutStartSource = "session.start_time"`);
-2. else the lap table's `startTime` (`"laps.startTime"`): the clock the lap offsets count from, so the windows line up by construction;
+1. the lap table's `startTime` (`alignment.workoutStartSource = "laps.startTime"`): the clock the lap offsets count from, so the windows line up by construction;
+2. else the FIT's first `sessions[].start_time` (`"session.start_time"`);
 3. else the first record's timestamp (`"first-record"`). The first record can come later than the workout start (HR not yet locked), which would shift every window by that delay; this is the last resort.
 
-With a session start, the two sources are assumed to be the same instant. `alignment` reports `lapStartTimeMs`, `fitStartMs` (the FIT's own start: session start_time, else the first record) and `startSkewS` = session start minus lap-table start. It is null without both of those, because a first record is not a second reading of the start. The windows are **not** corrected for a skew: which clock is right is unknown. A skew above 2 s is added to `note`; above 60 s `reliable` is false as well. Timestamps from fit-file-parser are `Date` objects; epoch ms and ISO strings are accepted as well.
+The FIT's session start is not used as time zero when the lap table has a start, because the lap offsets are measured on the lap table's clock. It is kept to measure that skew: `alignment` reports `lapStartTimeMs`, `fitStartMs` (the FIT's own start: session start_time, else the first record) and `startSkewS` = session start minus lap-table start. It is null without both of those, because a first record is not a second reading of the start. The windows are **not** corrected for the skew: which clock is right is unknown, so the lap table's, which the lap offsets are measured on, is the one used. A skew above 2 s is added to `note`; above 10 s `reliable` is false as well. Timestamps from fit-file-parser are `Date` objects; epoch ms and ISO strings are accepted as well.
 
 ## 3. Metrics per rest
 
@@ -32,7 +32,7 @@ Window: `[startOffsetS, startOffsetS + durationS]`. HR samples are the FIT recor
 
 | Field | Definition |
 |---|---|
-| `peakHr`, `peakAtS` | Highest smoothed HR in `[start - 15 s, min(start + 30 s, end)]` (first one on a tie). `peakHr` is that smoothed value, so a sharp peak reads a little lower than its raw sample (a one-sample spike of 175 in a flat 140 gives 151.7). Optical HR lags the effort by 20-30 s, so the peak of a set often lands inside the rest, or just before it. `peakAtS` is seconds from the rest start, negative if before it. |
+| `peakHr`, `peakAtS` | Highest smoothed HR in `[start - 15 s, min(start + 30 s, end)]` (the latest one on a tie, so a flat plateau puts the peak at its end and `t10S` etc. count from there). `peakHr` is that smoothed value, so a sharp peak reads a little lower than its raw sample (a one-sample spike of 175 in a flat 140 gives 151.7). Optical HR lags the effort by 20-30 s, so the peak of a set often lands inside the rest, or just before it. `peakAtS` is seconds from the rest start, negative if before it. |
 | `endHr` | Mean of the raw samples in the last 5 s of the rest (`(end - 5, end]`). |
 | `dropTotal` | `peakHr - endHr` (smoothed peak minus raw tail mean). |
 | `t10S`, `t20S`, `t30S` | Seconds from the peak sample until the smoothed HR is first `<= peakHr - 10 / 20 / 30`. Only samples after the peak up to the end of the rest are searched; null if never reached. |

@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { compareWorkout, detailSets, norm, type PlanItem } from "./compare.js";
-import { LAP_COLUMNS, lapChecks, lapKind, type shapeLaps } from "./laps.js";
+import { LAP_COLUMNS, cleanLabel, lapChecks, lapKind, type shapeLaps } from "./laps.js";
+import { buildStrengthGuideJson } from "./guide-zip.js";
 
 type Laps = Parameters<typeof compareWorkout>[0];
 
@@ -170,7 +171,7 @@ test("a prep in front of Session complete, and a rest in front of it, are unexpe
 
 // ---------- plan matching ----------
 
-test("truncation: a one-part set label of raw length 40 matches the longer plan name by prefix; a two-part one does not", () => {
+test("truncation: a set label of raw length 40 (one or two parts) matches the longer plan name by prefix; a shorter two-part one does not", () => {
   const full = "Bulgarian Split Squat With Rear Foot Elevated";
   const cutName = full.slice(0, 40);
   const cut = compareWorkout(table([[`100kg 3x5 | ${cutName}`, 60], [cutName, 30], DONE]), [{ name: full }]);
@@ -181,9 +182,44 @@ test("truncation: a one-part set label of raw length 40 matches the longer plan 
   const name = "A".repeat(19);
   const twoPart = table([["x | " + name, 60], [`${name} | ${"B".repeat(21)}`, 30], DONE]);
   const out = compareWorkout(twoPart, [{ name: `${name} Extended` }]);
-  assert.equal(out.exercises[0].plan, null, "raw length 40 but two parts: not treated as cut");
-  assert.deepEqual(out.deviations.map((d) => d.code), ["extra-exercise", "missing-exercise"]);
+  assert.equal(out.exercises[0].plan, 0, "raw length 40 with two parts: the name may be cut");
+  assert.deepEqual(out.deviations, []);
+
+  const short = table([["x | " + name, 60], [`${name} | ${"B".repeat(19)}`, 30], DONE]);
+  const uncut = compareWorkout(short, [{ name: `${name} Extended` }]);
+  assert.equal(uncut.exercises[0].plan, null, "raw length 39: not cut, no prefix matching");
+  assert.deepEqual(uncut.deviations.map((d) => d.code), ["extra-exercise", "missing-exercise"]);
 });
+
+// The lap table the watch would record: one lap per guide step, labelled with the step's text.
+function roundTrip(exercises: Parameters<typeof buildStrengthGuideJson>[0]["exercises"], opts: { restMode?: "countdown" | "stopwatch"; lapGranularity?: "perSet" | "perExercise" } = {}) {
+  const guide = buildStrengthGuideJson({ title: "T", date: "2026-11-13", exercises, ...opts }, "app") as unknown as { steps: { fields: { type: string; value?: string }[] }[] };
+  const specs = guide.steps.map((s): Spec => {
+    const label = cleanLabel(s.fields.find((f) => f.type === "text")?.value);
+    return [label, /Next: set/.test(label ?? "") ? 90 : 40];
+  });
+  return compareWorkout(table(specs), exercises.map((e) => ({ name: e.name, sets: e.sets, restSec: e.restSec })));
+}
+
+const ROUND_TRIP_SETS: [string, Parameters<typeof roundTrip>[0]][] = [
+  ["short names", [{ name: "Bench Press", detail: "70kg 3x8", sets: 3, restSec: 90 }, { name: "Row", detail: "50kg 3x10", sets: 3, restSec: 90 }]],
+  ["Bulgarian split squat with plates", [{ name: "Bench Press", detail: "70kg 3x8", sets: 3, restSec: 90 }, { name: "Barbell Bulgarian Split Squat", detail: "2x20kg 3x8/leg", sets: 3, restSec: 90, plates: "1x10/side" }]],
+  ["a name over 40 characters", [{ name: "Single Arm Dumbbell Romanian Deadlift On Bench", detail: "24kg 3x10", sets: 3, restSec: 90 }, { name: "Row", detail: "50kg 3x10", sets: 3, restSec: 90 }]],
+  ["a long detail", [{ name: "Romanian Deadlift", detail: "60kg 3x10 tempo 3-1-1 pause at bottom!", sets: 3, restSec: 90, plates: "2x10/side" }, { name: "Row", detail: "50kg 3x10", sets: 3, restSec: 90 }]],
+  // 23 characters survive next to a 16-character detail; 'Dumbbell Bench Press ' is 21, so the cut names still differ ('...In' / '...De')
+  ["two names sharing a long prefix", [{ name: "Dumbbell Bench Press Incline", detail: "2x24kg 3x10/side", sets: 3, restSec: 90 }, { name: "Dumbbell Bench Press Decline", detail: "2x24kg 3x10/side", sets: 3, restSec: 90 }]],
+];
+
+for (const [what, exercises] of ROUND_TRIP_SETS) {
+  for (const [mode, opts] of [["perSet countdown", {}], ["perSet stopwatch", { restMode: "stopwatch" }], ["perExercise", { lapGranularity: "perExercise" }]] as const) {
+    test(`round trip: ${what}, ${mode}: every pushed exercise matches its own plan entry`, () => {
+      const out = roundTrip(exercises, opts);
+      assert.deepEqual(out.exercises.map((e) => e.plan), exercises.map((_, i) => i));
+      assert.deepEqual(out.deviations.filter((d) => d.basis === "plan").map((d) => d.code), []);
+      assert.equal(out.reliable, true);
+    });
+  }
+}
 
 test("duplicate plan names match in order", () => {
   const out = compareWorkout(table([["BW | Plank", 60], ["Plank | BW 3x45s", 150], ["BW | Plank", 60], ["Plank | BW 3x45s", 150], DONE]), [{ name: "Plank" }, { name: "Plank" }]);

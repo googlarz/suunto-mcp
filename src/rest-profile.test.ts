@@ -143,7 +143,15 @@ test("restRecovery: the peak is searched from 15 s before the rest to 30 s after
   const preRest = (t: number) => (t === 85 ? 160 : 120); // exactly -15 s: inside, and the peak is before the rest
   const r = restRecovery(series(60, 200, preRest), { startOffsetS: 100, durationS: 60 });
   assert.equal(r.peakHr, 133.3);
-  assert.equal(r.peakAtS, -15);
+  assert.equal(r.peakAtS, -14, "t = 84, 85 and 86 all smooth to 133.3; the latest is taken");
+});
+
+test("restRecovery: of tied peaks the latest counts, so a flat plateau does not inflate the recovery times", () => {
+  // flat 150 from 15 s before the rest to its start, then -1 bpm/s
+  const r = restRecovery(series(60, 200, (t) => (t <= 100 ? 150 : 150 - (t - 100))), { startOffsetS: 100, durationS: 60 });
+  assert.equal(r.peakAtS, -1, "the last smoothed 150 is at t = 99 (the sample at 100 is averaged with the 149 after it)");
+  assert.equal(r.t10S, 11, "counted from the end of the plateau; the first tie would give 25");
+  assert.equal(r.t20S, 21);
 });
 
 test("restRecovery: a peak search does not run past the end of a short rest", () => {
@@ -154,10 +162,10 @@ test("restRecovery: a peak search does not run past the end of a short rest", ()
 test("restRecovery: thresholds never reached inside the window are null; the rate uses the window when it is under 60 s", () => {
   // falls 0.5 bpm/s from 150: t10 at 20 s, t20 at 40 s, t30 never within a 35 s window
   const r = restRecovery(series(60, 200, (t) => (t <= 100 ? 150 - (100 - t) : 150 - (t - 100) / 2)), { startOffsetS: 100, durationS: 35 });
-  assert.equal(r.t10S, 21);
+  assert.equal(r.t10S, 20, "the peak is the later of the two tied 149.5 values, at t = 101");
   assert.equal(r.t20S, null);
   assert.equal(r.t30S, null);
-  assert.equal(r.recoveryBpmPerMin, 29.1, "17 bpm (smoothed 149.5 to 132.5) in 35 s");
+  assert.equal(r.recoveryBpmPerMin, 30, "17 bpm (smoothed 149.5 to 132.5) in the 34 s the rest has left");
 });
 
 test("restRecovery: 3-sample smoothing ignores a single-sample dip", () => {
@@ -270,7 +278,7 @@ test("buildRestProfile: countdown rests, the lap lasts the target but recovery s
   assert.equal(a.t30S, 30);
   assert.equal(a.endHr, 110, "back at the 110 plateau by the end");
   assert.deepEqual(p.perExercise, [{ name: "Squat", n: 1, medianT20S: 20, medianEndHr: 110, medianRecoveryBpmPerMin: 39.7 }]);
-  assert.equal(p.alignment.workoutStartSource, "session.start_time");
+  assert.equal(p.alignment.workoutStartSource, "laps.startTime");
   assert.equal(p.alignment.lapStartTimeMs, T0);
   assert.equal(p.alignment.fitStartMs, T0);
   assert.equal(p.alignment.startSkewS, 0);
@@ -286,14 +294,14 @@ test("buildRestProfile: stopwatch rests carry the target; the actual duration ca
   assert.equal(p.rests[0].t20S, 20);
 });
 
-test("buildRestProfile: timebase. Lap offsets count from the session start, even when the first record comes later", () => {
+test("buildRestProfile: timebase. Lap offsets count from the lap table's startTime, even when the first record comes later", () => {
   const laps = guided((k, S) => `Next: set ${k}/${S}`, 60);
   // the first record is 25 s after the session start; the HR curve is defined on session time
   const samples = series(25, 245, guidedHr([90, 180]));
   const p = buildRestProfile(laps, parsedFrom(samples, T0));
   assert.equal(p.rests[0].peakAtS, 1);
   assert.equal(p.rests[0].t20S, 20);
-  assert.equal(p.alignment.workoutStartSource, "session.start_time");
+  assert.equal(p.alignment.workoutStartSource, "laps.startTime");
   assert.equal(p.alignment.fitStartMs, T0);
   assert.equal(p.alignment.startSkewS, 0);
 });
@@ -320,24 +328,41 @@ test("buildRestProfile: with neither a session start nor a lap-table startTime t
   assert.notEqual(p.rests[0].peakAtS, 1, "every window is 25 s early against the HR curve");
 });
 
-test("buildRestProfile: a small start skew is reported, not corrected", () => {
-  const laps = guided((k, S) => `Next: set ${k}/${S}`, 60, T0 - 3000);
-  const p = buildRestProfile(laps, parsedFrom(series(0, 245, guidedHr([90, 180])), T0));
-  assert.equal(p.alignment.lapStartTimeMs, T0 - 3000);
-  assert.equal(p.alignment.startSkewS, 3);
-  assert.match(p.note!, /3 s/);
+// HR curve defined on the lap table's clock (T0); the FIT session says it started `skewS` later.
+function skewed(skewS: number) {
+  const laps = guided((k, S) => `Next: set ${k}/${S}`, 60);
+  return buildRestProfile(laps, parsedFrom(series(0, 245, guidedHr([90, 180])), T0, T0 + skewS * 1000));
+}
+
+test("buildRestProfile: a 0 s start skew is silent and reliable", () => {
+  const p = skewed(0);
+  assert.equal(p.alignment.startSkewS, 0);
+  assert.equal(p.alignment.workoutStartSource, "laps.startTime");
   assert.equal(p.reliable, true);
-  assert.equal(p.rests[0].peakAtS, 1, "windows still use the lap offsets as they are");
+  assert.equal(p.note, null);
+  assert.equal(p.rests[0].peakAtS, 1);
 });
 
-test("buildRestProfile: a start skew over 60 s makes the profile unreliable", () => {
-  const laps = guided((k, S) => `Next: set ${k}/${S}`, 60, T0 - 90_000);
-  const p = buildRestProfile(laps, parsedFrom(series(0, 245, guidedHr([90, 180])), T0));
-  assert.equal(p.alignment.startSkewS, 90);
+test("buildRestProfile: a 5 s start skew is reported in the note, the windows stay on the lap table's clock, still reliable", () => {
+  const p = skewed(5);
+  assert.equal(p.alignment.startSkewS, 5);
+  assert.equal(p.alignment.fitStartMs, T0 + 5000);
+  assert.match(p.note!, /5 s/);
+  assert.equal(p.reliable, true);
+  assert.equal(p.rests[0].peakAtS, 1, "not shifted by the session start");
+  assert.equal(p.rests[0].t20S, 20);
+});
+
+test("buildRestProfile: a 30 s start skew keeps the windows on the lap table's clock but makes the profile unreliable", () => {
+  const p = skewed(30);
+  assert.equal(p.alignment.startSkewS, 30);
   assert.equal(p.reliable, false);
-  assert.match(p.note!, /90 s.*unreliable/);
-  const edge = buildRestProfile(guided((k, S) => `Next: set ${k}/${S}`, 60, T0 - 60_000), parsedFrom(series(0, 245, guidedHr([90, 180])), T0));
-  assert.equal(edge.reliable, true, "exactly 60 s is still only a note");
+  assert.match(p.note!, /30 s.*unreliable/);
+  assert.equal(p.rests[0].peakAtS, 1, "a window anchored on the session start would see the peak 29 s early and a negative drop");
+  assert.equal(p.rests[0].t20S, 20);
+  assert.ok(p.rests[0].dropTotal! > 0);
+  assert.equal(skewed(-30).reliable, false, "either sign");
+  assert.equal(skewed(10).reliable, true, "exactly 10 s is still only a note");
 });
 
 test("buildRestProfile: unguided and lap-less workouts pass the compare status through with no rests", () => {
@@ -446,12 +471,16 @@ test("hrSeries: records sharing a timestamp collapse to the last one", () => {
   assert.equal(r.sampleCount, 21, "duplicates do not inflate the sample count");
 });
 
-test("hrSeries: the lap table's startTime is time zero when there is no session start", () => {
+test("hrSeries: the lap table's startTime is time zero when it exists; the session start only when it does not", () => {
   const parsed = { records: [rec(7, 100, true)] };
   assert.deepEqual(hrSeries(parsed as any, T0 - 3000).samples, [{ tS: 10, hr: 100 }]);
   assert.equal(hrSeries(parsed as any, T0 - 3000).startSource, "laps.startTime");
   assert.equal(hrSeries(parsed as any, T0 - 3000).fitStartMs, T0 + 7000);
-  assert.equal(hrSeries({ ...parsed, sessions: [{ start_time: T0 }] } as any, T0 - 3000).startSource, "session.start_time", "a session start wins");
+  const withSession = hrSeries({ ...parsed, sessions: [{ start_time: T0 }] } as any, T0 - 3000);
+  assert.equal(withSession.startSource, "laps.startTime", "the lap table's clock wins over the session start");
+  assert.equal(withSession.startMs, T0 - 3000);
+  assert.equal(withSession.sessionStartMs, T0, "the session start is still reported, for the skew");
+  assert.deepEqual(withSession.samples, [{ tS: 10, hr: 100 }]);
 });
 
 test("buildRestProfile: a split rest gets a note on its entry only", () => {

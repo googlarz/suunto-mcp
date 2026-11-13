@@ -57,13 +57,13 @@ const MIN_HR = 30;
 const MAX_HR = 250;
 
 // Heart rate over time from the FIT records, in seconds since the workout start.
-// Time zero is the FIT session's start_time, else the lap table's startTime
-// (`lapStartMs`, the clock the lap offsets count from), else the first record's
+// Time zero is the lap table's startTime (`lapStartMs`, the clock the lap offsets
+// count from), else the FIT session's start_time, else the first record's
 // timestamp. fit-file-parser returns timestamps as Dates; epoch ms and ISO
 // strings are accepted too. Records without a numeric heart_rate in 30-250 bpm
 // are dropped; of several records with the same timestamp the last one is kept.
 // fitStartMs is the FIT's own start (session start_time, else the first record) and
-// sessionStartMs the session's alone, both for comparing with the lap table.
+// sessionStartMs the session's alone, both for comparing with the lap table (the skew).
 export function hrSeries(
   parsed: ParsedFit,
   lapStartMs: number | null = null,
@@ -72,8 +72,8 @@ export function hrSeries(
   const sessionStartMs = toMs(parsed.sessions?.[0]?.start_time);
   const firstMs = records.map((r) => toMs(r?.timestamp)).find((ms) => ms !== null) ?? null;
   const fitStartMs = sessionStartMs ?? firstMs;
-  const startMs = sessionStartMs ?? lapStartMs ?? firstMs;
-  const startSource: StartSource | null = sessionStartMs !== null ? "session.start_time" : lapStartMs !== null ? "laps.startTime" : firstMs !== null ? "first-record" : null;
+  const startMs = lapStartMs ?? sessionStartMs ?? firstMs;
+  const startSource: StartSource | null = lapStartMs !== null ? "laps.startTime" : sessionStartMs !== null ? "session.start_time" : firstMs !== null ? "first-record" : null;
   if (startMs === null) return { samples: [], startMs, startSource, fitStartMs, sessionStartMs };
 
   const sorted: HrSample[] = [];
@@ -127,7 +127,7 @@ export function restRecovery(series: HrSample[], window: RestWindow, opts: Parti
   series.forEach((x, i) => {
     if (x.tS < lo || x.tS > hi) return;
     const sm = smoothed(i);
-    if (sm > peakSm) {
+    if (sm >= peakSm) {
       peakSm = sm;
       peakIdx = i;
     }
@@ -199,9 +199,9 @@ export interface RestProfile {
 }
 
 // Skews up to this many seconds are normal rounding between the two sources; above
-// SKEW_UNRELIABLE_S the two clocks plainly disagree and the rest windows cannot be trusted.
+// SKEW_UNRELIABLE_S the two clocks plainly disagree and the HR cannot be trusted to line up with the laps.
 const SKEW_NOTE_S = 2;
-const SKEW_UNRELIABLE_S = 60;
+const SKEW_UNRELIABLE_S = 10;
 
 function median(xs: (number | null)[]): number | null {
   const v = xs.filter((x): x is number => x !== null).sort((a, b) => a - b);
@@ -275,7 +275,7 @@ export function buildRestProfile(laps: ReturnType<typeof shapeLaps>, parsed: Par
     rests.length === 0 ? "This guide has no between-set rests to profile (the strength-perExercise format records one lap per exercise)." : null,
     rests.length > 0 && samples.length === 0 ? "The FIT file has no heart rate records, so no rest could be profiled." : null,
     skewS !== null && Math.abs(skewS) > SKEW_NOTE_S
-      ? `The FIT session start is ${skewS} s from the lap table's startTime: rest windows may be shifted by that much${skewUnreliable ? ", so the profile is unreliable" : ""}.`
+      ? `The FIT session start is ${skewS} s from the lap table's startTime: the HR may be shifted against the rest windows by that much${skewUnreliable ? ", so the profile is unreliable" : ""}.`
       : null,
   ].filter((n): n is string => n !== null);
 

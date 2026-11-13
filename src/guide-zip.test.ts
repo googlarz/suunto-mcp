@@ -124,7 +124,7 @@ test("buildStrengthGuideJson: default rest between sets is a countdown that auto
   assert.equal(restStep.transitions[0].condition.value, 90);
 });
 
-test("buildStrengthGuideJson: rest between sets is titled E<i>/<N> REST and spells out the next set", () => {
+test("buildStrengthGuideJson: rest between sets is titled <i>/<N> REST and spells out the next set", () => {
   const guide = buildStrengthGuideJson(strengthPlan, "app") as any;
   assert.equal(guide.steps[2].title, "1/2 REST");
   assert.equal(guide.steps[4].title, "1/2 REST");
@@ -195,7 +195,7 @@ const planOf = (nEx: number, sets: number, extra: Record<string, unknown> = {}) 
   exercises: Array.from({ length: nEx }, (_, i) => ({ name: `Ex${i + 1}`, detail: "10kg", sets, restSec: 60, ...extra })),
 });
 
-test("buildStrengthGuideJson: every step title is E<i>/<N> [S<k>/<S>] and fits 13 chars (1, 6, 12 exercises; 10 sets)", () => {
+test("buildStrengthGuideJson: every step title is <i>/<N> [- <k>/<S>] and fits 13 chars (1, 6, 12 exercises; 10 sets)", () => {
   for (const [n, sets] of [[1, 3], [6, 3], [12, 10]] as const) {
     for (const restMode of ["countdown", "stopwatch"] as const) {
       const guide = buildStrengthGuideJson({ ...planOf(n, sets), restMode }, "app") as any;
@@ -212,14 +212,14 @@ test("buildStrengthGuideJson: every step title is E<i>/<N> [S<k>/<S>] and fits 1
   assert.deepEqual(one.steps.map((s: any) => s.title), ["1/1", "1/1 - 1/3", "1/1 REST", "1/1 - 2/3", "1/1 REST", "1/1 - 3/3", "DONE"]);
 });
 
-test("buildStrengthGuideJson: rest is titled 'E<i>/<N> REST' and keeps 'Next: set k/S' in its text", () => {
+test("buildStrengthGuideJson: rest is titled '<i>/<N> REST' and keeps 'Next: set k/S' in its text", () => {
   const guide = buildStrengthGuideJson(planOf(6, 3), "app") as any;
   const rest = guide.steps[4]; // prep, s1, r1, s2, r2
   assert.equal(rest.title, "1/6 REST");
   assert.ok(rest.fields.some((f: any) => f.type === "text" && f.value === "Next: set 3/3"));
 });
 
-test("buildStrengthGuideJson: lapGranularity 'perExercise' work step is titled E<i>/<N>; prep too; DONE kept", () => {
+test("buildStrengthGuideJson: lapGranularity 'perExercise' work step is titled <i>/<N>; prep too; DONE kept", () => {
   const guide = buildStrengthGuideJson({ ...planOf(3, 3), lapGranularity: "perExercise" }, "app") as any;
   assert.deepEqual(guide.steps.map((s: any) => s.title), ["1/3", "1/3", "2/3", "2/3", "3/3", "3/3", "DONE"]);
 });
@@ -254,11 +254,11 @@ test("buildStrengthGuideJson: without restTargetHr rests are unchanged; restTarg
   assert.ok(!mixed.steps[6].fields.some((f: any) => f.type === "targetHeartRate"));
 });
 
-test("buildStrengthGuideJson: rejects restTargetHr outside 40-200 or non-integer", () => {
-  for (const bad of [39, 201, 120.5, NaN]) {
+test("buildStrengthGuideJson: rejects restTargetHr outside 41-200 or non-integer (the gauge runs from 40, so 40 would have min = max)", () => {
+  for (const bad of [40, 201, 120.5, NaN]) {
     assert.throws(() => buildStrengthGuideJson(planOf(1, 2, { restTargetHr: bad }), "app"), /restTargetHr/, String(bad));
   }
-  for (const ok of [40, 200]) assert.doesNotThrow(() => buildStrengthGuideJson(planOf(1, 2, { restTargetHr: ok }), "app"));
+  for (const ok of [41, 200]) assert.doesNotThrow(() => buildStrengthGuideJson(planOf(1, 2, { restTargetHr: ok }), "app"));
 });
 
 test("buildStrengthGuideJson: description lists the exercises joined with ' · ' and is capped at 60 chars", () => {
@@ -288,22 +288,24 @@ test("two-line text: 23+16 and shorter are untouched", () => {
   assert.equal(textOf(oneEx({ name: "Bench", detail: "60kg 3x10" }).steps[1]), "Bench\n60kg 3x10");
 });
 
-test("two-line text: very long name is cut to fit; long detail is capped at 38 and the name keeps at least 1 char", () => {
+test("two-line text: very long name is cut to fit; long detail is capped at 36 and the name keeps at least 3 chars", () => {
   const long = oneEx({ name: "N".repeat(100), detail: "60kg 3x10" });
   assert.equal(textOf(long.steps[1]), `${"N".repeat(30)}\n60kg 3x10`);
   const longDetail = oneEx({ name: "Squat", detail: "D".repeat(60) });
-  assert.equal(textOf(longDetail.steps[1]), `S\n${"D".repeat(38)}`);
+  assert.equal(textOf(longDetail.steps[1]), `Squ\n${"D".repeat(36)}`);
   assert.equal(textOf(longDetail.steps[1]).length, 40);
+  const nearCap = oneEx({ name: "Romanian Deadlift", detail: "60kg 3x10 tempo 3-1-1 pause at bottom!" });
+  assert.equal(textOf(nearCap.steps[1]), `Rom\n60kg 3x10 tempo 3-1-1 pause at botto`);
 });
 
-test("prep text: the load/plates line survives and the name on line 2 is cut; plates capped at 38", () => {
+test("prep text: the load/plates line survives and the name on line 2 is cut; plates capped at 36", () => {
   const p = oneEx({ name: "N".repeat(50), detail: "60kg 3x10", plates: "2x20+1x5/side" });
   assert.equal(textOf(p.steps[0]), `2x20+1x5/side\n${"N".repeat(26)}`);
   assert.equal(textOf(p.steps[0]).length, 40);
   const noPlates = oneEx({ name: "N".repeat(50), detail: "60kg 3x10" });
   assert.equal(textOf(noPlates.steps[0]), `60kg 3x10\n${"N".repeat(30)}`);
   const longPlates = oneEx({ name: "Squat", plates: "P".repeat(60) });
-  assert.equal(textOf(longPlates.steps[0]), `${"P".repeat(38)}\nS`);
+  assert.equal(textOf(longPlates.steps[0]), `${"P".repeat(36)}\nSqu`);
   assert.equal(textOf(oneEx({ name: "Bench", detail: "60kg 3x10" }).steps[0]), "60kg 3x10\nBench");
 });
 

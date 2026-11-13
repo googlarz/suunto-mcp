@@ -198,7 +198,7 @@ test("e2e get_workout_rest_profile: the clean fixture session, rests joined to t
     assert.ok(first.t20S !== null && first.t20S > 50 && first.t20S < 80, `t20 ${first.t20S}`);
     assert.ok(first.coverage >= 0.99, `coverage ${first.coverage}`);
     assert.deepEqual(out.perExercise.map((e: any) => e.name), ["Back Squat", "Bench Press", "Seated Cable Row"]);
-    assert.equal(out.alignment.workoutStartSource, "session.start_time");
+    assert.equal(out.alignment.workoutStartSource, "laps.startTime");
     assert.equal(out.alignment.startSkewS, 0);
     assert.deepEqual(out.developer.fields, [{ name: "rest_recovery", units: "bpm", devIdx: 0, fieldNo: 0, baseType: 2 }]);
     assert.deepEqual(out.developer.devChannels, ["rest_recovery"]);
@@ -543,11 +543,11 @@ test("e2e push_*_guide: simultaneous pushes are queued and each is read back fro
   );
 });
 
-test("e2e push_strength_guide: restTargetHr outside 40-200 is rejected by the schema, in range is accepted", async () => {
+test("e2e push_strength_guide: restTargetHr outside 41-200 is rejected by the schema, in range is accepted", async () => {
   await withMcp(
     async (call) => {
       const ex = (restTargetHr: number) => ({ title: "G", date: "2026-10-29", exercises: [{ name: "Squat", detail: "80kg 3x5", sets: 3, restSec: 90, restTargetHr }] });
-      for (const bad of [39, 201, 120.5]) {
+      for (const bad of [40, 201, 120.5]) {
         const r = await call("push_strength_guide", ex(bad));
         assert.equal(r.isError, true, `${bad}: ${r.text}`);
         assert.match(r.text, /restTargetHr/);

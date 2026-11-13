@@ -344,7 +344,7 @@ export function compareWorkout(laps: ReturnType<typeof shapeLaps>, plan?: PlanIt
       const p = parts(e.label);
       name = p[0];
       detail = p.slice(1).join(" | ") || null;
-      cut = format === "workout" ? p[0].length >= WORKOUT_CAP : p.length === 1 && rawLen(e.label) >= STRENGTH_CAP;
+      cut = format === "workout" ? p[0].length >= WORKOUT_CAP : rawLen(e.label) >= STRENGTH_CAP;
     } else if (format === "workout") {
       const p = parts(e.prep!.label);
       name = nextName(e.prep!.label);

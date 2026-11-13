@@ -435,7 +435,7 @@ export interface StrengthExercise {
   detail: string; // display string, e.g. "60kg 3x10" — shown on set steps and (unless plates is given) on the prep screen before the exercise
   sets: number; // 1-100
   restSec: number; // rest between sets within this exercise. Not applied between exercises — that's the self-paced prep stopwatch
-  restTargetHr?: number; // bpm 40-200 — adds a targetHeartRate gauge (40..restTargetHr) to this exercise's between-set rest steps (both restModes). Not on prep/set steps.
+  restTargetHr?: number; // bpm 41-200 — adds a targetHeartRate gauge (40..restTargetHr) to this exercise's between-set rest steps (both restModes). Not on prep/set steps.
   plates?: string; // per-side plate breakdown for barbell exercises, e.g. "2x20+1x5/side" — shown on the prep screen INSTEAD of detail (that's the moment you're loading the bar, not mid-set). Omit for non-barbell exercises (dumbbell, machine, bodyweight, cable) — detail is shown there instead. The math is done by the caller, not this tool.
 }
 
@@ -475,14 +475,16 @@ function strengthTitle(exIndex: number, totalExercises: number, set?: number | "
 
 // Two-line text field (line1 \n line2) under the 40-char limit for fields
 // that share a step. The line named by `cut` is the one shortened (the
-// exercise name); the other is capped at 38 so the name keeps 1+ char.
+// exercise name); the other is capped at 36 so the name keeps 3+ chars, the
+// least compare.ts can still link to a plan entry.
 function twoLineText(line1: string, line2: string, cut: "first" | "second"): string {
   const max = TEXT_WITH_SIBLING_FIELDS_MAX;
+  const otherMax = max - 4;
   if (cut === "first") {
-    const keep = truncate(line2, max - 2);
+    const keep = truncate(line2, otherMax);
     return `${truncate(line1, max - 1 - keep.length)}\n${keep}`;
   }
-  const keep = truncate(line1, max - 2);
+  const keep = truncate(line1, otherMax);
   return `${keep}\n${truncate(line2, max - 1 - keep.length)}`;
 }
 
@@ -594,8 +596,8 @@ function buildPrepStep(
 // (its text spells out "Next: set 3/3"). perExercise work steps are "4/7". Lap
 // labels are built from step TEXT, never from titles, so titles are free.
 //
-// Field layout: 2 fields on the work step, 3 on rest/prep (well inside the
-// 4-5 max), ordered by priority — the schema gives the first field the
+// Field layout: 2 fields on the work step, 3 on prep and on rest (4 on a rest
+// with restTargetHr), well inside the 4-5 max, ordered by priority — the schema gives the first field the
 // best placement/biggest size. heartRate is always first: confirmed
 // on-device that a text field ahead of it can hide it entirely rather than
 // just cropping (unlike the docs' description of long text cropping other
@@ -607,8 +609,8 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
   const steps: Record<string, unknown>[] = [];
   const totalExercises = exercises.length;
   for (const ex of exercises) {
-    if (ex.restTargetHr !== undefined && (!Number.isInteger(ex.restTargetHr) || ex.restTargetHr < 40 || ex.restTargetHr > 200)) {
-      throw new Error(`Exercise "${ex.name}": restTargetHr must be an integer from 40 to 200 bpm (got ${ex.restTargetHr}).`);
+    if (ex.restTargetHr !== undefined && (!Number.isInteger(ex.restTargetHr) || ex.restTargetHr < 41 || ex.restTargetHr > 200)) {
+      throw new Error(`Exercise "${ex.name}": restTargetHr must be an integer from 41 to 200 bpm (got ${ex.restTargetHr}).`);
     }
   }
   const restMode = plan.restMode ?? "countdown";
