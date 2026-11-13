@@ -4,6 +4,9 @@ import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
+import { buildTrainingLoad } from "./training-load.js";
+import { compareWorkout } from "./compare.js";
+import { buildRestProfile } from "./rest-profile.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -24,6 +27,16 @@ Workout commands:
   get-workout-fit      <workoutKey> [--full]
   get-workout-samples  <workoutKey>   (currently rejected by Suunto)
   export-workout-gpx   <workoutKey>   (currently rejected by Suunto)
+
+Analysis commands:
+  get-training-load    <YYYY-MM-DD> [--days N]
+  compare-workout      <workoutKey>   (laps only, no plan comparison)
+  get-workout-rest-profile <workoutKey>
+
+Route commands:
+  list-routes
+  get-route            <routeId>
+  export-route         <routeId>   (prints the GPX text)
 
 24/7 health commands:
   get-daily-activity   <YYYY-MM-DD>
@@ -127,6 +140,48 @@ export async function runCli(argv: string[]) {
       case "export-workout-gpx": {
         const key = rest[0] ?? die("Usage: export-workout-gpx <workoutKey>");
         const bytes = await suunto.getWorkoutGpx(key);
+        process.stdout.write(new TextDecoder().decode(bytes) + "\n");
+        break;
+      }
+
+      case "get-training-load": {
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { days: { type: "string" } } });
+        const date = positionals[0] ?? die("Usage: get-training-load <YYYY-MM-DD> [--days N]");
+        const days = values.days !== undefined ? Number(values.days) : undefined;
+        if (days !== undefined && !Number.isInteger(days)) die(`--days must be a whole number, got "${values.days}"`);
+        out(await buildTrainingLoad(suunto, { date, days }));
+        break;
+      }
+
+      case "compare-workout": {
+        const key = rest[0] ?? die("Usage: compare-workout <workoutKey>");
+        const data = await suunto.getWorkoutWithExtensions(key, LAP_EXTENSIONS);
+        out(compareWorkout(shapeLaps(data)));
+        break;
+      }
+
+      case "get-workout-rest-profile": {
+        const key = rest[0] ?? die("Usage: get-workout-rest-profile <workoutKey>");
+        const data = await suunto.getWorkoutWithExtensions(key, LAP_EXTENSIONS);
+        const parsed = await parseFit(await suunto.getWorkoutFit(key));
+        out(buildRestProfile(shapeLaps(data), parsed));
+        break;
+      }
+
+      case "get-route": {
+        const id = rest[0] ?? die("Usage: get-route <routeId>");
+        out(await suunto.getRoute(id));
+        break;
+      }
+
+      case "list-routes": {
+        out(await suunto.listRoutes());
+        break;
+      }
+
+      case "export-route": {
+        const id = rest[0] ?? die("Usage: export-route <routeId>");
+        const bytes = await suunto.exportRoute(id);
         process.stdout.write(new TextDecoder().decode(bytes) + "\n");
         break;
       }

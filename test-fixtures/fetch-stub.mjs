@@ -39,6 +39,36 @@ function marker(offsetS, durationS, hr, energy, notes) {
   return { startTime: START + offsetS * 1000, endTime: START + (offsetS + durationS) * 1000, totals: { duration: durationS, energy, hr, intervalNotes: notes } };
 }
 
+// STUB_HISTORY_DAYS=N adds N days of deterministic history ending 2026-09-25 (k = 0 is the 25th, k = N-1 the oldest),
+// for get_baselines: night leading into day k lasts 25000 s with HRV 40 + k, recovery Balance 0.5 + 0.01 k at 06:30
+// (the sleep's end) and 0.3 + 0.01 k as the day's low at 02:00, steps 1000 (k + 1).
+const HISTORY_DAYS = Number(process.env.STUB_HISTORY_DAYS ?? 0);
+const historyDay = (k) => new Date(Date.UTC(2026, 8, 25 - k)).toISOString().slice(0, 10);
+
+function historySleepRows() {
+  return Array.from({ length: HISTORY_DAYS }, (_, k) => {
+    const bedtime = stamp(Date.UTC(2026, 8, 25 - k - 1, 21, 0), 120);
+    const end = stamp(Date.UTC(2026, 8, 25 - k, 4, 30), 120);
+    return { timestamp: bedtime, entryData: { SleepId: 1000 + k, IsNap: false, Duration: 25000, BedtimeStart: bedtime, BedtimeEnd: end, SleepQualityScore: 70, AvgHRV: 40 + k } };
+  });
+}
+
+function historyRecoveryRows() {
+  return Array.from({ length: HISTORY_DAYS }, (_, k) => [
+    { timestamp: `${historyDay(k)}T02:00:00.000+02:00`, entryData: { Balance: 0.3 + 0.01 * k, StressState: 1 } },
+    { timestamp: `${historyDay(k)}T06:30:00.000+02:00`, entryData: { Balance: 0.5 + 0.01 * k, StressState: 1 } },
+  ]).flat();
+}
+
+function historyStats(start, end) {
+  const steps = [];
+  for (let k = 0; k < HISTORY_DAYS; k++) {
+    const day = historyDay(k);
+    if (day >= start && day <= end) steps.push({ TimeISO8601: `${day}T12:00:00+02:00`, Value: 1000 * (k + 1) });
+  }
+  return [{ Name: "stepcount", Aggregation: "sum", Sources: [{ Samples: steps }] }];
+}
+
 function sleepRows(url) {
   const sleeps = [
     // one sleep re-sent three times as Suunto revises it
@@ -52,11 +82,11 @@ function sleepRows(url) {
       const bedtime = stamp(s.at, 120);
       return { timestamp: bedtime, entryData: { SleepId: s.id, IsNap: duration < 10800, Duration: duration, BedtimeStart: bedtime, SleepQualityScore: duration > 20000 ? 80 : undefined } };
     }),
-  ).filter((r) => inWindow(Date.parse(r.timestamp), url));
+  ).concat(historySleepRows()).filter((r) => inWindow(Date.parse(r.timestamp), url));
 }
 
 function recoveryRows(url) {
-  const rows = [];
+  const rows = historyRecoveryRows();
   for (let t = Date.UTC(2026, 8, 25, 22); t < Date.UTC(2026, 8, 28, 22); t += HOUR / 2) rows.push({ timestamp: stamp(t, 120), entryData: { Balance: 0.5, StressState: 1 } });
   return rows.filter((r) => inWindow(Date.parse(r.timestamp), url));
 }
@@ -192,6 +222,7 @@ globalThis.fetch = async (input, init = {}) => {
     // the real endpoint answers 400 to an offset written +0200
     if (/[+-]\d{4}$/.test(url.searchParams.get("startdate") ?? "")) return res("Invalid arguments", 400);
     const day = (url.searchParams.get("startdate") ?? "2026-09-27").slice(0, 10);
+    if (HISTORY_DAYS) return res(historyStats(day, (url.searchParams.get("enddate") ?? day).slice(0, 10)));
     return res([
       { Name: "stepcount", Aggregation: "sum", Sources: [{ Samples: [{ TimeISO8601: `${day}T12:00:00+02:00`, Value: 1234 }] }] },
       { Name: "energyconsumption", Aggregation: "sum", Sources: [{ Samples: [{ TimeISO8601: `${day}T12:00:00+02:00`, Value: 10_000_000 }] }] },

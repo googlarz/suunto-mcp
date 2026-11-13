@@ -334,6 +334,41 @@ test("e2e get_training_load: the stub's three 50-TSS workouts on the 27th, rolle
   );
 });
 
+test("e2e get_baselines: 15 stub days of history before the 25th, hand-computed band and the 25th against it", async () => {
+  await withMcp(
+    async (call) => {
+      const { text, isError } = await call("get_baselines", { date: "2026-09-25", days: 15 });
+      assert.equal(isError, false, text);
+      assert.ok(!text.includes("\n"), "compact JSON");
+      const out = JSON.parse(text);
+      assert.deepEqual([out.date, out.from, out.to, out.days, out.errors], ["2026-09-25", "2026-09-10", "2026-09-24", 15, []]);
+      // The window is k = 1..15 (k = 0 is the 25th). HRV 40 + k = 41..55: p25 = (44 + 45) / 2, median x[7] = 48, p75 = (51 + 52) / 2;
+      // the last 7 days k = 1..7 -> 41..47, median 44. The 25th itself has 40, below the band.
+      assert.deepEqual(out.metrics.hrv, { n: 15, median: 48, p25: 44.5, p75: 51.5, last7Median: 44, latest: 40, latestVsBand: "below" });
+      assert.deepEqual(out.metrics.sleepDurationS, { n: 15, median: 25000, p25: 25000, p75: 25000, last7Median: 25000, latest: 25000, latestVsBand: "within" });
+      // steps 1000 (k + 1) = 2000..16000: p25 = (5000 + 6000) / 2, median 9000, p75 = (12000 + 13000) / 2; the 25th's own 1000 is never reported
+      assert.deepEqual(out.metrics.steps, { n: 15, median: 9000, p25: 5500, p75: 12500, last7Median: 5000, latest: null, latestVsBand: null });
+      // waking Balance 0.5 + 0.01 k: median k = 8 -> 0.58; k = 0 -> 0.5 is below p25
+      assert.equal(out.metrics.recoveryMorning.median, 0.58);
+      assert.deepEqual([out.metrics.recoveryMorning.latest, out.metrics.recoveryMorning.latestVsBand], [0.5, "below"]);
+      assert.deepEqual([out.metrics.recoveryLow.median, out.metrics.recoveryLow.latest], [0.38, null]);
+      assert.ok(out.notes.some((n: string) => /not a medical reference/.test(n)));
+
+      // too little history: the stub has nothing before 2026-08-17 (40 days back from the 25th)
+      const thin = JSON.parse((await call("get_baselines", { date: "2026-08-01", days: 14 })).text);
+      assert.equal(thin.metrics.hrv.n, 0);
+      assert.equal(thin.metrics.hrv.latestVsBand, null);
+
+      for (const args of [{ date: "2026-02-30" }, { date: "2026-09-25", days: 13 }, { date: "2026-09-25", days: 91 }, { date: "2026-09-25", days: 20.5 }]) {
+        const bad = await call("get_baselines", args);
+        assert.equal(bad.isError, true, JSON.stringify(args));
+        assert.match(bad.text, /Invalid arguments/);
+      }
+    },
+    { STUB_HISTORY_DAYS: "40" },
+  );
+});
+
 test("e2e get_training_load: reaching the workout limit is reported", async () => {
   await withMcp(
     async (call) => {
@@ -417,6 +452,33 @@ test("e2e CLI: output larger than a pipe buffer arrives whole (it used to stop a
     assert.ok(out.length > 300_000, `only ${out.length} bytes arrived`);
     assert.equal(JSON.parse(out).payload.length, 200);
   });
+});
+
+async function runCli(args: string[]) {
+  return withStubbedEnv(async ({ cwd, env }) => {
+    const child = spawn(process.execPath, ["--import", stub, distIndex, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c: Buffer) => (stdout += c));
+    child.stderr.on("data", (c: Buffer) => (stderr += c));
+    const [code] = (await once(child, "close")) as [number];
+    return { code, stdout, stderr };
+  });
+}
+
+test("e2e CLI: get-route and export-route print the route JSON and the GPX", async () => {
+  const route = await runCli(["get-route", "6acd201e1cc20768cf51aa4f"]);
+  assert.equal(route.code, 0, route.stderr);
+  assert.equal(JSON.parse(route.stdout).description, "Wasserfallsteig near Bad Urach");
+  const gpx = await runCli(["export-route", "6acd201e1cc20768cf51aa4f"]);
+  assert.equal(gpx.code, 0, gpx.stderr);
+  assert.match(gpx.stdout, /<gpx[^>]*>[\s\S]*<name>Stub route<\/name>/);
+});
+
+test("e2e CLI: a new command without its argument exits non-zero with the usage line", async () => {
+  const r = await runCli(["compare-workout"]);
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /Usage: compare-workout <workoutKey>/);
 });
 
 test("get_workout_fit stays pretty-printed: callers slice its ~550 KB output by line range", async () => {
@@ -652,7 +714,7 @@ test("e2e prompts: list, get, invalid params, and every tool named in a prompt e
     const list = (await rpc("prompts/list")).result.prompts;
     assert.deepEqual(
       list.map((p: any) => [p.name, p.arguments.map((a: any) => a.name)]),
-      [["suunto-morning", ["date"]], ["suunto-weekly", ["endDate"]], ["suunto-gym-today", ["date"]]],
+      [["suunto-morning", ["date"]], ["suunto-weekly", ["endDate"]], ["suunto-gym-today", ["date"]], ["suunto-gym-review", ["date"]]],
     );
     const tools = new Set(await listTools());
     for (const p of list) {

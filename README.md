@@ -378,9 +378,10 @@ MCP clients that support prompts (for example Claude Desktop) list these as one-
 
 | Prompt | What it does | Optional argument |
 |---|---|---|
-| `suunto-morning` | Morning briefing: last night's sleep, recovery on waking, yesterday's load and workouts, how ready today is | `date` (YYYY-MM-DD, default today) |
+| `suunto-morning` | Morning briefing: last night's sleep, recovery on waking (set against your own recent band), yesterday's load and workouts, how ready today is | `date` (YYYY-MM-DD, default today) |
 | `suunto-weekly` | Weekly review: sleep, HRV, recovery and training load against the week before, each gym session against its plan | `endDate` (YYYY-MM-DD, default yesterday) |
-| `suunto-gym-today` | Readiness gate: cut planned intensity 20-30% if HRV is clearly below your recent level or sleep score is low, otherwise train as planned | `date` (YYYY-MM-DD, default today) |
+| `suunto-gym-today` | Readiness gate: cut planned intensity 20-30% if last night's HRV or sleep score is below your own recent band (`get_baselines`), otherwise train as planned | `date` (YYYY-MM-DD, default today) |
+| `suunto-gym-review` | Review of a day's guided gym session: sets done against the plan, deviations with their basis, heart-rate recovery in the rests; says plainly when the numbers are unreliable | `date` (YYYY-MM-DD, default today) |
 
 ---
 
@@ -586,7 +587,7 @@ node dist/index.js get-sleep 2026-04-20
 node dist/index.js list-recovery --from 2026-04-01 --to 2026-04-30
 ```
 
-Other commands: `get-workout-fit`, `get-daily-activity`, `list-daily-activity`, `list-sleep`, `get-recovery`, `daily-digest`, `sync-to-health-skill`. Run it with `--help` for the full list and every option. All output is JSON — pipe into `jq` for filtering.
+Other commands: `get-workout-fit`, `get-training-load`, `compare-workout`, `get-workout-rest-profile`, `list-routes`, `get-route`, `export-route`, `get-daily-activity`, `list-daily-activity`, `list-sleep`, `get-recovery`, `daily-digest`, `sync-to-health-skill`. Run it with `--help` for the full list and every option. Output is JSON (pipe into `jq` for filtering), except `export-route`, which prints GPX.
 
 </details>
 
@@ -629,6 +630,7 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `list_workouts` | Recent workouts, filtered by date |
 | `get_workout` | Summary numbers for one workout (no laps — use `get_workout_laps`) |
 | `get_daily_snapshot` | One call for a whole day: last night's sleep (main sleep, naps), the day's lowest and highest recovery balance (and the value on waking and at bedtime), steps, energy and workouts. Pass `to` for up to 14 days in one request |
+| `get_baselines` | Your own recent norms: median and the middle-half band (p25-p75) of the last 14-90 days (default 28, ending the day before `date`) for sleep duration, sleep score, HRV, recovery on waking, the day's lowest recovery and steps, plus where `date` sits in it (`below` / `within` / `above`). Quantiles use linear interpolation between order statistics; a band needs 7 days with a value. A missing day is never counted as 0. Not a medical reference. Read-only |
 | `get_training_load` | Fitness (CTL), Fatigue (ATL) and Form (TSB) day by day, plus weekly totals and the 7-day ramp rate, computed from workout TSS (Suunto's API has no such numbers). Up to 120 days ending at `date`; CTL can be about 1 point off the watch. Read-only — doesn't touch the digest files |
 | `get_workout_laps` | Lap-by-lap table for one workout: time, heart rate, calories and the guide step of each lap — the way to read back a guided gym session set by set; it also reports when the table looks unreliable (a missing or doubled lap, no heart rate) |
 | `compare_workout_to_plan` | Reads a guided gym session back against its plan: maps the laps to exercises, sets and rests and lists deviations (missing or extra sets and exercises, short or long sets, rests off target, laps outside the guide), each marked with what it rests on (the labels, your plan, or a heuristic). Pass the exercises array you pushed as `plan` to also check order, set counts and rest targets. With restMode `countdown` rest overruns are not measurable. Read-only |
