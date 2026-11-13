@@ -419,6 +419,33 @@ test("e2e CLI: output larger than a pipe buffer arrives whole (it used to stop a
   });
 });
 
+async function runCli(args: string[]) {
+  return withStubbedEnv(async ({ cwd, env }) => {
+    const child = spawn(process.execPath, ["--import", stub, distIndex, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c: Buffer) => (stdout += c));
+    child.stderr.on("data", (c: Buffer) => (stderr += c));
+    const [code] = (await once(child, "close")) as [number];
+    return { code, stdout, stderr };
+  });
+}
+
+test("e2e CLI: get-route and export-route print the route JSON and the GPX", async () => {
+  const route = await runCli(["get-route", "6acd201e1cc20768cf51aa4f"]);
+  assert.equal(route.code, 0, route.stderr);
+  assert.equal(JSON.parse(route.stdout).description, "Wasserfallsteig near Bad Urach");
+  const gpx = await runCli(["export-route", "6acd201e1cc20768cf51aa4f"]);
+  assert.equal(gpx.code, 0, gpx.stderr);
+  assert.match(gpx.stdout, /<gpx[^>]*>[\s\S]*<name>Stub route<\/name>/);
+});
+
+test("e2e CLI: a new command without its argument exits non-zero with the usage line", async () => {
+  const r = await runCli(["compare-workout"]);
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /Usage: compare-workout <workoutKey>/);
+});
+
 test("get_workout_fit stays pretty-printed: callers slice its ~550 KB output by line range", async () => {
   const source = await readFile(srcIndex, "utf8");
   const handler = source.slice(source.indexOf('case "get_workout_fit"'), source.indexOf('case "export_workout_gpx"'));

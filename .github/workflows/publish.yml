@@ -99,12 +99,12 @@ jobs:
           pkg="$(jq -r '.packages[0].identifier' server.json)"
           version="$(jq -r .version server.json)"
           want="$(jq -r .name server.json)"
-          for i in $(seq 1 18); do
+          for i in $(seq 1 60); do
             got="$(curl -fsS "https://registry.npmjs.org/${pkg}/${version}" | jq -r '.mcpName // empty' || true)"
             [ "$got" = "$want" ] && exit 0
             sleep 10
           done
-          echo "::error::${pkg}@${version} with mcpName ${want} not visible on npm after 3 minutes"; exit 1
+          echo "::error::${pkg}@${version} with mcpName ${want} not visible on npm after 10 minutes"; exit 1
 
       - run: ./mcp-publisher login github-oidc
       - run: ./mcp-publisher publish

@@ -2,6 +2,9 @@
 
 Versions on npm: 0.14.1, 0.14.4, 0.15.1 and later. The tags v0.14.0, v0.14.2, v0.14.3, v0.14.5 and v0.15.0 exist on GitHub but were never published to npm. Pre-0.15.1 notes are in the GitHub Releases.
 
+## Unreleased
+- CLI: new read-only commands `get-training-load <date> [--days N]`, `compare-workout <workoutKey>` (without a plan), `get-workout-rest-profile <workoutKey>`, `get-route <routeId>`, `list-routes` and `export-route <routeId>` (prints the GPX). They call the same functions as the matching MCP tools.
+
 ## 0.22.0
 - `push_strength_guide`: the guide's list icon is now a blue-violet gradient with a white barbell instead of flat grey. Other guides keep the grey icon. How it renders in the Suunto app is not yet checked on a device.
 - `push_strength_guide`: step titles now carry both counters: prep `3/6`, set `3/6 - 2/3`, a rest `3/6 REST` (its text still starts with `Next:`), and with `perExercise` the work step is `3/6` (up to 13 characters for 10 of 12 exercises with 10 sets; 3-digit set counts are cropped). Before, set and rest steps showed only the set counter. Lap labels come from step text, so `get_workout_laps`, `compare_workout_to_plan` and `get_workout_rest_profile` are unaffected. How the longer titles render on the watch is not yet checked on a device.
