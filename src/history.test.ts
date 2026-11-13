@@ -109,6 +109,7 @@ test("parseLoadKg: the first number followed by kg, else null", () => {
   assert.equal(parseLoadKg("55kg 10-15 RPE7"), 55);
   assert.equal(parseLoadKg("2x20kg 3x8/leg"), 20, "the first weight, not the 2 of '2x'");
   assert.equal(parseLoadKg("2x32kg 3x40m"), 32);
+  assert.equal(parseLoadKg("100kg 3x5, back-off 80kg 1x10"), 100, "the first of several weights");
   assert.equal(parseLoadKg("62,5kg 3x8"), 62.5);
   assert.equal(parseLoadKg("12.5 kg 3x8"), 12.5);
   assert.equal(parseLoadKg("RPE6 8-12"), null, "no weight: never guessed");
@@ -216,6 +217,24 @@ test("history by name: oldest first, load progression, recovery after set 1 and 
     assert.ok(Number.isInteger(out.summary.restEndHrMedian) && out.summary.restEndHrMedian >= 101 && out.summary.restEndHrMedian <= 104, `median ${out.summary.restEndHrMedian}`);
     assert.ok(out.notes.some((n: string) => /normalisation/.test(n)), "the matching rule is stated");
     assert.ok(out.notes.some((n: string) => /PLANNED/.test(n)));
+  });
+});
+
+test("history by name: an unreliable session is listed and flagged but does not move restEndHrMedian", async () => {
+  await withCacheDir(async () => {
+    // no 'Session complete' lap: unreliable; its first squat rest ends near 60 bpm instead of 101
+    const rows = CLEAN.laps.rows.slice(0, -1).map((r: any[]) => (r[0] === 3 ? [...r.slice(0, 5), 60, ...r.slice(6)] : r));
+    const unreliable = { ...CLEAN, laps: { ...CLEAN.laps, rows } };
+    const { client, parse } = fakeClient([
+      { key: keyOf(1), startMs: at(14) },
+      { key: keyOf(2), startMs: at(7), fixture: unreliable },
+    ]);
+    const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 4, date: TODAY }, deps(parse));
+    const c = (n: string) => out.sessions.cols.indexOf(n);
+    assert.deepEqual(out.sessions.rows.map((r: any[]) => r[c("reliable")]), [true, false]);
+    assert.ok(out.sessions.rows[1][c("restEndHr")] < 70, "the unreliable session's own value is still shown");
+    assert.equal(out.summary.sessions, 2);
+    assert.equal(out.summary.restEndHrMedian, Math.round(out.sessions.rows[0][c("restEndHr")]), "only the reliable session counts");
   });
 });
 
