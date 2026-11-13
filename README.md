@@ -90,6 +90,30 @@ The setup has three parts:
 
 ---
 
+### Try it without an account (demo mode)
+
+Suunto takes 3–4 weeks to approve API access. You don't have to wait to see what this does: with `SUUNTO_DEMO=1` the server runs on realistic **synthetic** data (about 8 weeks, ending today) and needs no Suunto account, no credentials and no network. Only Node.js is required. Add this to the `mcpServers` block of the Claude Desktop config (the file from Step 9), then restart Claude:
+
+```json
+{
+  "mcpServers": {
+    "suunto-demo": {
+      "command": "npx",
+      "args": ["-y", "suunto-mcp"],
+      "env": { "SUUNTO_DEMO": "1" }
+    }
+  }
+}
+```
+
+What works: every read tool and the four prompts (`suunto-morning`, `suunto-weekly`, `suunto-gym-today`, `suunto-gym-review`) — workouts with guide-labelled gym laps (three sessions a week, one of them with a planted deviation for `compare_workout_to_plan`), two runs a week with TSS, nightly sleep with stages, score and HRV plus the odd nap, recovery every 30 minutes, daily steps and energy, two routes, three guides, and a small FIT file with heart rate for `get_workout_fit` and `get_workout_rest_profile`. Training load, baselines and snapshots are computed from that data by the normal code.
+
+What does not: anything that writes (`upload_workout`, `upload_route`, `push_*_guide`, `delete_guide`, `generate_daily_digest`) writes nothing and only returns a short note on what it would do with real credentials. `get_upload_status` has no uploads to find.
+
+You can't mistake demo data for real data: every tool result is JSON with a top-level `"demo": true` (a result that is a list, or text such as a GPX file, comes back as `{ "demo": true, "data": … }`), the server's instructions and the prompts say the data is synthetic, and the startup line says DEMO MODE. Errors are unchanged. `npm run doctor` with `SUUNTO_DEMO=1` just reports that demo mode is on. When your API access arrives, remove `SUUNTO_DEMO` and follow the setup below. Demo mode applies to the MCP server only, not to the terminal commands.
+
+---
+
 ### Part 1: Register with Suunto's developer portal (~5 min to submit, then wait 3–4 weeks)
 
 Suunto has a free developer portal called **apizone** where you register apps that can access your data. You'll create an account, subscribe to the data plan, and register a small "app" — don't worry, there's nothing to build, it's just a name and a password you make up.
@@ -484,6 +508,7 @@ Set these in the `env` block of your Claude config (or in `.env` for terminal co
 | Variable | Needed | What it does |
 |---|---|---|
 | `SUUNTO_CLIENT_ID`, `SUUNTO_CLIENT_SECRET`, `SUUNTO_SUBSCRIPTION_KEY` | yes | Your apizone credentials |
+| `SUUNTO_DEMO` | no | `1` runs the server on synthetic data with no credentials and no network; see "Try it without an account" |
 | `SUUNTO_APP_NAME` | to push guides | Exact app name registered on apizone |
 | `SUUNTO_REDIRECT_URI` | no | OAuth callback; default `http://localhost:8421/callback` (must match apizone) |
 | `SUUNTO_TOKEN_PATH` | no | Token file; default `~/.suunto-mcp/tokens.json` |

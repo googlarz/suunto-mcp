@@ -40,9 +40,12 @@ import { buildTrainingLoad } from "./training-load.js";
 import { buildBaselines } from "./baselines.js";
 import { buildExerciseHistory } from "./history.js";
 import { logSession } from "./journal.js";
+import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoWriteResult, isDemo, markDemo } from "./demo.js";
 
 const cfg = loadConfig();
-const suunto = new SuuntoClient(cfg);
+// SUUNTO_DEMO=1: synthetic data, no credentials, no network (see demo.ts).
+const demo = isDemo();
+const suunto = demo ? new DemoClient() : new SuuntoClient(cfg);
 
 // Read the version from package.json instead of hardcoding it here — a
 // hardcoded string silently drifts from the real published version on
@@ -56,7 +59,7 @@ const pkgVersion: string = JSON.parse(
 // ListResources) succeed without credentials, which catalogs like
 // glama.ai use to verify the server boots correctly.
 function ensureReady() {
-  assertCredentials(cfg);
+  if (!demo) assertCredentials(cfg);
 }
 
 // Far above any real route (a day-long track is well under 1 MB); keeps a mistaken path from reading a huge file.
@@ -64,7 +67,7 @@ const MAX_GPX_BYTES = 10_000_000;
 
 const server = new Server(
   { name: "suunto-mcp", version: pkgVersion },
-  { capabilities: { tools: {}, resources: {}, prompts: {} } },
+  { capabilities: { tools: {}, resources: {}, prompts: {} }, ...(demo ? { instructions: DEMO_INSTRUCTIONS } : {}) },
 );
 
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -74,16 +77,19 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
   ensureReady();
   const contents = await readResource(req.params.uri, suunto);
-  return { contents: [contents] };
+  return { contents: [demo ? { ...contents, text: markDemo(contents.text) } : contents] };
 });
 
 server.setRequestHandler(ListPromptsRequestSchema, async () => ({
   prompts: PROMPTS,
 }));
 
-server.setRequestHandler(GetPromptRequestSchema, async (req) =>
-  getPrompt(req.params.name, req.params.arguments),
-);
+server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+  const prompt = getPrompt(req.params.name, req.params.arguments);
+  if (!demo) return prompt;
+  const note = `${DEMO_NOTICE} Say so in your answer: every number below comes from generated data.\n\n`;
+  return { ...prompt, messages: prompt.messages.map((m) => ({ ...m, content: { ...m.content, text: note + m.content.text } })) };
+});
 
 const toolDefs = [
   {
@@ -946,6 +952,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // through to the API layer instead of being rejected up front.
     const errors = validateAgainstSchema(tool.inputSchema, a);
     if (errors.length) return text(`Invalid arguments for ${name}: ${errors.join("; ")}`, true);
+    // Demo mode writes nothing: every tool that is not read-only just says what it would do.
+    if (demo && !tool.annotations.readOnlyHint) return text(demoWriteResult(name));
     ensureReady();
     switch (name) {
       case "list_workouts": {
@@ -1177,13 +1185,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 });
 
+// Every tool result passes through here, so this is the one place demo mode marks
+// its output (errors stay as they are: they carry no data).
 function text(s: string, isError = false) {
   return {
-    content: [{ type: "text", text: s }],
+    content: [{ type: "text", text: demo && !isError ? markDemo(s) : s }],
     ...(isError ? { isError: true } : {}),
   };
 }
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("suunto-mcp ready on stdio");
+console.error(demo ? "suunto-mcp ready on stdio — DEMO MODE: synthetic data, no credentials, no network" : "suunto-mcp ready on stdio");
