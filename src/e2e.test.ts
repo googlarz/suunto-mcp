@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,9 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
       // real defaults pause 2 s between guide pushes / uploads and between upload status polls
       SUUNTO_WRITE_GAP_MS: "0",
       SUUNTO_UPLOAD_POLL_MS: "0",
+      // the history cache and the journal must never touch the real home directory
+      SUUNTO_CACHE_DIR: join(cwd, "cache"),
+      SUUNTO_JOURNAL_PATH: join(cwd, "journal.json"),
     };
     return await fn({ cwd, env });
   } finally {
@@ -731,4 +734,138 @@ test("e2e prompts: list, get, invalid params, and every tool named in a prompt e
     assert.equal(bad.error.code, -32602);
     assert.equal((await rpc("prompts/get", { name: "nope" })).error.code, -32602);
   });
+});
+
+// ---------- get_exercise_history and log_session ----------
+
+const HISTORY_ENV = { STUB_HISTORY_LAPS: "1" };
+
+test("e2e get_exercise_history + log_session: index, cache, by-name history, journal merge and replacement", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-hist-e2e-"));
+  const cache = join(dir, "cache");
+  const journal = join(dir, "journal.json");
+  try {
+    await withMcp(
+      async (call) => {
+        const args = { date: "2026-10-05", weeks: 2 };
+        const index = await call("get_exercise_history", args);
+        assert.equal(index.isError, false, index.text);
+        assert.ok(!index.text.includes("\n"), "compact JSON");
+        const out = JSON.parse(index.text);
+        assert.equal(out.from, "2026-09-22");
+        assert.equal(out.sessions, 1, "the workout without laps is not a session");
+        assert.deepEqual(out.exercises.map((e: any) => [e.name, e.sessions, e.lastDate, e.lastDetail]), [
+          ["Back Squat", 1, "2026-10-01", "100kg 3x5"],
+          ["Bench Press", 1, "2026-10-01", "70kg 3x8"],
+          ["Seated Cable Row", 1, "2026-10-01", "55kg 2x12"],
+        ]);
+        assert.equal(out.pending, 0);
+        assert.equal(out.errors.length, 1, "the workout the stub has no laps for is skipped");
+        assert.equal(out.errors[0].workoutKey, "dead00000000000000000001");
+
+        // the derived record is on disk with the documented modes; the failure is not
+        assert.deepEqual(await readdir(cache), [`${CLEAN_KEY}.json`]);
+        assert.equal((await stat(cache)).mode & 0o777, 0o700);
+        assert.equal((await stat(join(cache, `${CLEAN_KEY}.json`))).mode & 0o777, 0o600);
+
+        // a second call is served from it: change the file and the change shows
+        const file = join(cache, `${CLEAN_KEY}.json`);
+        const entry = JSON.parse(await readFile(file, "utf8"));
+        entry.data.exercises[0].detail = "cached 90kg";
+        await writeFile(file, JSON.stringify(entry));
+        const named = JSON.parse((await call("get_exercise_history", { ...args, name: "back squat" })).text);
+        const c = (n: string) => named.sessions.cols.indexOf(n);
+        assert.equal(named.sessions.rows.length, 1);
+        assert.equal(named.sessions.rows[0][c("detail")], "cached 90kg");
+        assert.equal(named.sessions.rows[0][c("kg")], 100);
+        assert.equal(named.sessions.rows[0][c("loadSource")], "label");
+        assert.equal(named.sessions.rows[0][c("workoutKey")], CLEAN_KEY);
+        assert.equal(typeof named.sessions.rows[0][c("restEndHr")], "number");
+        assert.deepEqual(named.summary, { sessions: 1, firstLoadKg: 100, lastLoadKg: 100, restEndHrMedian: named.summary.restEndHrMedian });
+        assert.ok(named.summary.restEndHrMedian >= 101 && named.summary.restEndHrMedian <= 104);
+
+        // log what really happened; the journal wins for the load and is attached
+        const first = await call("log_session", { workoutKey: CLEAN_KEY, note: "all as planned except squat set 3: 6 reps", exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 95 }, { reps: 5, kg: 97.5 }, { reps: 6, kg: 97.5, rpe: 9 }] }] });
+        assert.equal(first.isError, false, first.text);
+        const firstOut = JSON.parse(first.text);
+        assert.equal(firstOut.replaced, null);
+        assert.equal(firstOut.entries, 1);
+        assert.equal((await stat(journal)).mode & 0o777, 0o600);
+        const second = JSON.parse((await call("log_session", { workoutKey: CLEAN_KEY, note: "corrected", exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }] }] })).text);
+        assert.deepEqual(second.replaced, firstOut.saved, "the previous entry is handed back");
+        assert.equal(second.entries, 1);
+        const merged = JSON.parse((await call("get_exercise_history", { ...args, name: "Back Squat" })).text);
+        const row = merged.sessions.rows[0];
+        assert.equal(row[c("kg")], 100);
+        assert.equal(row[c("loadSource")], "journal");
+        assert.deepEqual(row[c("journal")], { note: "corrected", sets: [{ reps: 5, kg: 100 }] });
+
+        // invalid arguments are refused and leave the journal alone
+        const before = await readFile(journal, "utf8");
+        for (const bad of [{ workoutKey: "abc" }, { workoutKey: CLEAN_KEY, exercises: [{ name: "x", sets: [{ reps: 201 }] }] }, { workoutKey: CLEAN_KEY, exercises: Array.from({ length: 41 }, () => ({ name: "x" })) }, { workoutKey: CLEAN_KEY, exercises: [{ name: "x", sets: Array.from({ length: 21 }, () => ({})) }] }]) {
+          const r = await call("log_session", bad);
+          assert.equal(r.isError, true, JSON.stringify(bad).slice(0, 60));
+        }
+        assert.equal(await readFile(journal, "utf8"), before);
+        for (const bad of [{ weeks: 0 }, { weeks: 27 }, { date: "2026-02-31" }, { name: "" }]) {
+          const r = await call("get_exercise_history", bad);
+          assert.equal(r.isError, true, JSON.stringify(bad));
+          assert.match(r.text, /Invalid arguments for get_exercise_history/);
+        }
+      },
+      { ...HISTORY_ENV, SUUNTO_CACHE_DIR: cache, SUUNTO_JOURNAL_PATH: journal },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("e2e get_exercise_history: SUUNTO_CACHE=off writes no cache entry", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-hist-e2e-"));
+  try {
+    await withMcp(
+      async (call) => {
+        const r = await call("get_exercise_history", { date: "2026-10-05", weeks: 2 });
+        assert.equal(r.isError, false, r.text);
+        assert.equal(JSON.parse(r.text).sessions, 1);
+      },
+      { ...HISTORY_ENV, SUUNTO_CACHE: "off", SUUNTO_CACHE_DIR: join(dir, "cache") },
+    );
+    assert.deepEqual(await readdir(dir), []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("e2e: the test environment keeps the history cache and the journal out of the real home directory", async () => {
+  await withMcp(async (call) => {
+    assert.equal((await call("get_exercise_history", { date: "2026-10-05", weeks: 2 })).isError, false);
+    assert.equal((await call("log_session", { workoutKey: CLEAN_KEY, note: "test" })).isError, false);
+  }, HISTORY_ENV);
+  const home = join(homedir(), ".suunto-mcp");
+  await assert.rejects(stat(join(home, "cache", `${CLEAN_KEY}.json`)), { code: "ENOENT" });
+  const journalText = await readFile(join(home, "journal.json"), "utf8").catch(() => "");
+  assert.ok(!journalText.includes(CLEAN_KEY), "the test journal entry reached the real journal");
+});
+
+test("e2e tools/list: get_exercise_history is read-only, log_session a non-destructive idempotent local write", async () => {
+  await withMcp(async (_call, _names, toolDefs) => {
+    const defs = await toolDefs();
+    const history = defs.find((t: any) => t.name === "get_exercise_history");
+    const log = defs.find((t: any) => t.name === "log_session");
+    assert.deepEqual(history.annotations, { readOnlyHint: true, openWorldHint: true });
+    assert.deepEqual(log.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+    assert.match(history.description, /writes nothing but that cache/);
+    assert.match(history.description, /CALL AGAIN until pending is 0/);
+    assert.match(log.description, /never contacts Suunto/);
+  });
+});
+
+test("e2e CLI: get-exercise-history rejects a bad --weeks before any request", async () => {
+  const cases: [string, RegExp][] = [["abc", /--weeks must be a whole number/], ["0", /weeks must be a whole number from 1 to 26/]];
+  for (const [weeks, re] of cases) {
+    const r = await runCli(["get-exercise-history", "--weeks", weeks]);
+    assert.notEqual(r.code, 0, weeks);
+    assert.match(r.stderr, re);
+  }
 });

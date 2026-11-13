@@ -7,6 +7,7 @@ import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
 import { buildTrainingLoad } from "./training-load.js";
 import { compareWorkout } from "./compare.js";
 import { buildRestProfile } from "./rest-profile.js";
+import { buildExerciseHistory } from "./history.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -32,6 +33,7 @@ Analysis commands:
   get-training-load    <YYYY-MM-DD> [--days N]
   compare-workout      <workoutKey>   (laps only, no plan comparison)
   get-workout-rest-profile <workoutKey>
+  get-exercise-history [name] [--weeks N]   (load, sets, rest recovery per session; writes only the local cache)
 
 Route commands:
   list-routes
@@ -165,6 +167,14 @@ export async function runCli(argv: string[]) {
         const data = await suunto.getWorkoutWithExtensions(key, LAP_EXTENSIONS);
         const parsed = await parseFit(await suunto.getWorkoutFit(key));
         out(buildRestProfile(shapeLaps(data), parsed));
+        break;
+      }
+
+      case "get-exercise-history": {
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { weeks: { type: "string" } } });
+        const weeks = values.weeks !== undefined ? Number(values.weeks) : undefined;
+        if (weeks !== undefined && !Number.isInteger(weeks)) die(`--weeks must be a whole number, got "${values.weeks}"`);
+        out(await buildExerciseHistory(suunto, { name: positionals[0], weeks }));
         break;
       }
 
