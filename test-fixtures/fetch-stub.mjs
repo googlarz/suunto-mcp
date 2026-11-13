@@ -165,6 +165,17 @@ globalThis.fetch = async (input, init = {}) => {
     return res({ items: names.map((description, i) => ({ id: `route${i}`, username: "u", description, activities, segments: [{ start: {}, end: {} }] })) });
   }
 
+  if (path === "/v3/workouts/" && process.env.STUB_HISTORY_LAPS) {
+    // get_exercise_history e2e: the clean session, a newer one the stub has no laps for (answers 404), a workout without laps
+    const base = { timeOffsetInMinutes: 120 };
+    const all = [
+      { ...base, workoutKey: "dead00000000000000000001", startTime: clean.startTime + HOUR, extensionTypes: ["SUMMARY", "MANUALLAP"] },
+      { ...base, workoutKey: CLEAN_KEY, startTime: clean.startTime, extensionTypes: ["SUMMARY", "MANUALLAP"] },
+      { ...base, workoutKey: "dead00000000000000000002", startTime: clean.startTime - HOUR, extensionTypes: ["SUMMARY"] },
+    ];
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    return res({ payload: all.slice(offset, offset + Number(url.searchParams.get("limit") ?? 50)), metadata: { count: all.length } });
+  }
   if (path === "/v3/workouts/") {
     const total = Number(process.env.STUB_WORKOUTS ?? 3);
     const pad = "x".repeat(Number(process.env.STUB_PAD ?? 0));

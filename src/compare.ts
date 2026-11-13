@@ -72,8 +72,8 @@ const SET_REST = /^(?:(\d+)s target\s*·\s*)?Next: set (\d+)\/(\d+)$/;
 const STRENGTH_CAP = 40;
 // A name cut right after a space loses that space in cleanLabel, so a cut
 // strength label can also be one character short of the cap.
-const STRENGTH_CUT_MIN = STRENGTH_CAP - 1;
-const WORKOUT_CAP = 54;
+export const STRENGTH_CUT_MIN = STRENGTH_CAP - 1;
+export const WORKOUT_CAP = 54;
 // Heuristic thresholds (§3.8). Checked against three real sessions; revisit with more.
 const SHORT_SET_RATIO = 0.25;
 const SHORT_SET_MAX_S = 10;

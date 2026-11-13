@@ -70,10 +70,10 @@ test("stdio: every tool has a title and annotations consistent with what it does
       assert.ok(t.title && t.title.length > 3, `${t.name}: missing title`);
       assert.ok(t.annotations, `${t.name}: missing annotations`);
       assert.equal(typeof t.annotations.readOnlyHint, "boolean", `${t.name}: readOnlyHint must be explicit`);
-      assert.equal(t.annotations.openWorldHint, true, `${t.name}: talks to Suunto's cloud`);
+      assert.equal(t.annotations.openWorldHint, t.name !== "log_session", `${t.name}: talks to Suunto's cloud (log_session alone is a local file)`);
 
       const readsOnly = /^(get|list|export|compare)_/.test(t.name);
-      const writes = /^(push|delete|upload|generate)_/.test(t.name);
+      const writes = /^(push|delete|upload|generate|log)_/.test(t.name);
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
       if (/^(push_.*_guide|delete_guide|generate_daily_digest)$/.test(t.name)) {
