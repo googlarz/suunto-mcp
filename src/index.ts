@@ -37,6 +37,7 @@ import { compareWorkout } from "./compare.js";
 import { buildRestProfile } from "./rest-profile.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
 import { buildTrainingLoad } from "./training-load.js";
+import { buildBaselines } from "./baselines.js";
 
 const cfg = loadConfig();
 const suunto = new SuuntoClient(cfg);
@@ -189,6 +190,32 @@ const toolDefs = [
           maxLength: 10,
           examples: ["2026-04-26"],
           description: "Optional last day of a range (inclusive, at most 14 days from `date`). The result is then { from, to, days: [one entry per day, in the shape above without errors], errors } — one request per section for the whole range, so prefer it to calling this once per day.",
+        },
+      },
+      required: ["date"],
+    },
+  },
+  {
+    name: "get_baselines",
+    description:
+      "Your own recent norms, so a day can be judged against them: the band of the user's last `days` days (default 28) for sleep duration, sleep score, HRV, recovery on waking, the day's lowest recovery and steps, and where the judged `date` sits in it. The baseline window is the `days` days BEFORE `date` (date-days to date-1); `date` itself is never part of its own baseline. Per day: sleepDurationS, sleepScore and hrv (AvgHRV) come from the main sleep of the night that led INTO that day (as in get_daily_snapshot; sleep shorter than about 3 h is filed by Suunto as a nap and does not count, so that day has no value), recoveryMorning is the Balance nearest the main sleep's end, recoveryLow the lowest Balance of the local day (Balance x100 equals the watch's Resources %), steps the day's step count. A day without data has no value and is never counted as 0. Output (compact JSON; seconds whole, Balance 2 decimals, everything else 1): { date, from, to, days, metrics: { <metric>: { n (days with a value in the window), median, p25, p75, last7Median, latest, latestVsBand } }, notes, errors }. median, p25 and p75 are quantiles by linear interpolation between order statistics (position (n-1)*p in the sorted values; the median of an even n is the mean of the two middle values), and all three are null when n < 7 (too little data; notes says so). last7Median is the median of the last 7 days of the window, null with fewer than 4 values. latest is the value for `date` itself, null when missing; for steps and recoveryLow it is always null because that day is still running. latestVsBand is 'below' | 'within' | 'above' relative to [p25, p75] (the edges count as within), null when latest or the band is null. The band is the middle half of the user's own last N days, not a medical reference. One request per section (sleep, recovery, activity) for the whole span; a section that fails leaves its metrics empty and is listed in errors: [{ section, error }]. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-20"],
+          description: "The local calendar day YYYY-MM-DD being judged against the baseline. Today works: its night may still be in progress and the watch may not have synced yet.",
+        },
+        days: {
+          type: "integer",
+          minimum: 14,
+          maximum: 90,
+          description: "Length of the baseline window in days, ending the day before `date` (default 28).",
         },
       },
       required: ["date"],
@@ -886,6 +913,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
       case "get_daily_snapshot":
         return text(JSON.stringify(a.to && a.to !== a.date ? await buildSnapshotRange(suunto, a.date, a.to) : await buildSnapshot(suunto, a.date)));
+      case "get_baselines":
+        return text(JSON.stringify(await buildBaselines(suunto, { date: a.date, days: a.days })));
       case "get_training_load":
         return text(JSON.stringify(await buildTrainingLoad(suunto, { date: a.date, days: a.days, seedCtl: a.seedCtl, seedAtl: a.seedAtl })));
       case "get_workout_laps": {
