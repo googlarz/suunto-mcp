@@ -91,6 +91,17 @@ export interface BaselinesOptions {
   days?: number; // length of the baseline window, MIN_DAYS..MAX_DAYS
 }
 
+// Daily statistics accept at most 28 days per request.
+const STATS_MAX_DAYS = 28;
+export function statsChunks(from: string, to: string): { from: string; to: string }[] {
+  const chunks = [];
+  for (let start = from; start <= to; start = addDays(start, STATS_MAX_DAYS)) {
+    const end = addDays(start, STATS_MAX_DAYS - 1);
+    chunks.push({ from: start, to: end < to ? end : to });
+  }
+  return chunks;
+}
+
 export async function buildBaselines(client: SuuntoClient, opts: BaselinesOptions) {
   const date = opts.date;
   const days = opts.days ?? DEFAULT_DAYS;
@@ -110,11 +121,18 @@ export async function buildBaselines(client: SuuntoClient, opts: BaselinesOption
     }
   };
 
-  // The night that led into day D is filed under D - 1, so the nights run one day earlier.
+    // The night that led into day D is filed under D - 1, so the nights run one day earlier.
   const [sleepRes, recoveryRes, stats] = await Promise.all([
     section("sleep", () => client.listSleep(previousDate(from), to)),
     section("recovery", () => client.listRecovery(from, date)),
-    section("activity", () => client.getDailyStats(`${from}T00:00:00`, `${date}T23:59:59`)),
+    // Suunto answers 400 when the end is 28 days or more after the start
+    // (measured live), so the window is read in pieces; `date` itself is not
+    // needed (steps never have a `latest`).
+    section("activity", () =>
+      Promise.all(
+        statsChunks(from, to).map(async (c) => ({ ...c, res: await client.getDailyStats(`${c.from}T00:00:00`, `${c.to}T23:59:59`) })),
+      ),
+    ),
   ]);
   const nights = sleepRes === null ? null : groupBy(rowsOf(sleepRes), (r) => nightOf(r) ?? "");
   const recovery = recoveryRes === null ? null : groupBy(rowsOf(recoveryRes), rowDate);
@@ -131,7 +149,9 @@ export async function buildBaselines(client: SuuntoClient, opts: BaselinesOption
     perDay.hrv.push(main?.avgHrv ?? null);
     perDay.recoveryMorning.push(recovery === null ? null : nearestSample(dayRows, main?.bedtimeEnd)?.balance ?? null);
     perDay.recoveryLow.push(recovery === null ? null : summarizeRecovery(dayRows)?.low.balance ?? null);
-    perDay.steps.push(stats === null ? null : summarizeActivity(stats, d).steps);
+    // Each day is read from its own piece only: a piece also returns the day after its end.
+    const piece = stats?.find((c) => d >= c.from && d <= c.to);
+    perDay.steps.push(piece ? summarizeActivity(piece.res, d).steps : null);
   }
 
   const metrics: Record<string, MetricBand> = {};

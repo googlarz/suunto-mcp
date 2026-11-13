@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bandOf, buildBaselines, quantile } from "./baselines.js";
+import { bandOf, buildBaselines, quantile, statsChunks } from "./baselines.js";
 
 const id = (n: number) => n;
 
@@ -113,7 +113,7 @@ const client = (over: Record<string, unknown> = {}, calls: string[] = []) =>
 test("buildBaselines: one request per section over the whole span; the night maps to the day it led into", async () => {
   const calls: string[] = [];
   const out = await buildBaselines(client({}, calls), { date: DATE, days: 14 });
-  assert.deepEqual(calls.sort(), ["recovery 2026-10-19..2026-11-02", "sleep 2026-10-18..2026-11-01", "stats 2026-10-19T00:00:00..2026-11-02T23:59:59"]);
+  assert.deepEqual(calls.sort(), ["recovery 2026-10-19..2026-11-02", "sleep 2026-10-18..2026-11-01", "stats 2026-10-19T00:00:00..2026-11-01T23:59:59"]);
   assert.deepEqual([out.date, out.from, out.to, out.days], [DATE, FROM, "2026-11-01", 14]);
   assert.deepEqual(out.errors, []);
 
@@ -183,3 +183,32 @@ test("buildBaselines: days defaults to 28; days and date are validated before an
   assert.equal((await buildBaselines(client(), { date: DATE, days: 90 })).from, "2026-08-04");
   assert.equal((await buildBaselines(client(), { date: DATE, days: 14 })).from, FROM);
 });
+
+test("statsChunks: at most 28 days a piece, contiguous, covering the window exactly", () => {
+  assert.deepEqual(statsChunks("2026-10-01", "2026-10-28"), [{ from: "2026-10-01", to: "2026-10-28" }]);
+  assert.deepEqual(statsChunks("2026-08-15", "2026-11-12"), [
+    { from: "2026-08-15", to: "2026-09-11" },
+    { from: "2026-09-12", to: "2026-10-09" },
+    { from: "2026-10-10", to: "2026-11-06" },
+    { from: "2026-11-07", to: "2026-11-12" },
+  ]);
+});
+
+test("buildBaselines: steps over a 90-day window come from several requests and a boundary day is counted once", async () => {
+  const calls: string[] = [];
+  const stepsClient = {
+    listSleep: async () => [],
+    listRecovery: async () => [],
+    // like the real endpoint: every piece also returns the day after its end
+    getDailyStats: async (a: string, b: string) => {
+      calls.push(`${a.slice(0, 10)}..${b.slice(0, 10)}`);
+      const samples = [];
+      for (let d = a.slice(0, 10); d <= addDaysT(b.slice(0, 10), 1); d = addDaysT(d, 1)) samples.push({ TimeISO8601: `${d}T12:00:00+01:00`, Value: 1000 });
+      return [{ Name: "stepcount", Sources: [{ Samples: samples }] }];
+    },
+  } as any;
+  const out = await buildBaselines(stepsClient, { date: "2026-11-13", days: 90 });
+  assert.equal(calls.length, 4);
+  assert.deepEqual([out.metrics.steps.n, out.metrics.steps.median, out.metrics.steps.p75], [90, 1000, 1000], "no day doubled at a piece boundary");
+});
+const addDaysT = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
