@@ -52,6 +52,20 @@ test("fit: summarizeFit handles empty FIT", () => {
   assert.equal(s.sport, undefined);
   assert.equal(s.records_sample, null);
   assert.equal(s.laps, 0);
+  assert.equal(s.developer, null);
+});
+
+test("fit: summarizeFit lists SuuntoPlus developer fields when the FIT has them", () => {
+  const s = summarizeFit({
+    developer_data_ids: [{ developer_data_index: 0, application_id: [1, 2] }],
+    field_descriptions: [{ developer_data_index: 0, field_definition_number: 3, fit_base_type_id: 2, field_name: "Reps", units: "n" }],
+    records: [{ heart_rate: 100, Reps: 5 }],
+  } as any);
+  assert.deepEqual(s.developer, {
+    apps: [{ devIdx: 0, applicationId: "0102" }],
+    fields: [{ name: "Reps", units: "n", devIdx: 0, fieldNo: 3, baseType: 2 }],
+    devChannels: ["Reps"],
+  });
 });
 
 test("fit: summarizeFit picks middle record correctly", () => {

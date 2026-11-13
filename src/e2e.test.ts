@@ -179,6 +179,72 @@ test("e2e tools/list: compare_workout_to_plan is listed as read-only", async () 
   });
 });
 
+test("e2e get_workout_rest_profile: the clean fixture session, rests joined to the FIT's heart rate", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("get_workout_rest_profile", { workoutKey: CLEAN_KEY });
+    assert.equal(isError, false, text);
+    assert.ok(!text.includes("\n"), "compact JSON");
+    assert.ok(text.length < 8_000, `expected a small result, got ${text.length} B`);
+    const out = JSON.parse(text);
+    assert.equal(out.workoutKey, CLEAN_KEY);
+    assert.equal(out.status, "ok");
+    assert.equal(out.restMode, "countdown");
+    assert.equal(out.reliable, true);
+    assert.deepEqual(out.rests.map((r: any) => [r.exerciseN, r.exercise, r.set, r.actualDurationS]), [[1, "Back Squat", 1, 120], [1, "Back Squat", 2, 120], [2, "Bench Press", 1, 90], [2, "Bench Press", 2, 90], [3, "Seated Cable Row", 1, 60]]);
+    const first = out.rests[0]; // lap 3: HR falls from 138 to 101 over 123.4-243.4 s
+    assert.ok(first.peakHr >= 134 && first.peakHr <= 138, `peak ${first.peakHr}`);
+    assert.ok(first.peakAtS >= 0 && first.peakAtS <= 3, `peak at ${first.peakAtS} s`);
+    assert.ok(first.endHr >= 101 && first.endHr <= 104, `end ${first.endHr}`);
+    assert.ok(first.t20S !== null && first.t20S > 50 && first.t20S < 80, `t20 ${first.t20S}`);
+    assert.ok(first.coverage >= 0.99, `coverage ${first.coverage}`);
+    assert.deepEqual(out.perExercise.map((e: any) => e.name), ["Back Squat", "Bench Press", "Seated Cable Row"]);
+    assert.equal(out.alignment.workoutStartSource, "laps.startTime");
+    assert.equal(out.alignment.startSkewS, 0);
+    assert.deepEqual(out.developer.fields, [{ name: "rest_recovery", units: "bpm", devIdx: 0, fieldNo: 0, baseType: 2 }]);
+    assert.deepEqual(out.developer.devChannels, ["rest_recovery"]);
+  });
+});
+
+test("e2e get_workout_rest_profile: the plan is accepted and checked like compare_workout_to_plan", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("get_workout_rest_profile", { workoutKey: CLEAN_KEY, plan: fixture("clean-3ex.plan.json") });
+    assert.equal(isError, false, text);
+    assert.equal(JSON.parse(text).rests.length, 5);
+  });
+});
+
+test("e2e get_workout_rest_profile: invalid input is rejected before any request", async () => {
+  await withMcp(async (call) => {
+    for (const args of [{}, { workoutKey: "" }, { workoutKey: CLEAN_KEY, plan: [] }, { workoutKey: CLEAN_KEY, plan: [{ sets: 3 }] }]) {
+      const r = await call("get_workout_rest_profile", args);
+      assert.equal(r.isError, true, JSON.stringify(args));
+      assert.match(r.text, /Invalid arguments for get_workout_rest_profile/);
+    }
+    const malformed = await call("get_workout_rest_profile", { workoutKey: "abc" });
+    assert.equal(malformed.isError, true);
+    assert.match(malformed.text, /not a workout key/);
+  });
+});
+
+test("e2e tools/list: get_workout_rest_profile is listed as read-only", async () => {
+  await withMcp(async (_call, _names, toolDefs) => {
+    const tool = (await toolDefs()).find((t: any) => t.name === "get_workout_rest_profile");
+    assert.ok(tool, "listed");
+    assert.equal(tool.annotations.readOnlyHint, true);
+    assert.equal(tool.title, "Get workout rest recovery profile");
+    assert.match(tool.description, /Read-only\.$/);
+  });
+});
+
+test("e2e get_workout_fit: the summary carries the developer fields", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("get_workout_fit", { workoutKey: CLEAN_KEY });
+    assert.equal(isError, false, text);
+    const out = JSON.parse(text);
+    assert.deepEqual(out.developer.devChannels, ["rest_recovery"]);
+  });
+});
+
 test("e2e get_sleep / list_sleep: the night of a date, one row per sleep, longest revision", async () => {
   await withMcp(async (call) => {
     const night = JSON.parse((await call("get_sleep", { date: "2026-09-27" })).text);
@@ -472,6 +538,22 @@ test("e2e push_*_guide: simultaneous pushes are queued and each is read back fro
       assert.equal(ids.size, 6);
       const updated = JSON.parse((await call("push_workout_guide", { ...guidePushes[0][1], guideId: "guide0" })).text);
       assert.deepEqual([updated.id, updated.check], ["guide0", { verified: true }]);
+    },
+    { SUUNTO_APP_NAME: "app" },
+  );
+});
+
+test("e2e push_strength_guide: restTargetHr outside 41-200 is rejected by the schema, in range is accepted", async () => {
+  await withMcp(
+    async (call) => {
+      const ex = (restTargetHr: number) => ({ title: "G", date: "2026-10-29", exercises: [{ name: "Squat", detail: "80kg 3x5", sets: 3, restSec: 90, restTargetHr }] });
+      for (const bad of [40, 201, 120.5]) {
+        const r = await call("push_strength_guide", ex(bad));
+        assert.equal(r.isError, true, `${bad}: ${r.text}`);
+        assert.match(r.text, /restTargetHr/);
+      }
+      const ok = await call("push_strength_guide", ex(120));
+      assert.equal(ok.isError, false, ok.text);
     },
     { SUUNTO_APP_NAME: "app" },
   );

@@ -86,7 +86,7 @@ export function buildZip(files: { name: string; data: Buffer }[]): Buffer {
 
 // Minimal 8x8 solid-gray PNG — Guide API requires an icon.png but doesn't
 // need it to look like anything; watch UI doesn't render a per-guide icon.
-function buildIconPng(): Buffer {
+export function buildIconPng(): Buffer {
   const size = 300; // Guide API requires exactly 300x300
   const rowBytes = 1 + size * 3; // filter byte + RGB
   const raw = Buffer.alloc(rowBytes * size, 0);
@@ -98,7 +98,10 @@ function buildIconPng(): Buffer {
       raw[px] = raw[px + 1] = raw[px + 2] = 0x88;
     }
   }
+  return encodePng(raw, size);
+}
 
+function encodePng(raw: Buffer, size: number): Buffer {
   function chunk(type: string, data: Buffer): Buffer {
     const typeBuf = Buffer.from(type, "ascii");
     const len = Buffer.alloc(4);
@@ -126,6 +129,75 @@ function buildIconPng(): Buffer {
     chunk("IDAT", idat),
     chunk("IEND", Buffer.alloc(0)),
   ]);
+}
+
+// Blue (#2563EB) to violet (#7C3AED); both keep a white glyph clearly readable.
+const ICON_START = [37, 99, 235];
+const ICON_END = [124, 58, 237];
+
+// Olympic barbell, side view, as rounded rects mirrored around the icon
+// centre: [|dx| from, |dx| to, half height, corner radius]. Plates graduate
+// in size, largest next to the grip, 2-3 px apart; a small collar and the
+// sleeve tip follow, all on a thin bar that spans almost the full width.
+const BARBELL_RECTS: [number, number, number, number][] = [
+  [0, 142, 5, 0], // bar
+  [58, 78, 95, 8], // plate 1
+  [80, 94, 75, 7], // plate 2
+  [97, 109, 55, 6], // plate 3
+  [112, 120, 20, 3], // collar
+  [122, 142, 7, 7], // sleeve tip
+];
+const GRIP_HALF = 58; // knurled grip: |dx| < 58
+const KNURL_PITCH = 6;
+const KNURL_ALPHA = 0.55;
+
+// Signed distance (px, negative inside) to a rounded rect centred on the y axis, symmetric in x.
+function roundedRectDist(dx: number, dy: number, x0: number, x1: number, hh: number, r: number): number {
+  const cx = (x0 + x1) / 2;
+  const hw = (x1 - x0) / 2;
+  const qx = Math.abs(Math.abs(dx) - cx) - (hw - r);
+  const qy = Math.abs(dy) - (hh - r);
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+}
+
+// Strength guide list icon: blue to violet diagonal gradient with a white
+// barbell on top. Deterministic; filter 1 (sub) per row keeps the
+// smooth gradient small after deflate.
+export function buildStrengthIconPng(): Buffer {
+  const size = 300;
+  const [c0, c1] = [ICON_START, ICON_END];
+  const rowBytes = 1 + size * 3;
+  const raw = Buffer.alloc(rowBytes * size);
+  const row = new Uint8Array(size * 3);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const t = (x + y) / (2 * (size - 1));
+      const dx = x + 0.5 - size / 2;
+      const dy = y + 0.5 - size / 2;
+      let cover = 0;
+      for (const [a, b, hh, r] of BARBELL_RECTS) {
+        const d = roundedRectDist(dx, dy, a, b, hh, r);
+        cover = Math.max(cover, Math.min(1, Math.max(0, 0.5 - d)));
+      }
+      // Knurling: 2 px wide ticks every KNURL_PITCH px, 14 px tall, semi-transparent.
+      const adx = Math.abs(dx);
+      if (adx < GRIP_HALF) {
+        const k = (adx - KNURL_PITCH / 2) / KNURL_PITCH;
+        const d = roundedRectDist(Math.abs(k - Math.round(k)) * KNURL_PITCH, dy, 0, 2, 7, 0);
+        cover = Math.max(cover, KNURL_ALPHA * Math.min(1, Math.max(0, 0.5 - d)));
+      }
+      for (let c = 0; c < 3; c++) {
+        const bg = c0[c] + (c1[c] - c0[c]) * t;
+        row[x * 3 + c] = Math.round(bg + (255 - bg) * cover);
+      }
+    }
+    const start = y * rowBytes;
+    raw[start] = 1; // filter: sub
+    for (let i = 0; i < size * 3; i++) {
+      raw[start + 1 + i] = (row[i] - (i >= 3 ? row[i - 3] : 0)) & 0xff;
+    }
+  }
+  return encodePng(raw, size);
 }
 
 export interface GuideExercise {
@@ -363,6 +435,7 @@ export interface StrengthExercise {
   detail: string; // display string, e.g. "60kg 3x10" — shown on set steps and (unless plates is given) on the prep screen before the exercise
   sets: number; // 1-100
   restSec: number; // rest between sets within this exercise. Not applied between exercises — that's the self-paced prep stopwatch
+  restTargetHr?: number; // bpm 41-200 — adds a targetHeartRate gauge (40..restTargetHr) to this exercise's between-set rest steps (both restModes). Not on prep/set steps.
   plates?: string; // per-side plate breakdown for barbell exercises, e.g. "2x20+1x5/side" — shown on the prep screen INSTEAD of detail (that's the moment you're loading the bar, not mid-set). Omit for non-barbell exercises (dumbbell, machine, bodyweight, cable) — detail is shown there instead. The math is done by the caller, not this tool.
 }
 
@@ -391,12 +464,58 @@ export interface StrengthPlan {
   lapGranularity?: StrengthLapGranularity; // default "perSet"
 }
 
+// Step titles are cropped to 13 chars on the watch (same as interval labels).
+// "<exercise>/<N> - <set>/<S>" is 13 chars at 10 of 12 exercises with 10
+// sets; 3-digit set counts (up to 100 allowed) get cropped by truncate().
+function strengthTitle(exIndex: number, totalExercises: number, set?: number | "REST", sets?: number): string {
+  const e = `${exIndex + 1}/${totalExercises}`;
+  if (set === undefined) return e;
+  return truncate(set === "REST" ? `${e} REST` : `${e} - ${set}/${sets}`, 13);
+}
+
+// Two-line text field (line1 \n line2) under the 40-char limit for fields
+// that share a step. The line named by `cut` is the one shortened (the
+// exercise name); the other is capped at 36 so the name keeps 3+ chars, the
+// least compare.ts can still link to a plan entry.
+function twoLineText(line1: string, line2: string, cut: "first" | "second"): string {
+  const max = TEXT_WITH_SIBLING_FIELDS_MAX;
+  const otherMax = max - 4;
+  if (cut === "first") {
+    const keep = truncate(line2, otherMax);
+    return `${truncate(line1, max - 1 - keep.length)}\n${keep}`;
+  }
+  const keep = truncate(line1, otherMax);
+  return `${keep}\n${truncate(line2, max - 1 - keep.length)}`;
+}
+
+// Popup when a set starts. The last set of an exercise announces what comes
+// next (the following exercise's name) instead of repeating this one.
+// Notifications are not part of lap labels (those come from step text).
+function setNotification(
+  ex: StrengthExercise,
+  set: number,
+  nextEx: StrengthExercise | undefined,
+): { title: string; text: string } {
+  if (set < ex.sets) return { title: `SET ${set}/${ex.sets}`, text: truncate(`${ex.name} - ${ex.detail}`, 54) };
+  return {
+    title: "LAST SET",
+    text: truncate(nextEx ? `Next: ${nextEx.name}` : `${ex.name} - ${ex.detail}`, 54),
+  };
+}
+
 function buildRestStep(
   restSec: number,
   nextFieldText: string,
   stepTitle: string,
   restMode: StrengthRestMode,
+  restTargetHr?: number,
 ): Record<string, unknown> {
+  // Optional HR gauge straight after the live HR (before the timer), same
+  // shape as buildIntervalGuideJson's targetHeartRate.
+  const hrFields: Record<string, unknown>[] = [{ type: "heartRate", title: "HR" }];
+  if (restTargetHr !== undefined) {
+    hrFields.push({ type: "targetHeartRate", value: Math.round((40 + restTargetHr) / 2), min: 40, max: restTargetHr });
+  }
   // HR first (guaranteed the best slot/most likely to actually render — a
   // text field ahead of it was observed on-device to push HR off screen
   // entirely, not just get cropped as the docs describe for long text),
@@ -406,7 +525,7 @@ function buildRestStep(
       type: "fields",
       title: stepTitle,
       fields: [
-        { type: "heartRate", title: "HR" },
+        ...hrFields,
         { type: "stepDurationCountdown", value: restSec },
         { type: "text", value: truncate(nextFieldText, TEXT_WITH_SIBLING_FIELDS_MAX) },
       ],
@@ -417,7 +536,7 @@ function buildRestStep(
     type: "fields",
     title: stepTitle,
     fields: [
-      { type: "heartRate", title: "HR" },
+      ...hrFields,
       { type: "duration", window: "step" },
       { type: "text", value: truncate(`${restSec}s target · ${nextFieldText}`, TEXT_WITH_SIBLING_FIELDS_MAX) },
     ],
@@ -443,11 +562,11 @@ function buildPrepStep(
   const loadInfo = ex.plates ?? ex.detail;
   return {
     type: "fields",
-    title: `${exIndex + 1}/${totalExercises}`,
+    title: strengthTitle(exIndex, totalExercises),
     fields: [
       { type: "heartRate", title: "HR" },
       { type: "duration", window: "step" },
-      { type: "text", value: truncate(`${loadInfo}\n${ex.name}`, TEXT_WITH_SIBLING_FIELDS_MAX) },
+      { type: "text", value: twoLineText(loadInfo, ex.name, "second") },
     ],
     transitions: [{ condition: { type: "manualLap" } }],
   };
@@ -473,12 +592,12 @@ function buildPrepStep(
 // - lapGranularity "perExercise": one work step per exercise after its
 //   prep, like buildGuideJson; no between-set rests, so restMode is moot.
 //
-// Set counter: set steps are titled "2/3" and so are the rests after them
-// (rest after set 2 of 3, with "Next: set 3/3" spelled out in its text);
-// prep steps carry the exercise counter ("4/7") instead.
+// Titles carry the counters: prep "4/7", set "4/7 - 2/3", rest "4/7 REST"
+// (its text spells out "Next: set 3/3"). perExercise work steps are "4/7". Lap
+// labels are built from step TEXT, never from titles, so titles are free.
 //
-// Field layout: 2 fields on the work step, 3 on rest/prep (well inside the
-// 4-5 max), ordered by priority — the schema gives the first field the
+// Field layout: 2 fields on the work step, 3 on prep and on rest (4 on a rest
+// with restTargetHr), well inside the 4-5 max, ordered by priority — the schema gives the first field the
 // best placement/biggest size. heartRate is always first: confirmed
 // on-device that a text field ahead of it can hide it entirely rather than
 // just cropping (unlike the docs' description of long text cropping other
@@ -489,6 +608,11 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
   const exercises = plan.exercises;
   const steps: Record<string, unknown>[] = [];
   const totalExercises = exercises.length;
+  for (const ex of exercises) {
+    if (ex.restTargetHr !== undefined && (!Number.isInteger(ex.restTargetHr) || ex.restTargetHr < 41 || ex.restTargetHr > 200)) {
+      throw new Error(`Exercise "${ex.name}": restTargetHr must be an integer from 41 to 200 bpm (got ${ex.restTargetHr}).`);
+    }
+  }
   const restMode = plan.restMode ?? "countdown";
   const lapGranularity = plan.lapGranularity ?? "perSet";
 
@@ -498,10 +622,10 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
     if (lapGranularity === "perExercise") {
       steps.push({
         type: "fields",
-        title: `${exIndex + 1}/${totalExercises}`,
+        title: strengthTitle(exIndex, totalExercises),
         fields: [
           { type: "heartRate", title: "HR" },
-          { type: "text", value: truncate(`${ex.name}\n${ex.detail}`, TEXT_WITH_SIBLING_FIELDS_MAX) },
+          { type: "text", value: twoLineText(ex.name, ex.detail, "first") },
         ],
         notification: { title: "GO", text: truncate(ex.name, 54) },
         transitions: [{ condition: { type: "manualLap" } }],
@@ -513,16 +637,16 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
       const isLastSet = set === ex.sets;
       const step: Record<string, unknown> = {
         type: "fields",
-        title: `${set}/${ex.sets}`,
+        title: strengthTitle(exIndex, totalExercises, set, ex.sets),
         // HR first — a text field ahead of it was observed on-device to
         // hide it entirely, not just crop it as the docs describe for long
         // text (see buildRestStep). Name+detail combined into one 2-line
         // text field (\n) instead of two separate fields.
         fields: [
           { type: "heartRate", title: "HR" },
-          { type: "text", value: truncate(`${ex.name}\n${ex.detail}`, TEXT_WITH_SIBLING_FIELDS_MAX) },
+          { type: "text", value: twoLineText(ex.name, ex.detail, "first") },
         ],
-        notification: { title: "SET", text: truncate(ex.name, 54) },
+        notification: setNotification(ex, set, exercises[exIndex + 1]),
         transitions: [{ condition: { type: "manualLap" } }],
       };
       // Set 1 follows a prep stopwatch that ended on a lap press; later
@@ -532,7 +656,13 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
 
       if (!isLastSet) {
         steps.push(
-          buildRestStep(ex.restSec, `Next: set ${set + 1}/${ex.sets}`, `${set}/${ex.sets}`, restMode),
+          buildRestStep(
+            ex.restSec,
+            `Next: set ${set + 1}/${ex.sets}`,
+            strengthTitle(exIndex, totalExercises, "REST"),
+            restMode,
+            ex.restTargetHr,
+          ),
         );
       }
     }
@@ -547,7 +677,8 @@ export function buildStrengthGuideJson(plan: StrengthPlan, ownerAppName: string)
   return {
     type: "sequence",
     name: plan.title,
-    description: `${totalExercises} exercise${totalExercises === 1 ? "" : "s"}`,
+    // No documented max for description; 60 is a conservative guess (unverified on-device).
+    description: truncate(exercises.map((e) => e.name).join(" · "), 60),
     shortDescription: truncate(plan.title, 23),
     localDate: plan.date,
     usage: "workout",
@@ -568,6 +699,6 @@ export function buildStrengthGuideZip(plan: StrengthPlan, ownerAppName: string):
   return buildZip([
     { name: "manifest.json", data: Buffer.from(JSON.stringify(manifest), "utf8") },
     { name: "guide.json", data: Buffer.from(JSON.stringify(guide), "utf8") },
-    { name: "icon.png", data: buildIconPng() },
+    { name: "icon.png", data: buildStrengthIconPng() },
   ]);
 }
