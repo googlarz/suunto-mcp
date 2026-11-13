@@ -185,9 +185,9 @@ test("truncation: a set label of raw length 40 (one or two parts) matches the lo
   assert.equal(out.exercises[0].plan, 0, "raw length 40 with two parts: the name may be cut");
   assert.deepEqual(out.deviations, []);
 
-  const short = table([["x | " + name, 60], [`${name} | ${"B".repeat(19)}`, 30], DONE]);
+  const short = table([["x | " + name, 60], [`${name} | ${"B".repeat(18)}`, 30], DONE]);
   const uncut = compareWorkout(short, [{ name: `${name} Extended` }]);
-  assert.equal(uncut.exercises[0].plan, null, "raw length 39: not cut, no prefix matching");
+  assert.equal(uncut.exercises[0].plan, null, "raw length 38: not cut, no prefix matching");
   assert.deepEqual(uncut.deviations.map((d) => d.code), ["extra-exercise", "missing-exercise"]);
 });
 
@@ -357,4 +357,15 @@ test("size: a 35-lap perSet session (17 sets) serialises below 4,000 bytes", () 
   assert.equal(t.lapCount, 35);
   const text = JSON.stringify(compareWorkout(t));
   assert.ok(text.length < 4_000, `got ${text.length} B`);
+});
+
+test("compareWorkout: a name cut right after a space (label one short of the cap) still matches its plan entry", () => {
+  // "Seated Cable Row Wide Grip Slow" + a 16-char detail: the name is cut to 23 chars, ending in a space
+  const ex = { name: "Seated Cable Row Wider Grip Slow", detail: "40kg 3x12 tempo!", sets: 2, restSec: 60 };
+  assert.equal(ex.name.slice(0, 23).endsWith(" "), true, "the cut falls on a space");
+  const cutName = ex.name.slice(0, 23).trim();
+  const t = table([[`${ex.detail} | ${cutName}`, 60], [`${cutName} | ${ex.detail}`, 30], ["Next: set 2/2", 60], [`${cutName} | ${ex.detail}`, 30], DONE]);
+  const out = compareWorkout(t, [{ name: ex.name, sets: 2 }]);
+  assert.equal(out.exercises[0].plan, 0);
+  assert.deepEqual(out.deviations.filter((d) => d.basis === "plan"), []);
 });

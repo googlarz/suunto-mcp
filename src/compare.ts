@@ -70,6 +70,9 @@ export interface Comparison {
 const SET_REST = /^(?:(\d+)s target\s*·\s*)?Next: set (\d+)\/(\d+)$/;
 // Longest text a label line can carry before guide-zip.ts cuts it (TEXT_WITH_SIBLING_FIELDS_MAX).
 const STRENGTH_CAP = 40;
+// A name cut right after a space loses that space in cleanLabel, so a cut
+// strength label can also be one character short of the cap.
+const STRENGTH_CUT_MIN = STRENGTH_CAP - 1;
 const WORKOUT_CAP = 54;
 // Heuristic thresholds (§3.8). Checked against three real sessions; revisit with more.
 const SHORT_SET_RATIO = 0.25;
@@ -344,7 +347,7 @@ export function compareWorkout(laps: ReturnType<typeof shapeLaps>, plan?: PlanIt
       const p = parts(e.label);
       name = p[0];
       detail = p.slice(1).join(" | ") || null;
-      cut = format === "workout" ? p[0].length >= WORKOUT_CAP : rawLen(e.label) >= STRENGTH_CAP;
+      cut = format === "workout" ? p[0].length >= WORKOUT_CAP : rawLen(e.label) >= STRENGTH_CUT_MIN;
     } else if (format === "workout") {
       const p = parts(e.prep!.label);
       name = nextName(e.prep!.label);
@@ -355,7 +358,7 @@ export function compareWorkout(laps: ReturnType<typeof shapeLaps>, plan?: PlanIt
       const p = parts(e.prep!.label);
       name = p[p.length - 1];
       detail = null;
-      cut = rawLen(e.prep!.label) >= STRENGTH_CAP;
+      cut = rawLen(e.prep!.label) >= STRENGTH_CUT_MIN;
     }
 
     let plannedSets: number | null;
