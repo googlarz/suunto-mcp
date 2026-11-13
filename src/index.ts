@@ -38,9 +38,14 @@ import { buildRestProfile } from "./rest-profile.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
 import { buildTrainingLoad } from "./training-load.js";
 import { buildBaselines } from "./baselines.js";
+import { buildExerciseHistory } from "./history.js";
+import { logSession } from "./journal.js";
+import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoWriteResult, isDemo, markDemo } from "./demo.js";
 
 const cfg = loadConfig();
-const suunto = new SuuntoClient(cfg);
+// SUUNTO_DEMO=1: synthetic data, no credentials, no network (see demo.ts).
+const demo = isDemo();
+const suunto = demo ? new DemoClient() : new SuuntoClient(cfg);
 
 // Read the version from package.json instead of hardcoding it here — a
 // hardcoded string silently drifts from the real published version on
@@ -54,7 +59,7 @@ const pkgVersion: string = JSON.parse(
 // ListResources) succeed without credentials, which catalogs like
 // glama.ai use to verify the server boots correctly.
 function ensureReady() {
-  assertCredentials(cfg);
+  if (!demo) assertCredentials(cfg);
 }
 
 // Far above any real route (a day-long track is well under 1 MB); keeps a mistaken path from reading a huge file.
@@ -62,7 +67,7 @@ const MAX_GPX_BYTES = 10_000_000;
 
 const server = new Server(
   { name: "suunto-mcp", version: pkgVersion },
-  { capabilities: { tools: {}, resources: {}, prompts: {} } },
+  { capabilities: { tools: {}, resources: {}, prompts: {} }, ...(demo ? { instructions: DEMO_INSTRUCTIONS } : {}) },
 );
 
 server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -72,16 +77,19 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
   ensureReady();
   const contents = await readResource(req.params.uri, suunto);
-  return { contents: [contents] };
+  return { contents: [demo ? { ...contents, text: markDemo(contents.text) } : contents] };
 });
 
 server.setRequestHandler(ListPromptsRequestSchema, async () => ({
   prompts: PROMPTS,
 }));
 
-server.setRequestHandler(GetPromptRequestSchema, async (req) =>
-  getPrompt(req.params.name, req.params.arguments),
-);
+server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+  const prompt = getPrompt(req.params.name, req.params.arguments);
+  if (!demo) return prompt;
+  const note = `${DEMO_NOTICE} Say so in your answer: every number below comes from generated data.\n\n`;
+  return { ...prompt, messages: prompt.messages.map((m) => ({ ...m, content: { ...m.content, text: note + m.content.text } })) };
+});
 
 const toolDefs = [
   {
@@ -325,6 +333,70 @@ const toolDefs = [
               name: { type: "string", minLength: 1, description: "Exercise name as pushed to the guide, e.g. 'Back Squat'." },
               sets: { type: "integer", minimum: 1, maximum: 100, description: "Planned number of sets." },
               restSec: { type: "integer", minimum: 1, description: "Planned rest between sets, in seconds." },
+            },
+            required: ["name"],
+          },
+        },
+      },
+      required: ["workoutKey"],
+    },
+  },
+  {
+    name: "get_exercise_history",
+    description:
+      "Progression of strength exercises across guided gym sessions (push_strength_guide / push_workout_guide): load, sets, rest and heart-rate recovery of the same exercise week after week. Each session is read once with the same logic as get_workout_laps, compare_workout_to_plan and get_workout_rest_profile, and the small derived result is cached on disk (~/.suunto-mcp/cache/, SUUNTO_CACHE=off disables it), so repeat calls are cheap. It writes nothing but that cache and never changes anything at Suunto. Looks at the `weeks` weeks (default 8, max 26) ending at `date` (default today; a session that started less than 24 h ago is read but not cached). Reads at most 8 sessions not yet cached per call (two requests each, newest first); the result's `pending` is how many are still unread: CALL AGAIN until pending is 0 before drawing conclusions from the history, unless a note says calling again will not help (cache not writable, sessions failing): then say so instead of looping. A session that fails to load is skipped and listed in `errors`. IMPORTANT: the watch records only the guide's TEXT, so weights and reps are what was PLANNED, not measured; a log_session entry for the session replaces the label's weight with the logged one (loadSource 'journal') and is attached as `journal`. Sessions whose mapping or rest profile is unreliable are included with reliable false. Without `name`: { from, to, sessions (guided sessions read), exercises: [{ name, sessions, lastDate, lastDetail }] (most sessions first; a name the guide cut to 40 characters is grouped with its longer form only when that is certain: exactly one longer name and at least 12 characters, otherwise they stay separate and a note lists them), pending, errors, notes }. With `name`: { name, from, to, sessions: { cols, rows } (oldest first; cols = date, workoutKey, detail, kg (the first 'NNkg' in the label text, or the top journal set's weight; null when there is none, never guessed), loadSource ('label' | 'journal'), setsDone, plannedSets, restS (the guide's rest), restEndHr / restDropTotal / restT20S / restCoverage (heart-rate recovery of the rest after set 1 from the FIT's record-level HR, null when missing: end-of-rest HR, peak minus end, seconds after the peak to fall 20 bpm, share of the rest's seconds with an HR sample), deviations (compare_workout_to_plan codes for that exercise), reliable, journal), summary: { sessions, firstLoadKg, lastLoadKg, restEndHrMedian (median end-of-rest HR after set 1 over reliable sessions: usable as push_strength_guide's restTargetHr) }, pending, errors, notes }. `name` is matched ignoring case, accents and punctuation, exactly or, for a name the guide may have cut (12+ characters), as a prefix of the given name. Use the names from the index (or compare_workout_to_plan). Writes only the local cache.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", minLength: 1, maxLength: 200, description: "Exercise name, e.g. 'Back Squat'. Omit for an index of all exercises in the range." },
+        weeks: { type: "integer", minimum: 1, maximum: 26, description: "How many weeks the history covers, ending at `date` (default 8)." },
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-20"],
+          description: "The last local calendar day of the range, YYYY-MM-DD (default today).",
+        },
+      },
+    },
+  },
+  {
+    name: "log_session",
+    description:
+      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each. Output: { saved, replaced, entries }.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        workoutKey: { type: "string", minLength: 24, maxLength: 24, pattern: "^[0-9a-fA-F]{24}$", description: "The 24-character workoutKey of the session, from list_workouts or get_daily_snapshot." },
+        note: { type: "string", maxLength: 500, description: "How the session went overall, in the user's words, e.g. 'all as planned except squat set 3'." },
+        feeling: { type: "string", maxLength: 500, description: "How the user felt, e.g. 'tired', 'strong'." },
+        exercises: {
+          type: "array",
+          maxItems: 40,
+          description: "Per exercise what was actually done. Leave out exercises that went as planned.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              name: { type: "string", minLength: 1, maxLength: 500, description: "Exercise name as in get_exercise_history, e.g. 'Back Squat'." },
+              sets: {
+                type: "array",
+                maxItems: 20,
+                description: "The sets in order, as done.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    reps: { type: "integer", minimum: 0, maximum: 200, description: "Reps done." },
+                    kg: { type: "number", minimum: 0, maximum: 1000, description: "Weight used, in kg." },
+                    rpe: { type: "number", minimum: 1, maximum: 10, description: "Rate of perceived exertion, 1-10." },
+                  },
+                },
+              },
+              note: { type: "string", maxLength: 500, description: "A note on this exercise, e.g. 'left knee felt tight'." },
             },
             required: ["name"],
           },
@@ -883,6 +955,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // through to the API layer instead of being rejected up front.
     const errors = validateAgainstSchema(tool.inputSchema, a);
     if (errors.length) return text(`Invalid arguments for ${name}: ${errors.join("; ")}`, true);
+    // Demo mode writes nothing: every tool that is not read-only just says what it would do.
+    if (demo && !tool.annotations.readOnlyHint) return text(demoWriteResult(name));
     ensureReady();
     switch (name) {
       case "list_workouts": {
@@ -931,6 +1005,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const parsed = await parseFit(await suunto.getWorkoutFit(a.workoutKey));
         return text(JSON.stringify(buildRestProfile(shapeLaps(data), parsed, a.plan)));
       }
+      case "get_exercise_history":
+        return text(JSON.stringify(await buildExerciseHistory(suunto, { name: a.name, weeks: a.weeks, date: a.date })));
+      case "log_session":
+        return text(JSON.stringify(await logSession(a)));
       case "export_workout_gpx": {
         const bytes = await suunto.getWorkoutGpx(a.workoutKey);
         return text(new TextDecoder().decode(bytes));
@@ -1110,13 +1188,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 });
 
+// Every tool result passes through here, so this is the one place demo mode marks
+// its output (errors stay as they are: they carry no data).
 function text(s: string, isError = false) {
   return {
-    content: [{ type: "text", text: s }],
+    content: [{ type: "text", text: demo && !isError ? markDemo(s) : s }],
     ...(isError ? { isError: true } : {}),
   };
 }
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("suunto-mcp ready on stdio");
+console.error(demo ? "suunto-mcp ready on stdio — DEMO MODE: synthetic data, no credentials, no network" : "suunto-mcp ready on stdio");

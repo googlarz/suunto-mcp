@@ -3,6 +3,7 @@ import "./env.js";
 import { loadConfig } from "./config.js";
 import { loadTokens } from "./storage.js";
 import { SuuntoClient } from "./api.js";
+import { isDemo } from "./demo.js";
 import { SuuntoAuthError, SuuntoEmptyResponseError, SuuntoForbiddenError, SuuntoNotFoundError } from "./errors.js";
 
 interface Check {
@@ -22,6 +23,16 @@ async function run(): Promise<Check[]> {
     status: major >= 20 ? "ok" : "fail",
     detail: `${process.versions.node} (require ≥ 20)`,
   });
+
+  // Demo mode needs no credentials and makes no network call.
+  if (isDemo()) {
+    checks.push({
+      name: "Demo mode",
+      status: "ok",
+      detail: "SUUNTO_DEMO=1: the server runs on synthetic data; credential, network and API checks skipped",
+    });
+    return checks;
+  }
 
   // 2. Env vars
   const missing = (

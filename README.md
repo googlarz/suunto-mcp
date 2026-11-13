@@ -90,6 +90,30 @@ The setup has three parts:
 
 ---
 
+### Try it without an account (demo mode)
+
+Suunto takes 3–4 weeks to approve API access. You don't have to wait to see what this does: with `SUUNTO_DEMO=1` the server runs on realistic **synthetic** data (about 8 weeks, ending today) and needs no Suunto account, no credentials and no network. Only Node.js is required. Add this to the `mcpServers` block of the Claude Desktop config (the file from Step 9), then restart Claude:
+
+```json
+{
+  "mcpServers": {
+    "suunto-demo": {
+      "command": "npx",
+      "args": ["-y", "suunto-mcp"],
+      "env": { "SUUNTO_DEMO": "1" }
+    }
+  }
+}
+```
+
+What works: every read tool and the four prompts (`suunto-morning`, `suunto-weekly`, `suunto-gym-today`, `suunto-gym-review`) — workouts with guide-labelled gym laps (three sessions a week, one of them with a planted deviation for `compare_workout_to_plan`), one or two runs a week with TSS, nightly sleep with stages, score and HRV plus the odd nap, recovery every 30 minutes, daily steps and energy, two routes, three guides, and a small FIT file with heart rate for `get_workout_fit` and `get_workout_rest_profile`. Training load, baselines and snapshots are computed from that data by the normal code.
+
+What does not: anything that writes (`upload_workout`, `upload_route`, `push_*_guide`, `delete_guide`, `generate_daily_digest`, `log_session`) writes nothing and only returns a short note on what it would do with real credentials. `get_upload_status` has no uploads to find.
+
+You can't mistake demo data for real data: every tool result is JSON with a top-level `"demo": true` (a result that is a list, or text such as a GPX file, comes back as `{ "demo": true, "data": … }`), the server's instructions and the prompts say the data is synthetic, and the startup line says DEMO MODE. Errors are unchanged. `npm run doctor` with `SUUNTO_DEMO=1` just reports that demo mode is on. When your API access arrives, remove `SUUNTO_DEMO` and follow the setup below. Demo mode applies to the MCP server only, not to the terminal commands.
+
+---
+
 ### Part 1: Register with Suunto's developer portal (~5 min to submit, then wait 3–4 weeks)
 
 Suunto has a free developer portal called **apizone** where you register apps that can access your data. You'll create an account, subscribe to the data plan, and register a small "app" — don't worry, there's nothing to build, it's just a name and a password you make up.
@@ -484,15 +508,25 @@ Set these in the `env` block of your Claude config (or in `.env` for terminal co
 | Variable | Needed | What it does |
 |---|---|---|
 | `SUUNTO_CLIENT_ID`, `SUUNTO_CLIENT_SECRET`, `SUUNTO_SUBSCRIPTION_KEY` | yes | Your apizone credentials |
+| `SUUNTO_DEMO` | no | `1` runs the server on synthetic data with no credentials and no network; see "Try it without an account" |
 | `SUUNTO_APP_NAME` | to push guides | Exact app name registered on apizone |
 | `SUUNTO_REDIRECT_URI` | no | OAuth callback; default `http://localhost:8421/callback` (must match apizone) |
 | `SUUNTO_TOKEN_PATH` | no | Token file; default `~/.suunto-mcp/tokens.json` |
 | `SUUNTO_TOKEN_STORAGE` | no | `keychain` to store tokens in the OS keychain |
 | `SUUNTO_NO_BROWSER` | no | Don't open a browser during pairing; copy the URL yourself |
 | `SUUNTO_DIGEST_HISTORY_PATH`, `SUUNTO_DIGEST_AVERAGES_PATH` | no | Where the daily digest writes |
+| `SUUNTO_CACHE_DIR`, `SUUNTO_CACHE` | no | Folder of `get_exercise_history`'s cache (default `~/.suunto-mcp/cache/`); `SUUNTO_CACHE=off` turns the cache off |
+| `SUUNTO_JOURNAL_PATH` | no | The `log_session` journal file; default `~/.suunto-mcp/journal.json` |
 | `SUUNTO_WEBHOOK_SECRET`, `SUUNTO_WEBHOOK_HOST`, `SUUNTO_WEBHOOK_LOG`, `SUUNTO_WEBHOOK_ALLOW_UNSIGNED`, `PORT` | webhook only | See the Webhooks section |
 
 ---
+
+## Local files
+
+Besides the tokens, suunto-mcp keeps these on your computer (all under `~/.suunto-mcp/` unless you move them with the variables above; folders `0700`, files `0600`):
+
+- `cache/<workoutKey>.json` — what `get_exercise_history` derived from a finished guided session (exercises, loads, sets, rest recovery; a few KB, never the raw FIT file). Sessions under 24 hours old are not cached. Safe to delete at any time: it is rebuilt on the next call (`rm -rf ~/.suunto-mcp/cache`). `SUUNTO_CACHE=off` stops it being read or written.
+- `journal.json` — what you told `log_session`. This is your own record, nothing rebuilds it: delete it (`rm -f ~/.suunto-mcp/journal.json`) only if you want it gone.
 
 ## Disconnecting
 
@@ -503,7 +537,7 @@ To fully remove access:
    ```bash
    rm -f ~/.suunto-mcp/tokens.json
    ```
-   If you used `SUUNTO_TOKEN_STORAGE=keychain`, delete the "suunto-mcp" entry in your system keychain instead. The daily digest also keeps `~/.suunto-mcp/averages.json` and `SUUNTO_HISTORY.md` — delete them too if you want the health data gone.
+   If you used `SUUNTO_TOKEN_STORAGE=keychain`, delete the "suunto-mcp" entry in your system keychain instead. The daily digest also keeps `~/.suunto-mcp/averages.json` and `SUUNTO_HISTORY.md`, `get_exercise_history` keeps `~/.suunto-mcp/cache/` and `log_session` keeps `~/.suunto-mcp/journal.json` — delete them too if you want the health data gone (`rm -rf ~/.suunto-mcp/cache ~/.suunto-mcp/journal.json`).
 3. Remove the `"suunto"` block from your Claude config and restart Claude.
 
 ---
@@ -635,6 +669,8 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `get_workout_laps` | Lap-by-lap table for one workout: time, heart rate, calories and the guide step of each lap — the way to read back a guided gym session set by set; it also reports when the table looks unreliable (a missing or doubled lap, no heart rate) |
 | `compare_workout_to_plan` | Reads a guided gym session back against its plan: maps the laps to exercises, sets and rests and lists deviations (missing or extra sets and exercises, short or long sets, rests off target, laps outside the guide), each marked with what it rests on (the labels, your plan, or a heuristic). Pass the exercises array you pushed as `plan` to also check order, set counts and rest targets. With restMode `countdown` rest overruns are not measurable. Read-only |
 | `get_workout_rest_profile` | How the heart rate recovered during each rest of a guided gym session. Reads the FIT file's record-level HR and joins it to the guide's laps (exercise, set), so it works with restMode `countdown`, where the rest lap always lasts exactly its target. Per rest: peak HR (smoothed over 3 samples, searched from 15 s before the rest to 30 s into it, because optical HR lags 20–30 s), HR at the end, total drop, seconds after the peak to fall 10, 20 and 30 bpm, bpm per minute over the first minute, and how many seconds have an HR sample; plus medians per exercise. Also lists the SuuntoPlus app's developer fields found in the FIT (`get_workout_fit` shows them too). The rest windows are placed on the FIT timeline by the workout start time; not yet checked against a real workout. Optional `plan` as for `compare_workout_to_plan`. Read-only |
+| `get_exercise_history` | Progression of strength exercises across guided sessions: for one exercise (`name`) or an index of all of them, per session the load (the first `NNkg` in the guide's text, or the weight you logged), sets done against planned, the guide's rest and the heart-rate recovery after set 1 (end-of-rest HR, drop, seconds to fall 20 bpm), plus a median end-of-rest HR you can use as `push_strength_guide`'s `restTargetHr`. `weeks` 1–26 (default 8) ending at `date`. Weights and reps are what the guide *planned*, the watch does not record them; `log_session` corrects that. Each session is read once and its small derived result cached locally; at most 8 uncached sessions are read per call, so the answer says how many are `pending` — call again until 0, unless a note says calling again will not help (the cache folder is not writable, or sessions keep failing). Names the guide cut to 40 characters are grouped with their longer form only when that is certain, otherwise they stay separate and a note lists them. Writes only the local cache (see *Local files*), never anything at Suunto |
+| `log_session` | Records what you say actually happened in a session (reps, weight, RPE, notes per exercise) in a local journal file. One entry per workout; logging the same workout again replaces it and returns the old entry. A call with no note, no feeling and no exercises is refused (`nothing to log`), and unknown fields (such as `weight`; use `kg` inside a set) are refused with an error naming the field. `get_exercise_history` shows it and uses its weights. Never contacts Suunto |
 | `get_workout_fit` | Raw FIT file decoded to structured data (large — `full: true` is about 550 KB for a strength session) |
 | `get_workout_samples` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it; use `get_workout_fit` |
 | `export_workout_gpx` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it |

@@ -4,7 +4,7 @@
 // readOnlyHint tools as safe in plan mode and for concurrent calls, and
 // clients may ask before running destructive ones.
 //
-// Every tool talks to Suunto's cloud, so openWorldHint is true throughout.
+// Every tool talks to Suunto's cloud, so openWorldHint is true throughout, except log_session (local file only).
 export interface ToolAnnotations {
   readOnlyHint: boolean;
   destructiveHint?: boolean;
@@ -29,6 +29,10 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_workout_laps: { title: "Get workout laps", annotations: READ },
   compare_workout_to_plan: { title: "Compare workout to plan", annotations: READ },
   get_workout_rest_profile: { title: "Get workout rest recovery profile", annotations: READ },
+  // Read-only as far as the user's data goes: its one write is a rebuildable local cache of derived results.
+  get_exercise_history: { title: "Get exercise history across sessions", annotations: READ },
+  // Writes only the local journal file; the same key again REPLACES that entry (hence destructive); never contacts Suunto, hence not openWorld.
+  log_session: { title: "Log what actually happened in a session", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },
