@@ -6,10 +6,10 @@
 // guide's text, so they are what was planned unless the journal (journal.ts) says otherwise.
 import type { SuuntoClient } from "./api.js";
 import { dayFetchBounds, localDate, workoutDate } from "./api.js";
-import { cacheEnabled, readCache, writeCache } from "./cache.js";
+import { MIN_AGE_MS, cacheDir, cacheEnabled, readCache, writeCache } from "./cache.js";
 import { STRENGTH_CUT_MIN, WORKOUT_CAP, compareWorkout, norm } from "./compare.js";
 import { parseFit, type ParsedFit } from "./fit.js";
-import { loadJournal, type JournalEntry } from "./journal.js";
+import { loadJournal, validEntries, type JournalEntry } from "./journal.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 import { buildRestProfile } from "./rest-profile.js";
 import { isValidCalendarDate } from "./schema-validate.js";
@@ -19,6 +19,9 @@ export const DEFAULT_WEEKS = 8;
 export const MAX_WEEKS = 26;
 // Uncached sessions read per call (two requests each): keeps one call inside Suunto's rate limit.
 export const MAX_FETCH = 8;
+// A name the guide cut keeps most of its text: shorter than this it is too likely to be a whole name that
+// merely starts another ('Squat' / 'Squat Jump'), and is never folded into a longer one.
+export const MIN_CUT_NAME = 12;
 const WORKOUT_LIMIT = 400;
 const ERROR_MAX = 200;
 
@@ -49,10 +52,12 @@ export interface WorkoutRecord {
 }
 
 // The first "<number>kg" in a detail text: "100kg 3x5" -> 100, "2x20kg 3x8/leg" -> 20, "62,5kg" -> 62.5.
-// null when there is none ("RPE6 8-12", "BW 3x15"): a weight is never guessed.
+// null when there is none ("RPE6 8-12", "BW 3x15") or when the weight is added to bodyweight
+// ("BW+10kg 3x8"): a weight is never guessed.
 export function parseLoadKg(detail: string | null): number | null {
   const m = detail === null ? null : /(?<![\d.,])(\d+(?:[.,]\d+)?)\s*kg/i.exec(detail);
-  return m ? Number(m[1].replace(",", ".")) : null;
+  if (m === null || /\bBW\b|bodyweight/i.test(detail!.slice(0, m.index))) return null;
+  return Number(m[1].replace(",", "."));
 }
 
 const median = (xs: number[]): number | null => {
@@ -93,7 +98,7 @@ export function deriveRecord(laps: ReturnType<typeof shapeLaps>, parsed: ParsedF
 export function nameMatches(query: string, stored: { name: string; cut: boolean }): boolean {
   const q = norm(query);
   const s = norm(stored.name);
-  return q !== "" && (q === s || (stored.cut && s.length >= 3 && q.startsWith(s)));
+  return q !== "" && (q === s || (stored.cut && s.length >= MIN_CUT_NAME && q.startsWith(s)));
 }
 
 export const COLS = [
@@ -110,17 +115,30 @@ export interface HistoryDeps {
 
 const rowsOf = (res: any): any[] => (Array.isArray(res) ? res : res?.payload ?? []);
 
-// The index groups a cut name with the longer name it is a prefix of, if any session has one.
-function canonical(distinct: Map<string, { name: string; cut: boolean }>): (n: string) => string {
+// The index groups a cut name with the longer name it is a prefix of, but only when that is certain: exactly
+// one longer name was seen and the cut name has at least MIN_CUT_NAME characters. Any other cut name that
+// is a prefix of something stays on its own and is listed in `unresolved` ("A / B / C": A is a prefix of B and C).
+function canonical(distinct: Map<string, { name: string; cut: boolean }>): { resolve: (n: string) => string; unresolved: string[] } {
+  const target = new Map<string, string>();
+  const unresolved: string[] = [];
+  for (const [key, e] of distinct) {
+    if (!e.cut) continue;
+    const longer = [...distinct.keys()].filter((k) => k.length > key.length && k.startsWith(key));
+    if (longer.length === 1 && key.length >= MIN_CUT_NAME) target.set(key, longer[0]);
+    else if (longer.length > 0) unresolved.push([e.name, ...longer.map((k) => distinct.get(k)!.name)].join(" / "));
+  }
   const resolve = (key: string): string => {
-    const e = distinct.get(key)!;
-    if (!e.cut || key.length < 3) return key;
-    let best: string | null = null;
-    for (const k of distinct.keys()) if (k.length > key.length && k.startsWith(key) && (best === null || k.length > best.length)) best = k;
-    return best === null ? key : resolve(best);
+    let k = key;
+    while (target.has(k)) k = target.get(k)!;
+    return k;
   };
-  return resolve;
+  return { resolve, unresolved };
 }
+
+// Sessions that failed to load in this process. They are tried after the ones not tried yet, so a few
+// bad sessions cannot use up every call's quota and starve the older ones behind them.
+const failedKeys = new Set<string>();
+export const clearFailedSessions = (): void => failedKeys.clear();
 
 export async function buildExerciseHistory(client: Client, opts: { name?: string; weeks?: number; date?: string }, deps: HistoryDeps = {}) {
   const weeks = opts.weeks ?? DEFAULT_WEEKS;
@@ -147,7 +165,9 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
   }
 
   const errors: { workoutKey: string; date: string; error: string }[] = [];
-  const batch = uncached.slice(0, MAX_FETCH);
+  const tryOrder = [...uncached.filter((w) => !failedKeys.has(w.key)), ...uncached.filter((w) => failedKeys.has(w.key))];
+  const batch = tryOrder.slice(0, MAX_FETCH);
+  let unwritable = 0; // sessions old enough to cache that could not be stored
   for (const w of batch) {
     try {
       const laps = shapeLaps(await client.getWorkoutWithExtensions(w.key, LAP_EXTENSIONS));
@@ -157,8 +177,11 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
       const record = deriveRecord(laps, parsed, w.date);
       record.workoutKey = w.key;
       records.set(w.key, record);
-      await writeCache(w.key, w.startMs, record, now);
+      failedKeys.delete(w.key);
+      const stored = await writeCache(w.key, w.startMs, record, now);
+      if (!stored && cacheEnabled() && w.startMs !== null && Number.isFinite(w.startMs) && now - w.startMs >= MIN_AGE_MS) unwritable++;
     } catch (err: any) {
+      failedKeys.add(w.key);
       errors.push({ workoutKey: w.key, date: w.date, error: String(err?.message ?? err).slice(0, ERROR_MAX) });
     }
   }
@@ -166,10 +189,14 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
 
   let journal: Record<string, JournalEntry> = {};
   let journalError: string | null = null;
-  try {
-    journal = await (deps.loadJournal ?? loadJournal)();
-  } catch (err: any) {
-    journalError = String(err?.message ?? err).slice(0, ERROR_MAX);
+  let journalIgnored = 0;
+  // Demo mode has no journal of its own (log_session writes nothing there): the real file must not leak in.
+  if (process.env.SUUNTO_DEMO !== "1") {
+    try {
+      ({ entries: journal, ignored: journalIgnored } = validEntries(await (deps.loadJournal ?? loadJournal)()));
+    } catch (err: any) {
+      journalError = String(err?.message ?? err).slice(0, ERROR_MAX);
+    }
   }
 
   const ordered = items.map((w) => records.get(w.key)).filter((r): r is WorkoutRecord => r !== undefined).sort((a, b) => a.date.localeCompare(b.date) || a.workoutKey.localeCompare(b.workoutKey));
@@ -179,10 +206,17 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
   ];
   if (pending > 0 && !cacheEnabled() && process.env.SUUNTO_DEMO !== "1") {
     notes.push(`${pending} older session(s) are not read: the cache is off (SUUNTO_CACHE=off), so each call reads only the ${MAX_FETCH} newest sessions and calling again will not reach the older ones.`);
+  } else if (pending > 0 && (unwritable > 0 || errors.length > 0)) {
+    const why = [
+      unwritable > 0 ? `the cache is not writable (${cacheDir()}), so the ${unwritable} session(s) read this call were not saved and every call starts from the newest ${MAX_FETCH} again` : "",
+      errors.length > 0 ? `${errors.length} session(s) failed to load (see errors) and stay uncached, so pending may never reach 0` : "",
+    ].filter(Boolean);
+    notes.push(`${pending} older session(s) are not read yet, and calling again will not help: ${why.join("; ")}.`);
   } else if (pending > 0) {
     notes.push(`${pending} older session(s) are not read yet (at most ${MAX_FETCH} uncached ones are fetched per call): call again until pending is 0.`);
   }
   if (listed.length >= WORKOUT_LIMIT) notes.push(`Reached the ${WORKOUT_LIMIT}-workout limit; older sessions in the range may be missing.`);
+  if (journalIgnored > 0) notes.push(`${journalIgnored} journal ${journalIgnored === 1 ? "entry" : "entries"} ignored: not a valid log_session entry (fix or delete ${journalIgnored === 1 ? "it" : "them"} in the journal file).`);
   if (journalError) notes.push(`The journal could not be read (${journalError}); loads are from the labels only.`);
 
   const head = { from, to };
@@ -196,7 +230,8 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
   }
 
   if (opts.name === undefined) {
-    const canon = canonical(distinct);
+    const { resolve: canon, unresolved } = canonical(distinct);
+    if (unresolved.length > 0) notes.push(`These names look alike and could not be told apart, so they are listed separately: ${unresolved.join("; ")}.`);
     const groups = new Map<string, { sessions: Set<string>; lastDate: string; lastDetail: string | null; name: string }>();
     for (const r of ordered) {
       for (const e of r.exercises) {

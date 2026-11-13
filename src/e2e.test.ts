@@ -802,7 +802,7 @@ test("e2e get_exercise_history + log_session: index, cache, by-name history, jou
 
         // invalid arguments are refused and leave the journal alone
         const before = await readFile(journal, "utf8");
-        for (const bad of [{ workoutKey: "abc" }, { workoutKey: CLEAN_KEY, exercises: [{ name: "x", sets: [{ reps: 201 }] }] }, { workoutKey: CLEAN_KEY, exercises: Array.from({ length: 41 }, () => ({ name: "x" })) }, { workoutKey: CLEAN_KEY, exercises: [{ name: "x", sets: Array.from({ length: 21 }, () => ({})) }] }]) {
+        for (const bad of [{ workoutKey: "abc" }, { workoutKey: CLEAN_KEY }, { workoutKey: CLEAN_KEY, note: "x", weight: 100 }, { workoutKey: CLEAN_KEY, exercises: [{ name: "x", sets: [{ reps: 5, weight: 100 }] }] }, { workoutKey: CLEAN_KEY, exercises: [{ name: "x", sets: [{ reps: 201 }] }] }, { workoutKey: CLEAN_KEY, exercises: Array.from({ length: 41 }, () => ({ name: "x" })) }, { workoutKey: CLEAN_KEY, exercises: [{ name: "x", sets: Array.from({ length: 21 }, () => ({})) }] }]) {
           const r = await call("log_session", bad);
           assert.equal(r.isError, true, JSON.stringify(bad).slice(0, 60));
         }
@@ -848,13 +848,19 @@ test("e2e: the test environment keeps the history cache and the journal out of t
   assert.ok(!journalText.includes(CLEAN_KEY), "the test journal entry reached the real journal");
 });
 
-test("e2e tools/list: get_exercise_history is read-only, log_session a non-destructive idempotent local write", async () => {
+test("e2e tools/list: get_exercise_history is read-only, log_session an idempotent local write that overwrites (destructive)", async () => {
   await withMcp(async (_call, _names, toolDefs) => {
     const defs = await toolDefs();
     const history = defs.find((t: any) => t.name === "get_exercise_history");
     const log = defs.find((t: any) => t.name === "log_session");
     assert.deepEqual(history.annotations, { readOnlyHint: true, openWorldHint: true });
-    assert.deepEqual(log.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+    assert.deepEqual(log.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
+    const sch = log.inputSchema;
+    assert.equal(sch.additionalProperties, false);
+    assert.equal(sch.properties.exercises.items.additionalProperties, false);
+    assert.equal(sch.properties.exercises.items.properties.sets.items.additionalProperties, false);
+    assert.match(log.description, /nothing to log/i);
+    assert.match(log.description, /unknown field/i);
     assert.match(history.description, /writes nothing but that cache/);
     assert.match(history.description, /CALL AGAIN until pending is 0/);
     assert.match(log.description, /never contacts Suunto/);

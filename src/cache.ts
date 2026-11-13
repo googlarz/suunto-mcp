@@ -7,10 +7,16 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 // Bump when the derived record changes shape or the algorithm behind it does:
 // an entry written under another number is ignored, so old results are recomputed.
 export const CACHE_SCHEMA = 1;
+
+// Read the way index.ts reads it for serverInfo. Every entry also records the version of the server that
+// wrote it and is ignored under any other, so a release that changes the derived record cannot serve stale
+// results even when nobody remembered to bump CACHE_SCHEMA.
+const pkgVersion: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 // A workout that started less than this long ago may still be syncing or being edited.
 export const MIN_AGE_MS = 24 * 3_600_000;
@@ -37,7 +43,7 @@ export async function readCache<T>(workoutKey: string): Promise<T | null> {
   if (!cacheEnabled()) return null;
   try {
     const entry = JSON.parse(await readFile(file, "utf8"));
-    return entry?.schema === CACHE_SCHEMA && entry.workoutKey === workoutKey.toLowerCase() ? (entry.data as T) : null;
+    return entry?.schema === CACHE_SCHEMA && entry.version === pkgVersion && entry.workoutKey === workoutKey.toLowerCase() ? (entry.data as T) : null;
   } catch {
     return null;
   }
@@ -57,12 +63,12 @@ export async function writeCache(workoutKey: string, startMs: number | null, dat
   const tmp = `${file}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
     await mkdir(cacheDir(), { recursive: true, mode: 0o700 });
-    await writeFile(tmp, JSON.stringify({ schema: CACHE_SCHEMA, workoutKey: workoutKey.toLowerCase(), data }), { encoding: "utf8", mode: 0o600 });
+    await writeFile(tmp, JSON.stringify({ schema: CACHE_SCHEMA, version: pkgVersion, workoutKey: workoutKey.toLowerCase(), data }), { encoding: "utf8", mode: 0o600 });
     await chmod(tmp, 0o600);
     await rename(tmp, file);
     return true;
   } catch {
-    await rm(tmp, { force: true });
+    await rm(tmp, { force: true }).catch(() => undefined); // force does not cover ENOTDIR, and a failed write must not throw
     return false;
   }
 }

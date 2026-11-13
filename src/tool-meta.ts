@@ -31,8 +31,8 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_workout_rest_profile: { title: "Get workout rest recovery profile", annotations: READ },
   // Read-only as far as the user's data goes: its one write is a rebuildable local cache of derived results.
   get_exercise_history: { title: "Get exercise history across sessions", annotations: READ },
-  // Writes only the local journal file (same key again replaces the entry); never contacts Suunto, hence not openWorld.
-  log_session: { title: "Log what actually happened in a session", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  // Writes only the local journal file; the same key again REPLACES that entry (hence destructive); never contacts Suunto, hence not openWorld.
+  log_session: { title: "Log what actually happened in a session", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },

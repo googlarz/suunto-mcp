@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { buildExerciseHistory, deriveRecord, nameMatches, parseLoadKg, MAX_FETCH, type HistoryDeps } from "./history.js";
+import { dirname, join } from "node:path";
+import { buildExerciseHistory, clearFailedSessions, deriveRecord, nameMatches, parseLoadKg, MAX_FETCH, type HistoryDeps } from "./history.js";
 import { shapeLaps } from "./laps.js";
 import type { ParsedFit } from "./fit.js";
 import type { JournalEntry } from "./journal.js";
@@ -86,6 +86,7 @@ async function withCacheDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const saved = { dir: process.env.SUUNTO_CACHE_DIR, off: process.env.SUUNTO_CACHE };
   process.env.SUUNTO_CACHE_DIR = join(root, "cache");
   delete process.env.SUUNTO_CACHE;
+  clearFailedSessions();
   try {
     return await fn(join(root, "cache"));
   } finally {
@@ -116,6 +117,12 @@ test("parseLoadKg: the first number followed by kg, else null", () => {
   assert.equal(parseLoadKg("BW 3x15"), null);
   assert.equal(parseLoadKg("3x10"), null);
   assert.equal(parseLoadKg("45lb 3x10"), null, "other units are not converted");
+  assert.equal(parseLoadKg("135 lbs"), null);
+  assert.equal(parseLoadKg("100 kg"), 100);
+  assert.equal(parseLoadKg("57.5kg"), 57.5);
+  assert.equal(parseLoadKg("BW+10kg 3x8"), null, "an addition to bodyweight is not the load: never guessed");
+  assert.equal(parseLoadKg("bw + 10 kg 3x8"), null);
+  assert.equal(parseLoadKg("Bodyweight +5kg 3x8"), null);
   assert.equal(parseLoadKg(null), null);
 });
 
@@ -131,7 +138,8 @@ test("nameMatches: normalised equality, or a prefix only when the stored name ma
   assert.equal(nameMatches("Seated Cable Row Wide Grip", cut), true);
   assert.equal(nameMatches("Seated Cable Row", cut), false, "the query is shorter than the stored name");
   assert.equal(nameMatches("Se", { name: "Se", cut: true }), true, "equal still matches");
-  assert.equal(nameMatches("Seated", { name: "Se", cut: true }), false, "a name under 3 letters is too short to prefix-match");
+  assert.equal(nameMatches("Seated", { name: "Se", cut: true }), false, "a name this short is too short to prefix-match");
+  assert.equal(nameMatches("Squat Jump", { name: "Squat", cut: true }), false, "a real cut leaves most of the name: 5 characters is not one");
 });
 
 // ---------- derivation ----------
@@ -401,5 +409,133 @@ test("history: an unreadable journal is reported in notes and the history still 
     const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 2, date: TODAY }, deps(parse, { loadJournal: async () => { throw new Error("journal.json is not valid JSON; fix or delete it"); } }));
     assert.equal(out.summary.sessions, 1);
     assert.match(out.notes.join(" "), /journal could not be read.*not valid JSON/);
+  });
+});
+
+// ---------- hostile journal files, demo mode ----------
+
+test("history: malformed journal entries are skipped and counted in one note; the valid ones still apply", async () => {
+  await withCacheDir(async () => {
+    const { client, parse } = fakeClient([{ key: keyOf(1), startMs: at(14) }, { key: keyOf(2), startMs: at(7) }, { key: keyOf(3), startMs: at(3) }, { key: keyOf(4), startMs: at(2) }]);
+    const good: JournalEntry = { workoutKey: keyOf(4), loggedAt: "x", exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 90 }] }] };
+    const hostile: any = {
+      [keyOf(1)]: { exercises: "x" },
+      [keyOf(2)]: { workoutKey: keyOf(2), loggedAt: "x", exercises: [{ sets: [{ kg: 1 }] }] },
+      [keyOf(3)]: { workoutKey: keyOf(3), loggedAt: "x", exercises: [{ name: "Back Squat", sets: "x" }] },
+      [keyOf(4)]: good,
+    };
+    const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 4, date: TODAY }, deps(parse, { loadJournal: async () => hostile }));
+    assert.equal(out.summary.sessions, 4);
+    const c = (n: string) => out.sessions.cols.indexOf(n);
+    assert.deepEqual(out.sessions.rows.map((r: any[]) => r[c("loadSource")]), ["label", "label", "label", "journal"]);
+    assert.equal(out.notes.filter((n: string) => /journal entries ignored/.test(n)).length, 1);
+    assert.match(out.notes.join(" "), /3 journal entries ignored/);
+    const index: any = await buildExerciseHistory(client, { weeks: 4, date: TODAY }, deps(parse, { loadJournal: async () => hostile }));
+    assert.equal(index.sessions, 4);
+  });
+});
+
+test("history: in demo mode the journal file is not read at all", async () => {
+  await withCacheDir(async () => {
+    const { client, parse } = fakeClient([{ key: keyOf(1), startMs: at(7) }]);
+    const saved = process.env.SUUNTO_DEMO;
+    process.env.SUUNTO_DEMO = "1";
+    let reads = 0;
+    try {
+      const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 2, date: TODAY }, deps(parse, { loadJournal: async () => { reads++; return { [keyOf(1)]: { workoutKey: keyOf(1), loggedAt: "x", note: "real" } }; } }));
+      assert.equal(reads, 0);
+      assert.equal(out.sessions.rows[0][out.sessions.cols.indexOf("journal")], null);
+    } finally {
+      if (saved === undefined) delete process.env.SUUNTO_DEMO;
+      else process.env.SUUNTO_DEMO = saved;
+    }
+  });
+});
+
+// ---------- pending that cannot reach 0 ----------
+
+const manySessions = (n: number, extra: (i: number) => Partial<W> = () => ({})): W[] => Array.from({ length: n }, (_, i) => ({ key: keyOf(i + 1), startMs: at(i + 2), ...extra(i + 1) }));
+
+test("history: when the cache cannot be written, pending stays and the note says calling again will not help", async () => {
+  await withCacheDir(async (dir) => {
+    const blocker = join(dirname(dir), "blocker");
+    await writeFile(blocker, "a file where the cache folder should go");
+    process.env.SUUNTO_CACHE_DIR = join(blocker, "cache");
+    const { client, parse } = fakeClient(manySessions(12));
+    for (let i = 0; i < 2; i++) {
+      const out: any = await buildExerciseHistory(client, { weeks: 4, date: TODAY }, deps(parse));
+      assert.deepEqual(out.errors, []);
+      assert.equal(out.pending, 4, "nothing was cached, so nothing got closer to 0");
+      const note = out.notes.join(" ");
+      assert.match(note, /will not help/);
+      assert.match(note, /not writable/);
+      assert.ok(note.includes(join(blocker, "cache")), "the folder is named");
+      assert.doesNotMatch(note, /call again until pending is 0/);
+    }
+  });
+});
+
+test("history: sessions that keep failing say so instead of 'call again', and cannot starve the older ones", async () => {
+  await withCacheDir(async () => {
+    // the nine newest fail every time; the three oldest are fine
+    const { client, calls, parse } = fakeClient(manySessions(12, (k) => ({ fails: k <= 9 })));
+    const first: any = await buildExerciseHistory(client, { weeks: 4, date: TODAY }, deps(parse));
+    assert.equal(first.errors.length, MAX_FETCH);
+    assert.equal(first.pending, 4);
+    assert.match(first.notes.join(" "), /will not help.*8 session\(s\) failed to load \(see errors\)/);
+    assert.doesNotMatch(first.notes.join(" "), /call again until pending is 0/);
+    calls.laps.length = 0;
+    const second: any = await buildExerciseHistory(client, { weeks: 4, date: TODAY }, deps(parse));
+    assert.deepEqual(calls.laps.slice(0, 4), [keyOf(9), keyOf(10), keyOf(11), keyOf(12)], "the not yet tried ones come first");
+    assert.deepEqual(calls.laps.slice(4), [keyOf(1), keyOf(2), keyOf(3), keyOf(4)], "then the ones that failed, newest first, each once");
+    assert.equal(second.sessions, 3, "the three older sessions got through; the ninth fails like the others");
+  });
+});
+
+// ---------- names that look alike ----------
+
+test("history index: 'Squat' and 'Squat Jump' stay separate even when the short one's label is at the cut length; the note says so", async () => {
+  await withCacheDir(async () => {
+    const longDetail = "100kg 3x5 tempo 3-1-0 pause!!xxxx"; // 'Squat' + 1 + 33 characters: at the 39-character cut
+    const { client, parse } = fakeClient([
+      { key: keyOf(1), startMs: at(14), subst: [["Back Squat", "Squat"], ["100kg 3x5", longDetail]] },
+      { key: keyOf(2), startMs: at(7), subst: [["Back Squat", "Squat Jump"]] },
+    ]);
+    const index: any = await buildExerciseHistory(client, { weeks: 4, date: TODAY }, deps(parse));
+    const names = index.exercises.map((e: any) => e.name);
+    assert.ok(names.includes("Squat") && names.includes("Squat Jump"), names.join());
+    assert.equal(index.exercises.find((e: any) => e.name === "Squat").sessions, 1);
+    assert.equal(index.exercises.find((e: any) => e.name === "Squat Jump").sessions, 1);
+    assert.match(index.notes.join(" "), /could not be told apart.*Squat.*Squat Jump/);
+    const named: any = await buildExerciseHistory(client, { name: "Squat Jump", weeks: 4, date: TODAY }, deps(parse));
+    assert.equal(named.summary.sessions, 1, "the short name is not folded into the long one when asked by name either");
+  });
+});
+
+test("history index: a cut name with exactly one longer candidate and 12+ characters is merged into it", async () => {
+  await withCacheDir(async () => {
+    const { client, parse } = fakeClient([
+      { key: keyOf(1), startMs: at(14), subst: [["Back Squat", "Barbell Bulgarian Split S"], ["100kg 3x5", "100kg 3x5 xxx"]] }, // 25 + 1 + 13 characters: at the cut
+      { key: keyOf(2), startMs: at(7), subst: [["Back Squat", "Barbell Bulgarian Split Squat"]] },
+    ]);
+    const index: any = await buildExerciseHistory(client, { weeks: 4, date: TODAY }, deps(parse));
+    const rows = index.exercises.filter((e: any) => e.name.startsWith("Barbell"));
+    assert.equal(rows.length, 1);
+    assert.deepEqual([rows[0].name, rows[0].sessions], ["Barbell Bulgarian Split Squat", 2]);
+    assert.doesNotMatch(index.notes.join(" "), /told apart/);
+  });
+});
+
+test("history index: a cut name with two longer candidates is not merged; the note lists them", async () => {
+  await withCacheDir(async () => {
+    const { client, parse } = fakeClient([
+      { key: keyOf(1), startMs: at(21), subst: [["Back Squat", "Barbell Bulgarian Split S"], ["100kg 3x5", "100kg 3x5 xxx"]] },
+      { key: keyOf(2), startMs: at(14), subst: [["Back Squat", "Barbell Bulgarian Split Squat"]] },
+      { key: keyOf(3), startMs: at(7), subst: [["Back Squat", "Barbell Bulgarian Split Stance"]] },
+    ]);
+    const index: any = await buildExerciseHistory(client, { weeks: 4, date: TODAY }, deps(parse));
+    const rows = index.exercises.filter((e: any) => e.name.startsWith("Barbell"));
+    assert.deepEqual(rows.map((e: any) => [e.name, e.sessions]).sort(), [["Barbell Bulgarian Split S", 1], ["Barbell Bulgarian Split Squat", 1], ["Barbell Bulgarian Split Stance", 1]]);
+    assert.match(index.notes.join(" "), /could not be told apart.*Barbell Bulgarian Split S.*Barbell Bulgarian Split Squat.*Barbell Bulgarian Split Stance/);
   });
 });

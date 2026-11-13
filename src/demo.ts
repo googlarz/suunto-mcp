@@ -576,7 +576,17 @@ export class DemoClient extends SuuntoClient {
     } else if (/^\/v2\/route\/[^/]+$/.test(p)) {
       body = this.route(this.routeIndex(p));
     } else if (p === "/v2/guides/items") {
-      body = Object.entries(GUIDE_IDS).map(([name, id], i) => ({ id, name, description: PROGRAMME[[1, 3, 5][i]].exercises.map((e) => e.name).join(" · ").slice(0, 60), owner: "demo", localDate: this.today, modificationTime: this.clock.getTime() - (i + 1) * 3 * DAY_MS, usage: 0 }));
+      // The real list: { error, payload, metadata } with every field of a listed guide, null where it usually is.
+      const payload = Object.entries(GUIDE_IDS).map(([name, id], i) => {
+        const modified = this.clock.getTime() - (i + 1) * 3 * DAY_MS;
+        return {
+          id, username: "demo", type: "sequence", modificationTime: modified, fileModificationTime: modified, name,
+          description: PROGRAMME[[1, 3, 5][i]].exercises.map((e) => e.name).join(" · ").slice(0, 60), shortDescription: name, owner: "demo",
+          url: null, iconUrl: null, backgroundUrl: null, richText: null, activities: null, localDate: this.today, usage: "workout",
+          pinned: false, externalId: null, ownerId: null, catalogueId: null, extended: null,
+        };
+      });
+      body = { error: null, payload, metadata: { ts: this.clock.getTime() } };
     } else if (p === "/v2/subscriptions") {
       body = [];
     } else {

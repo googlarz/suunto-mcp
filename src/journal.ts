@@ -55,9 +55,16 @@ function num(v: unknown, path: string, min: number, max: number, integer: boolea
 
 const defined = <T extends object>(o: T): T => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 
-// Strict check of log_session's arguments; returns the entry to store, stamped with `now`.
-export function parseLogInput(args: unknown, now = new Date()): JournalEntry {
+// A field this tool does not know is refused, not dropped: {name: "Squat", weight: 100} must not silently lose the weight.
+function onlyKeys(o: Record<string, unknown>, allowed: string[], path: string): void {
+  const extra = Object.keys(o).find((k) => !allowed.includes(k));
+  if (extra !== undefined) throw new Error(`${path}${extra} is not a known field (allowed here: ${allowed.join(", ")})`);
+}
+
+// Strict shape check of one entry (log_session's arguments, or an entry read back from the file).
+function parseEntry(args: unknown, loggedAt: string): JournalEntry {
   if (!isObject(args)) throw new Error("arguments must be an object");
+  onlyKeys(args, ["workoutKey", "note", "feeling", "exercises"], "");
   const key = args.workoutKey;
   if (typeof key !== "string" || !WORKOUT_KEY.test(key)) throw new Error("workoutKey must be the 24-character hex key from list_workouts");
   let exercises: JournalExercise[] | undefined;
@@ -67,6 +74,7 @@ export function parseLogInput(args: unknown, now = new Date()): JournalEntry {
     exercises = args.exercises.map((e, i) => {
       const p = `exercises[${i}]`;
       if (!isObject(e)) throw new Error(`${p} must be an object`);
+      onlyKeys(e, ["name", "sets", "note"], `${p}.`);
       let sets: JournalSet[] | undefined;
       if (e.sets !== undefined) {
         if (!Array.isArray(e.sets)) throw new Error(`${p}.sets must be an array`);
@@ -74,6 +82,7 @@ export function parseLogInput(args: unknown, now = new Date()): JournalEntry {
         sets = e.sets.map((s, j) => {
           const q = `${p}.sets[${j}]`;
           if (!isObject(s)) throw new Error(`${q} must be an object`);
+          onlyKeys(s, ["reps", "kg", "rpe"], `${q}.`);
           return defined({
             reps: num(s.reps, `${q}.reps`, 0, 200, true),
             kg: num(s.kg, `${q}.kg`, 0, 1000, false),
@@ -86,11 +95,38 @@ export function parseLogInput(args: unknown, now = new Date()): JournalEntry {
   }
   return defined({
     workoutKey: key.toLowerCase(),
-    loggedAt: now.toISOString(),
+    loggedAt,
     note: text(args.note, "note"),
     feeling: text(args.feeling, "feeling"),
     exercises,
   });
+}
+
+// Strict check of log_session's arguments; returns the entry to store, stamped with `now`.
+// A call with nothing in it is refused: it would replace a full entry with an empty one.
+export function parseLogInput(args: unknown, now = new Date()): JournalEntry {
+  const entry = parseEntry(args, now.toISOString());
+  if (!entry.note?.trim() && !entry.feeling?.trim() && !entry.exercises?.length) throw new Error("nothing to log: give a note, a feeling or at least one exercise (an empty call would wipe the entry already stored for this workout)");
+  return entry;
+}
+
+// The entries of a loaded journal that this server could have written; any other is skipped and counted
+// (a hand-edited or damaged file must not break reading).
+export function validEntries(raw: Record<string, unknown>): { entries: Record<string, JournalEntry>; ignored: number } {
+  const entries: Record<string, JournalEntry> = {};
+  let ignored = 0;
+  for (const [key, v] of Object.entries(raw)) {
+    try {
+      if (!isObject(v) || typeof v.loggedAt !== "string") throw new Error("not an entry");
+      const { loggedAt, ...rest } = v;
+      const entry = parseEntry(rest, loggedAt);
+      if (entry.workoutKey !== key) throw new Error("stored under another key");
+      entries[key] = entry;
+    } catch {
+      ignored++;
+    }
+  }
+  return { entries, ignored };
 }
 
 interface JournalFile {
@@ -115,11 +151,17 @@ export async function loadJournal(path = journalPath()): Promise<Record<string, 
     throw new Error(`${path} is not valid JSON; fix or delete it`);
   }
   if (!isObject(file) || !isObject(file.entries)) throw new Error(`${path} is not a suunto-mcp journal; fix or delete it`);
+  // rewriting another version's file as version 1 would drop what this server cannot read
+  if (file.version !== 1) throw new Error(`${path} is journal version ${JSON.stringify(file.version) ?? "unknown"}, but this server reads and writes version 1 only; it is left untouched`);
   return file.entries as Record<string, JournalEntry>;
 }
 
-async function saveJournal(path: string, entries: Record<string, JournalEntry>): Promise<void> {
+// Adds `entry` to the file and returns how many entries it now holds. The file is read again right here
+// and the entry merged onto it, so one logged by another server process since our first read is kept
+// (this entry wins for its own key). Not a lock: two writes within the same few milliseconds can still collide.
+async function saveJournal(path: string, entry: JournalEntry): Promise<number> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const entries = { ...(await loadJournal(path)), [entry.workoutKey]: entry };
   const file: JournalFile = { version: 1, entries };
   const tmp = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
@@ -130,6 +172,7 @@ async function saveJournal(path: string, entries: Record<string, JournalEntry>):
     await rm(tmp, { force: true });
     throw err;
   }
+  return Object.keys(entries).length;
 }
 
 // Calls run one after the other: two at once would each read the file before the other's write.
@@ -140,11 +183,8 @@ let queue: Promise<unknown> = Promise.resolve();
 export function logSession(args: unknown, path = journalPath(), now = new Date()): Promise<{ saved: JournalEntry; replaced: JournalEntry | null; entries: number }> {
   const run = async () => {
     const saved = parseLogInput(args, now);
-    const entries = await loadJournal(path);
-    const replaced = entries[saved.workoutKey] ?? null;
-    entries[saved.workoutKey] = saved;
-    await saveJournal(path, entries);
-    return { saved, replaced, entries: Object.keys(entries).length };
+    const replaced = (await loadJournal(path))[saved.workoutKey] ?? null;
+    return { saved, replaced, entries: await saveJournal(path, saved) };
   };
   const result = queue.then(run);
   queue = result.catch(() => undefined);

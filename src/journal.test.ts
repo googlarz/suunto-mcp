@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadJournal, logSession, parseLogInput } from "./journal.js";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { loadJournal, logSession, parseLogInput, validEntries } from "./journal.js";
 
 const KEY = "5e1f7c0de000000000000001";
 const NOW = new Date("2026-11-01T12:00:00Z");
@@ -20,7 +22,7 @@ async function withDir<T>(fn: (path: string, dir: string) => Promise<T>): Promis
 test("journal: valid input is normalised and stamped; optional parts stay out", () => {
   const e = parseLogInput({ workoutKey: KEY.toUpperCase(), note: "ok", exercises: [{ name: "Back Squat", sets: [{ reps: 6, kg: 100, rpe: 8.5 }, {}] }] }, NOW);
   assert.deepEqual(e, { workoutKey: KEY, loggedAt: NOW.toISOString(), note: "ok", exercises: [{ name: "Back Squat", sets: [{ reps: 6, kg: 100, rpe: 8.5 }, {}] }] });
-  assert.deepEqual(parseLogInput({ workoutKey: KEY }, NOW), { workoutKey: KEY, loggedAt: NOW.toISOString() });
+  assert.deepEqual(parseLogInput({ workoutKey: KEY, feeling: "tired" }, NOW), { workoutKey: KEY, loggedAt: NOW.toISOString(), feeling: "tired" });
 });
 
 test("journal: strict validation", () => {
@@ -48,6 +50,14 @@ test("journal: strict validation", () => {
     [{ ...ok, exercises: [{ name: "a", sets: [{ rpe: 0.5 }] }] }, /rpe/],
     [{ ...ok, exercises: [{ name: "a", sets: [{ rpe: 11 }] }] }, /rpe/],
     [{ ...ok, exercises: [{ name: "a", sets: [{ rpe: NaN }] }] }, /rpe/],
+    // an entry with nothing in it would wipe the existing one
+    [ok, /nothing to log/],
+    [{ ...ok, note: "  ", feeling: "" }, /nothing to log/],
+    [{ ...ok, exercises: [] }, /nothing to log/],
+    // unknown fields at every level are refused, not dropped
+    [{ ...ok, note: "x", date: "2026-11-01" }, /date is not a known field/],
+    [{ ...ok, exercises: [{ name: "Squat", weight: 100 }] }, /exercises\[0\]\.weight is not a known field/],
+    [{ ...ok, exercises: [{ name: "Squat", sets: [{ reps: 5, weight: 100 }] }] }, /exercises\[0\]\.sets\[0\]\.weight is not a known field/],
   ];
   for (const [input, re] of bad) assert.throws(() => parseLogInput(input, NOW), re, JSON.stringify(input)?.slice(0, 80));
   // the limits themselves are fine
@@ -94,7 +104,71 @@ test("journal: invalid input writes nothing; an unreadable journal is not overwr
     assert.deepEqual(await readdir(dir), [], "no file, no directory");
     assert.deepEqual(await loadJournal(path), {}, "a missing journal is an empty one");
     await writeFile(join(dir, "broken.json"), "{ not json");
-    await assert.rejects(logSession({ workoutKey: KEY }, join(dir, "broken.json"), NOW), /not valid JSON/);
+    await assert.rejects(logSession({ workoutKey: KEY, note: "x" }, join(dir, "broken.json"), NOW), /not valid JSON/);
     assert.equal(await readFile(join(dir, "broken.json"), "utf8"), "{ not json");
   });
+});
+
+test("journal: a call with nothing to log leaves the existing entry untouched", async () => {
+  await withDir(async (path) => {
+    await logSession({ workoutKey: KEY, note: "full entry", exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }] }] }, path, NOW);
+    const before = await readFile(path, "utf8");
+    await assert.rejects(logSession({ workoutKey: KEY }, path, NOW), /nothing to log/);
+    assert.equal(await readFile(path, "utf8"), before);
+  });
+});
+
+test("journal: a file whose version is not 1 is refused, not rewritten as version 1", async () => {
+  await withDir(async (_path, dir) => {
+    for (const body of ['{"version":2,"entries":{"x":{"a":1}}}', '{"entries":{}}']) {
+      const file = join(dir, "other.json");
+      await writeFile(file, body);
+      await assert.rejects(logSession({ workoutKey: KEY, note: "x" }, file, NOW), /version/);
+      await assert.rejects(loadJournal(file), /version/);
+      assert.equal(await readFile(file, "utf8"), body);
+    }
+  });
+});
+
+test("journal: an entry another process logged between our read and our write is kept", async () => {
+  await withDir(async (path) => {
+    const other = "5e1f7c0de000000000000002";
+    await logSession({ workoutKey: KEY, note: "first" }, path, NOW);
+    const real = fsp.readFile;
+    let reads = 0;
+    fsp.readFile = (async (...args: Parameters<typeof real>) => {
+      const out = await real(...args);
+      // the other process writes right after our first read of the journal
+      if (String(args[0]) === path && ++reads === 1) await writeFile(path, JSON.stringify({ version: 1, entries: { ...JSON.parse(String(out)).entries, [other]: { workoutKey: other, loggedAt: "x", note: "theirs" } } }));
+      return out;
+    }) as typeof real;
+    syncBuiltinESMExports();
+    try {
+      const third = "5e1f7c0de000000000000003";
+      const r = await logSession({ workoutKey: third, note: "ours" }, path, NOW);
+      assert.equal(r.entries, 3);
+    } finally {
+      fsp.readFile = real;
+      syncBuiltinESMExports();
+    }
+    assert.deepEqual(Object.keys(await loadJournal(path)).sort(), [KEY, other, "5e1f7c0de000000000000003"]);
+  });
+});
+
+test("journal: validEntries keeps what log_session could have written and counts the rest", () => {
+  const good = { workoutKey: KEY, loggedAt: "2026-11-01T12:00:00.000Z", note: "ok", exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }] }] };
+  const raw = {
+    [KEY]: good,
+    "5e1f7c0de000000000000002": { exercises: "x" },
+    "5e1f7c0de000000000000003": { workoutKey: "5e1f7c0de000000000000003", loggedAt: "x", exercises: [{ sets: [{ kg: 1 }] }] },
+    "5e1f7c0de000000000000004": { workoutKey: "5e1f7c0de000000000000004", loggedAt: "x", exercises: [{ name: "a", sets: "x" }] },
+    "5e1f7c0de000000000000005": "text",
+    "5e1f7c0de000000000000006": { workoutKey: "5e1f7c0de000000000000006", note: "no loggedAt" },
+    // an entry from the old call that wrote nothing is still a valid entry
+    "5e1f7c0de000000000000007": { workoutKey: "5e1f7c0de000000000000007", loggedAt: "x" },
+  };
+  const { entries, ignored } = validEntries(raw);
+  assert.deepEqual(Object.keys(entries).sort(), [KEY, "5e1f7c0de000000000000007"]);
+  assert.deepEqual(entries[KEY], good);
+  assert.equal(ignored, 5);
 });

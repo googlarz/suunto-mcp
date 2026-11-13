@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { CACHE_SCHEMA, MIN_AGE_MS, readCache, writeCache } from "./cache.js";
+
+const pkgVersion: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 const KEY = "5e1f7c0de000000000000001";
 const NOW = Date.UTC(2026, 10, 1, 12, 0, 0);
@@ -84,5 +87,28 @@ test("cache: an upper-case key reads the same entry as its lower-case form", asy
   await withCache(async () => {
     await writeCache("ABCDEF0123456789ABCDEF01", OLD, { a: 1 }, NOW);
     assert.deepEqual(await readCache("abcdef0123456789abcdef01"), { a: 1 });
+  });
+});
+
+test("cache: an entry written by another version of the server is ignored; ours carries the package version", async () => {
+  await withCache(async (dir) => {
+    await writeCache(KEY, OLD, { a: 1 }, NOW);
+    const file = join(dir, `${KEY}.json`);
+    const entry = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(entry.version, pkgVersion);
+    assert.deepEqual(await readCache(KEY), { a: 1 });
+    await writeFile(file, JSON.stringify({ ...entry, version: "0.0.0-other" }));
+    assert.equal(await readCache(KEY), null, "same schema number, other server version");
+    const { version: _gone, ...noVersion } = entry;
+    await writeFile(file, JSON.stringify(noVersion));
+    assert.equal(await readCache(KEY), null, "an entry without a version is from before versions were recorded");
+  });
+});
+
+test("cache: a folder that cannot be created makes the write return false, not throw", async () => {
+  await withCache(async (dir) => {
+    await writeCache(KEY, OLD, { a: 1 }, NOW); // creates `dir`
+    process.env.SUUNTO_CACHE_DIR = join(dir, `${KEY}.json`, "below-a-file");
+    assert.equal(await writeCache("5e1f7c0de000000000000002", OLD, { b: 2 }, NOW), false);
   });
 });

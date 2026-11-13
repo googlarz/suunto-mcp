@@ -278,7 +278,19 @@ test("e2e demo: rest profile, FIT, sleep, recovery, activity, routes, guides all
     await ok(call, "get_route", { routeId: routes.data[0].id });
     const gpx = await ok(call, "export_route", { routeId: routes.data[0].id });
     assert.match(gpx.data, /<gpx/);
-    assert.ok((await ok(call, "list_guides")).data.length >= 1);
+    // the real list is { error, payload, metadata } and each guide carries all of Suunto's fields
+    const guides = await ok(call, "list_guides");
+    assert.equal(guides.error, null);
+    assert.equal(typeof guides.metadata.ts, "number");
+    assert.equal(guides.payload.length, 3);
+    const keys = ["id", "username", "type", "modificationTime", "fileModificationTime", "name", "description", "shortDescription", "owner", "url", "iconUrl", "backgroundUrl", "richText", "activities", "localDate", "usage", "pinned", "externalId", "ownerId", "catalogueId", "extended"];
+    for (const g of guides.payload) {
+      assert.deepEqual(Object.keys(g).sort(), [...keys].sort());
+      assert.equal(g.type, "sequence");
+      assert.equal(g.usage, "workout");
+      assert.equal(typeof g.modificationTime, "number");
+      assert.equal(typeof g.fileModificationTime, "number");
+    }
   });
 });
 
@@ -305,7 +317,7 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     }
     assert.equal(await fetchLog(), "");
     // still a clean list afterwards: delete_guide did not delete
-    assert.ok((await ok(call, "list_guides")).data.length >= 1);
+    assert.ok((await ok(call, "list_guides")).payload.length >= 1);
   });
 });
 

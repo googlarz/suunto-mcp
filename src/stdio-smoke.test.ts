@@ -76,7 +76,7 @@ test("stdio: every tool has a title and annotations consistent with what it does
       const writes = /^(push|delete|upload|generate|log)_/.test(t.name);
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
-      if (/^(push_.*_guide|delete_guide|generate_daily_digest)$/.test(t.name)) {
+      if (/^(push_.*_guide|delete_guide|generate_daily_digest|log_session)$/.test(t.name)) {
         assert.equal(t.annotations.destructiveHint, true, `${t.name}: overwrites or deletes, must be flagged destructive`);
       }
     }
