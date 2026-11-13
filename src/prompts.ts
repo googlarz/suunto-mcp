@@ -19,6 +19,11 @@ export const PROMPTS = [
     description: "Training readiness gate: decides from last night's sleep, HRV and recent load whether to train as planned or cut intensity.",
     arguments: [{ name: "date", description: "Training day, YYYY-MM-DD (default: today).", required: false }],
   },
+  {
+    name: "suunto-gym-review",
+    description: "Review of a day's guided gym session: sets done against the plan, deviations, and heart-rate recovery in the rests.",
+    arguments: [{ name: "date", description: "Day of the session, YYYY-MM-DD (default: today).", required: false }],
+  },
 ];
 
 const NOTES = [
@@ -45,8 +50,9 @@ function morning(date: string): string {
   return [
     `Morning briefing for ${date} (yesterday = ${y}).`,
     `1. Call get_daily_snapshot ONCE with date=${y}, to=${date}. days[0] = ${y} (recovery low/high, steps, workouts). days[1] = ${date}: sleep.main is last night, recovery.morning the waking value, recovery.atBedtime the bedtime value.`,
-    `2. Call get_training_load with date=${y}, days=14.`,
-    "3. Write a short briefing: last night (duration, score, HRV, wake-ups), recovery on waking, yesterday's load and workouts, and one concrete sentence on how ready today is.",
+    `2. Call get_baselines with date=${date}: the user's own band for sleep, HRV and recovery.`,
+    `3. Call get_training_load with date=${y}, days=14.`,
+    "4. Write a short briefing: last night (duration, score, HRV, wake-ups), recovery on waking, yesterday's load and workouts, and one concrete sentence on how ready today is. Put last night's sleep (sleepDurationS, sleepScore), HRV and waking recovery (recoveryMorning) against the user's own band: latest vs median and p25-p75 (latestVsBand). A null band means too little history to judge.",
     "",
     ...NOTES,
   ].join("\n");
@@ -70,8 +76,21 @@ function gymToday(date: string): string {
   return [
     `Training readiness check for ${date}.`,
     `1. Call get_daily_snapshot with date=${date}: sleep.main is last night, recovery shows the day so far.`,
-    `2. Call get_training_load with date=${y}, days=14.`,
-    "3. Gate: if HRV is clearly below the user's recent level or the sleep score is low, cut the planned intensity by 20-30% and say why in one line. Otherwise train as planned.",
+    `2. Call get_baselines with date=${date}: the user's own band (middle half of the last 28 days).`,
+    `3. Call get_training_load with date=${y}, days=14.`,
+    "4. Gate: if metrics.hrv.latestVsBand or metrics.sleepScore.latestVsBand is 'below', cut the planned intensity by 20-30% and say why in one line. Otherwise train as planned. If a latestVsBand is null, say there is too little history to judge that metric.",
+    "",
+    ...NOTES,
+  ].join("\n");
+}
+
+function gymReview(date: string): string {
+  return [
+    `Review of the guided gym session(s) on ${date}.`,
+    `1. Call get_daily_snapshot with date=${date}. Take its workouts with hasLaps true. If there are none, say so and stop.`,
+    "2. For each, call compare_workout_to_plan and get_workout_rest_profile with its workoutKey.",
+    "3. Check `reliable` in both results first. If false, say plainly which numbers are unreliable and why (`note`, deviation basis) and draw no conclusion from them. restMode 'countdown' makes every rest last exactly its target: that is not rest compliance.",
+    "4. Report per exercise: sets done (sets.length) vs planned (planned.sets; null without the pushed plan); each deviation with its code and basis (labels, plan or heuristic); rest recovery from the profile (peakHr to endHr, dropTotal, t10S/t20S/t30S, null = never reached; perExercise medians).",
     "",
     ...NOTES,
   ].join("\n");
@@ -88,6 +107,9 @@ export function getPrompt(name: string, args?: Record<string, string>, today: st
       break;
     case "suunto-gym-today":
       text = gymToday(dateArg(args, "date", today));
+      break;
+    case "suunto-gym-review":
+      text = gymReview(dateArg(args, "date", today));
       break;
     default:
       throw new McpError(ErrorCode.InvalidParams, `Unknown prompt: ${name}`);

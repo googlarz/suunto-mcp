@@ -30,6 +30,7 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   compare_workout_to_plan: { title: "Compare workout to plan", annotations: READ },
   get_workout_rest_profile: { title: "Get workout rest recovery profile", annotations: READ },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
+  get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },
   export_workout_gpx: { title: "Export workout as GPX", annotations: READ },
   get_daily_activity: { title: "Get daily activity", annotations: READ },
