@@ -587,7 +587,7 @@ node dist/index.js get-sleep 2026-04-20
 node dist/index.js list-recovery --from 2026-04-01 --to 2026-04-30
 ```
 
-Other commands: `get-workout-fit`, `get-training-load`, `compare-workout`, `get-workout-rest-profile`, `list-routes`, `get-route`, `export-route`, `get-daily-activity`, `list-daily-activity`, `list-sleep`, `get-recovery`, `daily-digest`, `sync-to-health-skill`. Run it with `--help` for the full list and every option. All output is JSON — pipe into `jq` for filtering.
+Other commands: `get-workout-fit`, `get-training-load`, `compare-workout`, `get-workout-rest-profile`, `list-routes`, `get-route`, `export-route`, `get-daily-activity`, `list-daily-activity`, `list-sleep`, `get-recovery`, `daily-digest`, `sync-to-health-skill`. Run it with `--help` for the full list and every option. Output is JSON (pipe into `jq` for filtering), except `export-route`, which prints GPX.
 
 </details>
 

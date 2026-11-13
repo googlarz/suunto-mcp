@@ -1,6 +1,6 @@
 // get_baselines: the user's own recent norms for sleep, HRV, recovery and steps,
-// so "HRV below recent level" has something to be compared with. One request per
-// section for the whole span, reduced to a per-day value per metric, then to a
+// so "HRV below recent level" has something to be compared with. One request each
+// for sleep and recovery (activity in 28-day pieces) for the whole span, reduced to a per-day value per metric, then to a
 // band (quartiles) over the `days` days before the judged date. Pure functions
 // plus one orchestrator over SuuntoClient, like snapshot.ts and training-load.ts.
 import type { SuuntoClient } from "./api.js";
@@ -52,6 +52,8 @@ export function bandOf(window: (number | null)[], latest: number | null, round: 
   const p75 = banded ? quantile(values, 0.75) : null;
   const lastValues = ascending(present(window.slice(-LAST_DAYS)));
   const rounded = (x: number | null) => (x === null ? null : round(x));
+  // Compared as shown (rounded), so the verdict never contradicts the printed numbers.
+  const [l, lo, hi] = [rounded(latest), rounded(p25), rounded(p75)];
   return {
     n,
     median: banded ? round(quantile(values, 0.5)) : null,
@@ -59,7 +61,7 @@ export function bandOf(window: (number | null)[], latest: number | null, round: 
     p75: rounded(p75),
     last7Median: lastValues.length >= MIN_LAST_N ? round(quantile(lastValues, 0.5)) : null,
     latest: rounded(latest),
-    latestVsBand: latest === null || p25 === null || p75 === null ? null : latest < p25 ? "below" : latest > p75 ? "above" : "within",
+    latestVsBand: l === null || lo === null || hi === null ? null : l < lo ? "below" : l > hi ? "above" : "within",
   };
 }
 

@@ -52,7 +52,7 @@ function morning(date: string): string {
     `1. Call get_daily_snapshot ONCE with date=${y}, to=${date}. days[0] = ${y} (recovery low/high, steps, workouts). days[1] = ${date}: sleep.main is last night, recovery.morning the waking value, recovery.atBedtime the bedtime value.`,
     `2. Call get_baselines with date=${date}: the user's own band for sleep, HRV and recovery.`,
     `3. Call get_training_load with date=${y}, days=14.`,
-    "4. Write a short briefing: last night (duration, score, HRV, wake-ups), recovery on waking, yesterday's load and workouts, and one concrete sentence on how ready today is. Put last night's sleep (sleepDurationS, sleepScore), HRV and waking recovery (recoveryMorning) against the user's own band: latest vs median and p25-p75 (latestVsBand). A null band means too little history to judge.",
+    "4. Write a short briefing: last night (duration, score, HRV, wake-ups), recovery on waking, yesterday's load and workouts, and one concrete sentence on how ready today is. Put last night's sleep (sleepDurationS, sleepScore), HRV and waking recovery (recoveryMorning) against the user's own band: latest vs median and p25-p75 (latestVsBand). p25 null = too little history to judge; latest null = no value for last night (not synced, or a short night filed as a nap): say which.",
     "",
     ...NOTES,
   ].join("\n");
@@ -78,7 +78,7 @@ function gymToday(date: string): string {
     `1. Call get_daily_snapshot with date=${date}: sleep.main is last night, recovery shows the day so far.`,
     `2. Call get_baselines with date=${date}: the user's own band (middle half of the last 28 days).`,
     `3. Call get_training_load with date=${y}, days=14.`,
-    "4. Gate: if metrics.hrv.latestVsBand or metrics.sleepScore.latestVsBand is 'below', cut the planned intensity by 20-30% and say why in one line. Otherwise train as planned. If a latestVsBand is null, say there is too little history to judge that metric.",
+    "4. Gate: if metrics.hrv.latestVsBand or metrics.sleepScore.latestVsBand is 'below', cut the planned intensity by 20-30% and say why in one line. Otherwise train as planned. If latestVsBand is null: p25 null means too little history; latest null means last night has no value (not synced yet, or a short night filed as a nap), so say the gate cannot be judged instead of 'train as planned'.",
     "",
     ...NOTES,
   ].join("\n");
@@ -90,7 +90,7 @@ function gymReview(date: string): string {
     `1. Call get_daily_snapshot with date=${date}. Take its workouts with hasLaps true. If there are none, say so and stop.`,
     "2. For each, call compare_workout_to_plan and get_workout_rest_profile with its workoutKey.",
     "3. Check `reliable` in both results first. If false, say plainly which numbers are unreliable and why (`note`, deviation basis) and draw no conclusion from them. restMode 'countdown' makes every rest last exactly its target: that is not rest compliance.",
-    "4. Report per exercise: sets done (sets.length) vs planned (planned.sets; null without the pushed plan); each deviation with its code and basis (labels, plan or heuristic); rest recovery from the profile (peakHr to endHr, dropTotal, t10S/t20S/t30S, null = never reached; perExercise medians).",
+    "4. Report per exercise: sets done (sets.length) vs planned (planned.sets, read from the guide's labels; null when they give no count); each deviation with its code and basis (labels, plan or heuristic); rest recovery from the profile (peakHr to endHr, dropTotal, t10S/t20S/t30S, null = never reached; perExercise medians).",
     "",
     ...NOTES,
   ].join("\n");

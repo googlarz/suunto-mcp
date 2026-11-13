@@ -39,7 +39,8 @@ test("suunto-gym-today reads today's snapshot and yesterday's load", () => {
   assert.match(t, /get_baselines with date=2026-10-29\b/);
   assert.match(t, /cut the planned intensity by 20-30%/);
   assert.match(t, /metrics\.hrv\.latestVsBand or metrics\.sleepScore\.latestVsBand is 'below'/);
-  assert.match(t, /too little history to judge/);
+  assert.match(t, /p25 null means too little history/);
+  assert.match(t, /latest null means last night has no value/);
   const jan = text("suunto-gym-today", { date: "2026-01-01" });
   assert.match(jan, /date=2025-12-31, days=14/);
   assert.match(jan, /get_baselines with date=2026-01-01\b/);

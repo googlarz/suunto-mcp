@@ -212,3 +212,10 @@ test("buildBaselines: steps over a 90-day window come from several requests and 
   assert.deepEqual([out.metrics.steps.n, out.metrics.steps.median, out.metrics.steps.p75], [90, 1000, 1000], "no day doubled at a piece boundary");
 });
 const addDaysT = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+
+test("bandOf: the verdict is taken from the rounded numbers it prints", () => {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  // p25 of these is 0.8725 and latest 0.8721: both print as 0.87
+  const b = bandOf([0.87, 0.8725, 0.8725, 0.8725, 0.9, 0.9, 0.9, 0.9], 0.8721, r2);
+  assert.deepEqual([b.p25, b.latest, b.latestVsBand], [0.87, 0.87, "within"]);
+});
