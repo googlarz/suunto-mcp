@@ -586,7 +586,7 @@ export class DemoClient extends SuuntoClient {
           pinned: false, externalId: null, ownerId: null, catalogueId: null, extended: null,
         };
       });
-      body = { error: null, payload, metadata: { ts: this.clock.getTime() } };
+      body = { error: null, payload, metadata: { ts: String(this.clock.getTime()) } };
     } else if (p === "/v2/subscriptions") {
       body = [];
     } else {
