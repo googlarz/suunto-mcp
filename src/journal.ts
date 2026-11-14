@@ -22,6 +22,7 @@ export interface JournalEntry {
   loggedAt: string;
   note?: string;
   feeling?: string;
+  tags?: string[];
   exercises?: JournalExercise[];
 }
 
@@ -29,6 +30,8 @@ const WORKOUT_KEY = /^[0-9a-f]{24}$/i;
 export const MAX_TEXT = 500;
 export const MAX_EXERCISES = 40;
 export const MAX_SETS = 20;
+export const MAX_TAGS = 8;
+export const MAX_TAG_LENGTH = 24;
 
 export const journalPath = (): string => process.env.SUUNTO_JOURNAL_PATH ?? join(homedir(), ".suunto-mcp", "journal.json");
 
@@ -53,6 +56,24 @@ function num(v: unknown, path: string, min: number, max: number, integer: boolea
   return v;
 }
 
+function tagList(v: unknown): string[] | undefined {
+  if (v === undefined) return undefined;
+  if (!Array.isArray(v)) throw new Error("tags must be an array");
+  if (v.length > MAX_TAGS) throw new Error(`tags can have at most ${MAX_TAGS} items`);
+  const seen = new Map<string, number>();
+  return v.map((raw, i) => {
+    if (typeof raw !== "string") throw new Error(`tags[${i}] must be a string`);
+    const t = raw.trim();
+    if (t === "") throw new Error(`tags[${i}] must not be empty`);
+    if (t.length > MAX_TAG_LENGTH) throw new Error(`tags[${i}] must be at most ${MAX_TAG_LENGTH} characters`);
+    if (/\p{Cc}/u.test(t)) throw new Error(`tags[${i}] must not contain control characters`);
+    const key = t.toLowerCase();
+    if (seen.has(key)) throw new Error(`tags[${i}] duplicates tags[${seen.get(key)}] (ignoring case)`);
+    seen.set(key, i);
+    return t;
+  });
+}
+
 const defined = <T extends object>(o: T): T => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 
 // A field this tool does not know is refused, not dropped: {name: "Squat", weight: 100} must not silently lose the weight.
@@ -64,7 +85,7 @@ function onlyKeys(o: Record<string, unknown>, allowed: string[], path: string): 
 // Strict shape check of one entry (log_session's arguments, or an entry read back from the file).
 function parseEntry(args: unknown, loggedAt: string): JournalEntry {
   if (!isObject(args)) throw new Error("arguments must be an object");
-  onlyKeys(args, ["workoutKey", "note", "feeling", "exercises"], "");
+  onlyKeys(args, ["workoutKey", "note", "feeling", "tags", "exercises"], "");
   const key = args.workoutKey;
   if (typeof key !== "string" || !WORKOUT_KEY.test(key)) throw new Error("workoutKey must be the 24-character hex key from list_workouts");
   let exercises: JournalExercise[] | undefined;
@@ -98,6 +119,7 @@ function parseEntry(args: unknown, loggedAt: string): JournalEntry {
     loggedAt,
     note: text(args.note, "note"),
     feeling: text(args.feeling, "feeling"),
+    tags: tagList(args.tags),
     exercises,
   });
 }
@@ -106,7 +128,7 @@ function parseEntry(args: unknown, loggedAt: string): JournalEntry {
 // A call with nothing in it is refused: it would replace a full entry with an empty one.
 export function parseLogInput(args: unknown, now = new Date()): JournalEntry {
   const entry = parseEntry(args, now.toISOString());
-  if (!entry.note?.trim() && !entry.feeling?.trim() && !entry.exercises?.length) throw new Error("nothing to log: give a note, a feeling or at least one exercise (an empty call would wipe the entry already stored for this workout)");
+  if (!entry.note?.trim() && !entry.feeling?.trim() && !entry.tags?.length && !entry.exercises?.length) throw new Error("nothing to log: give a note, a feeling, tags or at least one exercise (an empty call would wipe the entry already stored for this workout)");
   return entry;
 }
 
@@ -180,10 +202,13 @@ let queue: Promise<unknown> = Promise.resolve();
 
 // Stores the entry, replacing one for the same workoutKey; returns the one it replaced (or null)
 // so nothing is lost silently.
+// A call with only tags does not replace: it sets the tags of the stored entry and keeps the rest of it.
 export function logSession(args: unknown, path = journalPath(), now = new Date()): Promise<{ saved: JournalEntry; replaced: JournalEntry | null; entries: number }> {
   const run = async () => {
-    const saved = parseLogInput(args, now);
-    const replaced = (await loadJournal(path))[saved.workoutKey] ?? null;
+    const parsed = parseLogInput(args, now);
+    const replaced = (await loadJournal(path))[parsed.workoutKey] ?? null;
+    const tagsOnly = !parsed.note?.trim() && !parsed.feeling?.trim() && !parsed.exercises?.length;
+    const saved = tagsOnly && replaced ? { ...replaced, loggedAt: parsed.loggedAt, tags: parsed.tags } : parsed;
     return { saved, replaced, entries: await saveJournal(path, saved) };
   };
   const result = queue.then(run);

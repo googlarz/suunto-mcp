@@ -36,6 +36,11 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },
+  forecast_training_load: { title: "Forecast training load (CTL/ATL/TSB) for planned days", annotations: READ },
+  // Only returns an adjusted spec: pushing it is a separate push_strength_guide call.
+  adjust_guide: { title: "Adjust a strength guide to today's recovery (returns it, pushes nothing)", annotations: READ },
+  // dryRun defaults to true (validate only); a real push only ever creates new guides, never overwrites one.
+  push_week_plan: { title: "Push a week of strength guides to the watch (dry run by default)", annotations: CREATE },
   export_workout_gpx: { title: "Export workout as GPX", annotations: READ },
   get_daily_activity: { title: "Get daily activity", annotations: READ },
   list_daily_activity: { title: "List daily activity", annotations: READ },

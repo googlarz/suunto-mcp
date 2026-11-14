@@ -24,7 +24,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "node:fs";
 import { loadConfig, assertCredentials } from "./config.js";
-import { SuuntoClient } from "./api.js";
+import { SuuntoClient, localDate } from "./api.js";
+import { adjustStrengthGuide, planWeek } from "./week-plan.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
 import { PROMPTS, getPrompt } from "./prompts.js";
@@ -36,7 +37,7 @@ import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 import { compareWorkout } from "./compare.js";
 import { buildRestProfile } from "./rest-profile.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
-import { buildTrainingLoad } from "./training-load.js";
+import { buildTrainingLoad, forecastTrainingLoad } from "./training-load.js";
 import { buildBaselines } from "./baselines.js";
 import { buildExerciseHistory } from "./history.js";
 import { logSession } from "./journal.js";
@@ -266,6 +267,40 @@ const toolDefs = [
     },
   },
   {
+    name: "forecast_training_load",
+    description:
+      "Projects Fitness (CTL, 42-day), Fatigue (ATL, 7-day) and Form (TSB) for planned training days: the same model and constants as get_training_load, rolled forward from today's values. Give each planned day's training stress as `tss` (the unit get_training_load shows per day: a typical hour of easy training is about 40-60, a hard one 80-100+); a date left out of `days` between today and the last planned day is a rest day (tss 0). Starts from the state at the end of `asOf` (default today) read with get_training_load's own computation (one workouts request, warm-up included); every planned date must be after asOf, and asOf must not be in the future, so to plan today pass yesterday as asOf. Workouts already in the account after asOf are not read: list them in `days`. Output (numbers to 1 decimal): { asOf, start: { ctl, atl, tsb }, series: [{ date, tss, ctl, atl, tsb }] (one per day from the day after asOf to the last planned day, values at the end of each day), notes }. A projection of the model, not a prediction of how you will respond; CTL can be about 1 point off the watch. At most 120 days after asOf. Read-only: it writes nothing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        days: {
+          type: "array",
+          minItems: 1,
+          maxItems: 120,
+          description: "The planned days, in any order, one entry per date.",
+          items: {
+            type: "object",
+            properties: {
+              date: { type: "string", format: "date", pattern: "^\\d{4}-\\d{2}-\\d{2}$", minLength: 10, maxLength: 10, description: "The day, YYYY-MM-DD, after asOf." },
+              tss: { type: "number", minimum: 0, maximum: 1000, description: "The day's total planned training stress (all sessions of that day together)." },
+            },
+            required: ["date", "tss"],
+          },
+        },
+        asOf: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-20"],
+          description: "The last local day whose workouts are counted as done, YYYY-MM-DD (default today; not in the future). The projection starts the day after.",
+        },
+      },
+      required: ["days"],
+    },
+  },
+  {
     name: "get_workout_laps",
     description:
       "Returns the manual laps of one workout as a compact table, plus its training-load fields — the way to read back a guided gym session set by set (push_strength_guide records one lap per set and per rest; push_workout_guide one lap per exercise and one per rest between exercises). A session from push_interval_guide auto-advances and is expected to record no manual laps (unverified), so it should return an empty table. About 2.5 KB for a 35-lap strength session, versus ~550 KB for get_workout_fit full=true. Output: { workoutKey, activityId, startTime (epoch ms), totalTimeS, guide: { id, name } | null (the guide that ran, as recorded by Suunto — not looked up in list_guides, because guides are often deleted afterwards), tss: [{ method (seen so far: 'HR', 'MET'), value }], pte, peakEpoc, recoveryTime (from the workout's summary extension; units not verified, and it can differ from the recoveryTime that list_workouts and get_workout carry), hrZoneTimeS: [zone1..zone5 seconds], feeling (the answer to the watch's 'How was it?' question, passed through as Suunto sends it; null when skipped), lapCount, checks: [{ code, detail }], laps: { cols, rows } }. checks lists reasons not to trust positional reading of the table (empty when clean): 'duplicate-rest' (the same rest label twice in a row — a set lap is missing or a rest was split), 'no-session-complete' (a guided table without its final lap — session ended early, buttons locked or watch restarted), 'unlabelled-laps' (some laps have no guide label), 'no-heart-rate' (no lap has heart rate, e.g. battery mode Tour). laps.cols = [i (1-based), startOffsetS (from workout start), durationS, hrAvg, hrMax, hrMin (bpm), kcal, kind, label]; each row is an array in that order. label is the text of the guide step that was active during the lap (lines joined with ' | '), or null when no guide ran. kind is 'rest' when the label contains 'Next:' at its start or after a '·' (a per-set rest lap reads 'Next: set k/S', or '<restSec>s target · Next: set k/S' with restMode 'stopwatch'), 'done' for the final 'Session complete' lap, 'step' for any other labelled lap, null when there is no label. A per-set strength guide yields, per exercise, a prep lap, then set 1, rest, set 2, rest, … — 2 × sets laps — and one trailing 'Session complete' lap for the whole session; a prep lap's label reads '<plates or detail> | <name>' and a set lap's '<name> | <detail>' (the halves are swapped, but the text is not always decisive, e.g. a name equal to the detail or a label cut at 40 characters), so tell them apart by position. Real sessions can deviate (skipped or repeated rest laps), so check the labels rather than only counting. A workout without manual laps (unguided gym, cycling) returns lapCount 0 and laps.rows [] — not an error. Call list_workouts first for the workoutKey.",
@@ -344,7 +379,7 @@ const toolDefs = [
   {
     name: "get_exercise_history",
     description:
-      "Progression of strength exercises across guided gym sessions (push_strength_guide / push_workout_guide): load, sets, rest and heart-rate recovery of the same exercise week after week. Each session is read once with the same logic as get_workout_laps, compare_workout_to_plan and get_workout_rest_profile, and the small derived result is cached on disk (~/.suunto-mcp/cache/, SUUNTO_CACHE=off disables it), so repeat calls are cheap. It writes nothing but that cache and never changes anything at Suunto. Looks at the `weeks` weeks (default 8, max 26) ending at `date` (default today; a session that started less than 24 h ago is read but not cached). Reads at most 8 sessions not yet cached per call (two requests each, newest first); the result's `pending` is how many are still unread: CALL AGAIN until pending is 0 before drawing conclusions from the history, unless a note says calling again will not help (cache not writable, sessions failing): then say so instead of looping. A session that fails to load is skipped and listed in `errors`. IMPORTANT: the watch records only the guide's TEXT, so weights and reps are what was PLANNED, not measured; a log_session entry for the session replaces the label's weight with the logged one (loadSource 'journal') and is attached as `journal`. Sessions whose mapping or rest profile is unreliable are included with reliable false. Without `name`: { from, to, sessions (guided sessions read), exercises: [{ name, sessions, lastDate, lastDetail }] (most sessions first; a name the guide cut to 40 characters is grouped with its longer form only when that is certain: exactly one longer name and at least 12 characters, otherwise they stay separate and a note lists them), pending, errors, notes }. With `name`: { name, from, to, sessions: { cols, rows } (oldest first; cols = date, workoutKey, detail, kg (the first 'NNkg' in the label text, or the top journal set's weight; null when there is none, never guessed), loadSource ('label' | 'journal'), setsDone, plannedSets, restS (the guide's rest), restEndHr / restDropTotal / restT20S / restCoverage (heart-rate recovery of the rest after set 1 from the FIT's record-level HR, null when missing: end-of-rest HR, peak minus end, seconds after the peak to fall 20 bpm, share of the rest's seconds with an HR sample), deviations (compare_workout_to_plan codes for that exercise), reliable, journal), summary: { sessions, firstLoadKg, lastLoadKg, restEndHrMedian (median end-of-rest HR after set 1 over reliable sessions: usable as push_strength_guide's restTargetHr) }, pending, errors, notes }. `name` is matched ignoring case, accents and punctuation, exactly or, for a name the guide may have cut (12+ characters), as a prefix of the given name. Use the names from the index (or compare_workout_to_plan). Writes only the local cache.",
+      "Progression of strength exercises across guided gym sessions (push_strength_guide / push_workout_guide): load, sets, rest and heart-rate recovery of the same exercise week after week. Each session is read once with the same logic as get_workout_laps, compare_workout_to_plan and get_workout_rest_profile, and the small derived result is cached on disk (~/.suunto-mcp/cache/, SUUNTO_CACHE=off disables it), so repeat calls are cheap. It writes nothing but that cache and never changes anything at Suunto. Looks at the `weeks` weeks (default 8, max 26) ending at `date` (default today; a session that started less than 24 h ago is read but not cached). Reads at most 8 sessions not yet cached per call (two requests each, newest first); the result's `pending` is how many are still unread: CALL AGAIN until pending is 0 before drawing conclusions from the history, unless a note says calling again will not help (cache not writable, sessions failing): then say so instead of looping. A session that fails to load is skipped and listed in `errors`. IMPORTANT: the watch records only the guide's TEXT, so weights and reps are what was PLANNED, not measured; a log_session entry for the session replaces the label's weight with the logged one (loadSource 'journal') and is attached as `journal`. Sessions whose mapping or rest profile is unreliable are included with reliable false. Without `name`: { from, to, sessions (guided sessions read), exercises: [{ name, sessions, lastDate, lastDetail }] (most sessions first; a name the guide cut to 40 characters is grouped with its longer form only when that is certain: exactly one longer name and at least 12 characters, otherwise they stay separate and a note lists them), pending, errors, notes }. With `name`: { name, from, to, sessions: { cols, rows } (oldest first; cols = date, workoutKey, detail, kg (the first 'NNkg' in the label text, or the top journal set's weight; null when there is none, never guessed), loadSource ('label' | 'journal'), setsDone, plannedSets, restS (the guide's rest), restEndHr / restDropTotal / restT20S / restCoverage (heart-rate recovery of the rest after set 1 from the FIT's record-level HR, null when missing: end-of-rest HR, peak minus end, seconds after the peak to fall 20 bpm, share of the rest's seconds with an HR sample), deviations (compare_workout_to_plan codes for that exercise), reliable, journal), summary: { sessions, firstLoadKg, lastLoadKg, restEndHrMedian (median end-of-rest HR after set 1 over reliable sessions: usable as push_strength_guide's restTargetHr) }, suggestion: { last, target, reason } (the newest session as e.g. '3x8@60kg' or, when set weights differed, '8@60/8@60/5@65kg', and a simple next target: when a log_session entry shows every planned set done with every planned rep at ONE weight, the same sets x reps with a step on top (2.5 kg, but at most 5% of the load in 1.25 kg steps and at least 1.25 kg: 5 kg goes to 6.25); a short set, differing weights between sets (repeat at the lowest weight that reached the reps), a missing load or a rep range written in any way ('3x8-12', '3x8 - 12', '3x8–12', '3x8 to 12') never raise the load: repeat; null without a session; usable as push_strength_guide's per-exercise last/target; nothing is pushed), pending, errors, notes }. `name` is matched ignoring case, accents and punctuation, exactly or, for a name the guide may have cut (12+ characters), as a prefix of the given name. Use the names from the index (or compare_workout_to_plan). Writes only the local cache.",
     inputSchema: {
       type: "object",
       properties: {
@@ -365,7 +400,7 @@ const toolDefs = [
   {
     name: "log_session",
     description:
-      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each. Output: { saved, replaced, entries }.",
+      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling, no tags and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each, at most 8 tags of 1-24 characters each (trimmed; no control characters; no duplicates, ignoring case; stored on the entry, get_exercise_history does not use them). A call with ONLY tags does not replace the entry: it sets the entry's tags and keeps its note, feeling and exercises (a tags-only entry is created when none exists). Output: { saved, replaced, entries }.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -373,6 +408,12 @@ const toolDefs = [
         workoutKey: { type: "string", minLength: 24, maxLength: 24, pattern: "^[0-9a-fA-F]{24}$", description: "The 24-character workoutKey of the session, from list_workouts or get_daily_snapshot." },
         note: { type: "string", maxLength: 500, description: "How the session went overall, in the user's words, e.g. 'all as planned except squat set 3'." },
         feeling: { type: "string", maxLength: 500, description: "How the user felt, e.g. 'tired', 'strong'." },
+        tags: {
+          type: "array",
+          maxItems: 8,
+          description: "Optional short labels for the session, e.g. ['deload', 'poor-sleep'] (at most 8, each 1-24 characters, trimmed, no duplicates). Sent alone, they set the tags of the existing entry without touching the rest.",
+          items: { type: "string", minLength: 1, maxLength: 24 },
+        },
         exercises: {
           type: "array",
           maxItems: 40,
@@ -819,6 +860,8 @@ const toolDefs = [
                 minimum: 1,
                 description: "Rest between sets within this exercise, in seconds. With restMode 'countdown' (default) it's the countdown and auto-advance duration; with 'stopwatch' it's shown as a target label only. Not applied between exercises — that's the self-paced prep stopwatch.",
               },
+              last: { type: "string", minLength: 1, maxLength: 36, description: "Optional: what was done last time, e.g. '3x8@60kg' (get_exercise_history's suggestion.last). Shown with target in a 'TODAY' popup when the exercise's prep step starts, never in the step text, so lap labels are unchanged. The hint 'Last <last> > <target>' must fit 36 characters: when it does not, last is shortened to its top reps ('10/10/10/10/8@102.5kg' becomes '10@102.5kg'), then dropped so the target stays whole, and if even that does not fit there is no popup (a number is never cut)." },
+              target: { type: "string", minLength: 1, maxLength: 36, description: "Optional: today's target, e.g. '3x8@62.5kg' (get_exercise_history's suggestion.target). See last." },
               plates: {
                 type: "string",
                 description: "Per-side plate breakdown for barbell exercises, e.g. '2x20+1x5/side' — shown on the prep screen instead of detail, since that's when the bar actually gets loaded. Omit for non-barbell exercises (dumbbell, machine, bodyweight, cable); compute the math yourself before calling this tool, it isn't done here.",
@@ -918,9 +961,51 @@ const toolDefs = [
   },
 ];
 
+// The tools that take a strength guide spec reuse push_strength_guide's schema (minus guideId) instead of copying it.
+const strengthSpec: any = (() => {
+  const { guideId: _guideId, ...properties } = (toolDefs.find((t) => t.name === "push_strength_guide")!.inputSchema as any).properties;
+  return { type: "object", properties, required: ["title", "date", "exercises"] };
+})();
+const specTools = [
+  {
+    name: "adjust_guide",
+    description:
+      "Adjusts a strength guide spec (the arguments of push_strength_guide) to how recovered the user is on `date` (default today), and RETURNS the adjusted spec with the reasons. It does not push anything: show the user the changes, and push the returned `guide` with push_strength_guide only if they agree. Reads get_baselines for `date`: HRV (metrics.hrv.latestVsBand) and recovery on waking (metrics.recoveryMorning.latestVsBand) against the user's own band of the last 28 days. Rules: neither below the band, or no reading yet -> unchanged (it never adds load or sets); one of the two below -> one set less on every exercise with 3 or more sets (the 'NxM' in detail is rewritten to match; an exercise whose detail has no matching 'NxM' keeps its sets and says so in reasons); both below -> that, plus every load in detail (the first '<n>kg', not bodyweight) 10% lower rounded to 2.5 kg, a plates breakdown is dropped when the load changed, and an exercise's `target` is dropped whenever that exercise changed at all (sets or load; a reason says so, `last` stays). Output: { level ('unchanged' | 'lighter' | 'reduced'), adjusted (whether anything changed), signals: { hrv, recoveryMorning } (below | within | above | null), reasons, changes: [{ exercise, from: { sets, detail }, to: { sets, detail } }], guide (the full adjusted spec), baselineErrors (only when a baseline section failed) }. The band is the middle half of the user's own recent days, not a medical reference. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        guide: { ...strengthSpec, description: "The strength guide spec to adjust: the same arguments as push_strength_guide (without guideId)." },
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-20"],
+          description: "The day whose HRV and recovery are compared with the band, YYYY-MM-DD (default today: the night that led into it). A day with no reading yet leaves the guide unchanged.",
+        },
+      },
+      required: ["guide"],
+    },
+  },
+  {
+    name: "push_week_plan",
+    description:
+      "Pushes a week of strength guides: one NEW SuuntoPlus guide per date, each built and sent exactly like push_strength_guide (same arguments per guide, without guideId; several dates coexist on the account). dryRun defaults to TRUE: then it only validates every guide (schema, unique dates, building each guide) and returns what it would push as { dryRun: true, ok, wouldPush: [{ date, title, exercises, sets }], notes } without contacting Suunto; show that to the user and call again with dryRun: false only when they agree. With dryRun false: everything is validated and built first, then the guides are pushed one after the other in date order (queued with a short pause, each read back from the guide list); the first failure stops the push, so the result is { dryRun: false, ok, pushed: [{ date, title, id, check: { verified, note? } }], failed?: { date, error }, notPushed?: [dates], notes } (ok false with failed set; say which days are missing). Pushing the same plan twice creates duplicates (list_guides / delete_guide to tidy up); to overwrite one guide use push_strength_guide with guideId. At most 14 guides. Requires SUUNTO_APP_NAME for a real push. Same delivery caveat as push_strength_guide: it appears after the phone's next normal Suunto app sync. Write operation (dryRun false).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        guides: { type: "array", minItems: 1, maxItems: 14, items: strengthSpec, description: "One strength guide spec per date (dates must differ)." },
+        dryRun: { type: "boolean", default: true, description: "true (default): validate only and return what would be pushed; false: push the guides." },
+      },
+      required: ["guides"],
+    },
+  },
+];
+
 // Titles + annotations live in tool-meta.ts; a tool without an entry there
 // fails at startup rather than shipping unannotated.
-const tools = toolDefs.map((t) => {
+const tools = [...toolDefs, ...specTools].map((t) => {
   const meta = TOOL_META[t.name];
   if (!meta) throw new Error(`Tool "${t.name}" has no entry in tool-meta.ts`);
   return { ...t, ...meta };
@@ -991,6 +1076,23 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await buildBaselines(suunto, { date: a.date, days: a.days })));
       case "get_training_load":
         return text(JSON.stringify(await buildTrainingLoad(suunto, { date: a.date, days: a.days, seedCtl: a.seedCtl, seedAtl: a.seedAtl })));
+      case "forecast_training_load":
+        return text(JSON.stringify(await forecastTrainingLoad(suunto, { days: a.days, asOf: a.asOf })));
+      case "adjust_guide": {
+        const baselines = await buildBaselines(suunto, { date: a.date ?? localDate() });
+        const m: any = baselines.metrics;
+        const adjusted = adjustStrengthGuide(a.guide, { hrv: m.hrv?.latestVsBand, recoveryMorning: m.recoveryMorning?.latestVsBand });
+        return text(JSON.stringify({ ...adjusted, ...(baselines.errors.length ? { baselineErrors: baselines.errors } : {}) }));
+      }
+      case "push_week_plan": {
+        const result = await planWeek(a.guides, {
+          dryRun: a.dryRun !== false,
+          appName: cfg.appName,
+          validate: (g) => validateAgainstSchema(strengthSpec, g, "guide"),
+          push: (zip, title) => suunto.pushGuideVerified(zip, title),
+        });
+        return text(JSON.stringify(result), !result.ok);
+      }
       case "get_workout_laps": {
         const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
         return text(JSON.stringify(shapeLaps(data)));

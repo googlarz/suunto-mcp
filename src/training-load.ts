@@ -4,7 +4,7 @@
 // forward one day at a time in its sidecar file; this computes it from scratch
 // for any range and writes nothing.
 import type { SuuntoClient } from "./api.js";
-import { dayFetchBounds, workoutDate } from "./api.js";
+import { dayFetchBounds, localDate, workoutDate } from "./api.js";
 import { isValidCalendarDate } from "./schema-validate.js";
 
 // ---------- Pure math ----------
@@ -200,5 +200,46 @@ export async function buildTrainingLoad(client: SuuntoClient, opts: TrainingLoad
     weeks: weeklyTotals(byDay, from, to).map((w) => ({ ...w, durationS: r1(w.durationS), tss: r1(w.tss) })),
     series: series.map((p) => ({ date: p.date, tss: r1(p.tss), ctl: r1(p.ctl), atl: r1(p.atl), tsb: r1(p.tsb) })),
     notes,
+  };
+}
+
+// ---------- forecast ----------
+
+export const MAX_FORECAST_DAYS = 120;
+export const MAX_PLANNED_TSS = 1000;
+
+export interface PlannedDay {
+  date: string;
+  tss: number; // the planned day's training stress, in the units get_training_load reports
+}
+
+// Projects CTL/ATL/TSB from the current state (get_training_load's, at the end of `asOf`) through the planned
+// days; a date without an entry is a rest day. Reads workouts, writes nothing.
+export async function forecastTrainingLoad(client: SuuntoClient, opts: { days: PlannedDay[]; asOf?: string }) {
+  const asOf = opts.asOf ?? localDate();
+  if (!isValidCalendarDate(asOf)) throw new Error(`"${asOf}" is not a valid calendar date (YYYY-MM-DD).`);
+  if (asOf > localDate()) throw new Error(`asOf ${asOf} is in the future (today is ${localDate()}): workouts that have not happened cannot be read; list planned days in \`days\` instead.`);
+  if (!Array.isArray(opts.days) || opts.days.length === 0) throw new Error("days must list at least one planned day: [{ date, tss }].");
+  const planned = new Map<string, { tss: number }>();
+  for (const [i, d] of opts.days.entries()) {
+    if (typeof d?.date !== "string" || !isValidCalendarDate(d.date)) throw new Error(`days[${i}].date "${d?.date}" is not a valid calendar date (YYYY-MM-DD).`);
+    if (d.date <= asOf) throw new Error(`days[${i}].date ${d.date} must be after asOf ${asOf}; a forecast starts the day after the last known workouts (pass an earlier asOf to plan today).`);
+    if (typeof d.tss !== "number" || !Number.isFinite(d.tss) || d.tss < 0 || d.tss > MAX_PLANNED_TSS) throw new Error(`days[${i}].tss must be a number from 0 to ${MAX_PLANNED_TSS}.`);
+    if (planned.has(d.date)) throw new Error(`${d.date} is listed more than once; give each date one total tss.`);
+    planned.set(d.date, { tss: d.tss });
+  }
+  const to = [...planned.keys()].sort().pop()!;
+  if (to > addDays(asOf, MAX_FORECAST_DAYS)) throw new Error(`The last planned day ${to} is more than ${MAX_FORECAST_DAYS} days after asOf ${asOf}.`);
+
+  const { ctl, atl, tsb } = (await buildTrainingLoad(client, { date: asOf, days: 1 })).current;
+  const series = rollForward(planned, addDays(asOf, 1), to, { ctl, atl });
+  return {
+    asOf,
+    start: { ctl, atl, tsb },
+    series: series.map((p) => ({ date: p.date, tss: r1(p.tss), ctl: r1(p.ctl), atl: r1(p.atl), tsb: r1(p.tsb) })),
+    notes: [
+      "The same 42-day/7-day model as get_training_load, rolled forward from its current values (rounded to 1 decimal; CTL can be about 1 point off the watch). It is not a prediction of your response, and a day left out of `days` counts as a rest day (tss 0).",
+      "Workouts already in your account after asOf are not read: list them in `days` too, or the forecast ignores them.",
+    ],
   };
 }

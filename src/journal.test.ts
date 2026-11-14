@@ -64,6 +64,58 @@ test("journal: strict validation", () => {
   assert.doesNotThrow(() => parseLogInput({ ...ok, note: "x".repeat(500), exercises: Array.from({ length: 40 }, () => ({ name: "a", sets: Array.from({ length: 20 }, () => ({ reps: 0, kg: 1000, rpe: 1 })) })) }, NOW));
 });
 
+test("journal: tags are validated strictly (max 8, each 1-24 characters, strings only)", () => {
+  const ok = { workoutKey: KEY, note: "x" };
+  assert.deepEqual(parseLogInput({ ...ok, tags: ["deload", "left-knee"] }, NOW).tags, ["deload", "left-knee"]);
+  assert.equal("tags" in parseLogInput(ok, NOW), false);
+  // tags alone are content: the call is not refused as empty
+  assert.deepEqual(parseLogInput({ workoutKey: KEY, tags: ["pr"] }, NOW).tags, ["pr"]);
+  const bad: [unknown, RegExp][] = [
+    [{ ...ok, tags: "pr" }, /tags must be an array/],
+    [{ ...ok, tags: Array.from({ length: 9 }, (_, i) => `t${i}`) }, /tags can have at most 8 items/],
+    [{ ...ok, tags: [5] }, /tags\[0\] must be a string/],
+    [{ ...ok, tags: ["ok", "x".repeat(25)] }, /tags\[1\] must be at most 24 characters/],
+    [{ ...ok, tags: [" "] }, /tags\[0\] must not be empty/],
+    [{ workoutKey: KEY, tags: [] }, /nothing to log/],
+    [{ ...ok, tags: ["a\nb"] }, /tags\[0\] must not contain control characters/],
+    [{ ...ok, tags: ["a\u0000"] }, /control characters/],
+    [{ ...ok, tags: ["Deload", " deload "] }, /tags\[1\] duplicates tags\[0\]/],
+  ];
+  for (const [input, re] of bad) assert.throws(() => parseLogInput(input, NOW), re, JSON.stringify(input).slice(0, 80));
+  // trimmed before the length check and before storing
+  assert.deepEqual(parseLogInput({ ...ok, tags: ["  deload  ", `${"x".repeat(24)} `] }, NOW).tags, ["deload", "x".repeat(24)]);
+  assert.doesNotThrow(() => parseLogInput({ ...ok, tags: Array.from({ length: 8 }, (_, i) => `${i}`.repeat(24)) }, NOW));
+});
+
+test("journal: a tags-only call keeps the stored entry and only sets its tags; without an entry it creates a tags-only one", async () => {
+  await withDir(async (path) => {
+    const full = await logSession({ workoutKey: KEY, note: "heavy", feeling: "tired", tags: ["old"], exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }] }] }, path, NOW);
+    const later = new Date("2026-11-02T12:00:00Z");
+    const r = await logSession({ workoutKey: KEY, tags: ["deload", "knee"] }, path, later);
+    assert.deepEqual(r.saved, { ...full.saved, tags: ["deload", "knee"], loggedAt: later.toISOString() });
+    assert.deepEqual(r.replaced, full.saved, "the previous entry is still returned");
+    assert.deepEqual((await loadJournal(path))[KEY], r.saved);
+    // a call with a note is still a full replacement
+    const note = await logSession({ workoutKey: KEY, note: "new", tags: ["x"] }, path, later);
+    assert.deepEqual(note.saved.exercises, undefined);
+    // no entry yet: tags only
+    const other = "5e1f7c0de000000000000009";
+    const fresh = await logSession({ workoutKey: other, tags: ["pr"] }, path, NOW);
+    assert.deepEqual(fresh.saved, { workoutKey: other, loggedAt: NOW.toISOString(), tags: ["pr"] });
+    assert.equal(fresh.replaced, null);
+  });
+});
+
+test("journal: tags survive a save and load, and an entry with bad tags in the file is skipped", async () => {
+  await withDir(async (path) => {
+    const r = await logSession({ workoutKey: KEY, tags: ["deload"] }, path, NOW);
+    assert.deepEqual((await loadJournal(path))[KEY].tags, ["deload"]);
+    const { entries, ignored } = validEntries({ [KEY]: r.saved, ["5e1f7c0de000000000000002"]: { ...r.saved, workoutKey: "5e1f7c0de000000000000002", tags: "nope" } });
+    assert.equal(Object.keys(entries).length, 1);
+    assert.equal(ignored, 1);
+  });
+});
+
 test("journal: logging writes a 0600 file (directory 0700) and leaves no temp file", async () => {
   await withDir(async (path) => {
     const r = await logSession({ workoutKey: KEY, note: "all as planned except squat set 3: 6 reps", exercises: [{ name: "Back Squat", sets: [{ reps: 5 }, { reps: 5 }, { reps: 6 }] }] }, path, NOW);

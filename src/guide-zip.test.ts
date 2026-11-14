@@ -339,3 +339,37 @@ test("perExercise work step keeps the GO notification", () => {
   const g = buildStrengthGuideJson({ ...strengthPlan, lapGranularity: "perExercise" }, "app") as any;
   assert.equal(g.steps[1].notification.title, "GO");
 });
+
+test("hints: last/target show as a TODAY popup on the exercise's prep step and change no step text", () => {
+  const plain = buildStrengthGuideJson(strengthPlan, "app") as any;
+  const ex = strengthPlan.exercises;
+  const hinted = buildStrengthGuideJson({ ...strengthPlan, exercises: [{ ...ex[0], last: "3x10@60kg", target: "3x10@62.5kg" }, { ...ex[1], target: "2x8@42.5kg" }] }, "app") as any;
+  assert.deepEqual(hinted.steps[0].notification, { title: "TODAY", text: "Last 3x10@60kg > 3x10@62.5kg | Bench Press" });
+  assert.deepEqual(hinted.steps[6].notification, { title: "TODAY", text: "Target 2x8@42.5kg | Overhead Press" });
+  // everything except the two prep popups is identical, so lap labels (and compare_workout_to_plan) are unaffected
+  for (const g of [plain, hinted]) for (const i of [0, 6]) delete g.steps[i].notification;
+  assert.deepEqual(hinted, plain);
+});
+
+test("hints: only last, only target, none", () => {
+  const popup = (extra: object) => oneEx({ name: "Squat", ...extra }).steps[0].notification;
+  assert.deepEqual(popup({ last: "3x5@100kg" }), { title: "TODAY", text: "Last 3x5@100kg | Squat" });
+  assert.deepEqual(popup({ target: "3x5@102.5kg" }), { title: "TODAY", text: "Target 3x5@102.5kg | Squat" });
+  assert.equal(popup({}), undefined);
+  assert.equal(popup({ last: "", target: " " }), undefined);
+});
+
+test("hints: a too-long hint shortens last first (top reps), keeps target whole, and is dropped rather than cut mid-number", () => {
+  const popup = (extra: object) => oneEx({ name: "Squat", ...extra }).steps[0].notification;
+  // "Last 10/10/10/10/8@102.5kg > 5x10@102.5kg" is 41 chars: last drops to its top set, the target stays whole
+  assert.equal(popup({ last: "10/10/10/10/8@102.5kg", target: "5x10@102.5kg" }).text, "Last 10@102.5kg > 5x10@102.5kg | Squat");
+  // last that cannot be shortened: the target alone is shown, whole
+  assert.equal(popup({ last: "8@60/8@60/5@65/5@65/4@70kg", target: "3x8@60kg" }).text, "Target 3x8@60kg | Squat");
+  // nothing fits in 36 characters: no popup at all, never a truncated number
+  assert.equal(popup({ last: "L".repeat(36), target: "T".repeat(36) }), undefined);
+  assert.equal(popup({ target: "5x10@102.5kg and then some more text" }), undefined);
+  assert.equal(popup({ last: "x".repeat(33) }), undefined, "'Last ' + 33 is 38");
+  // every hint that is shown is 36 characters or less
+  const long = popup({ last: "10/10/10/10/8@102.5kg", target: "5x10@102.5kg" }).text.split(" | ")[0];
+  assert.ok(long.length <= 36);
+});

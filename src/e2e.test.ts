@@ -48,10 +48,10 @@ async function withStubbedEnv<T>(fn: (ctx: { cwd: string; env: Record<string, st
 
 type Call = (name: string, args?: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>;
 
-async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>, toolDefs: () => Promise<any[]>, rpc: (method: string, params?: unknown) => Promise<any>) => Promise<void>, extraEnv: Record<string, string> = {}) {
+async function withMcp(fn: (call: Call, listTools: () => Promise<string[]>, toolDefs: () => Promise<any[]>, rpc: (method: string, params?: unknown) => Promise<any>) => Promise<void>, extraEnv: Record<string, string> = {}, preload = stub) {
   await withStubbedEnv(async ({ cwd, env: baseEnv }) => {
     const env = { ...baseEnv, ...extraEnv };
-    const child = spawn(process.execPath, ["--import", stub, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
+    const child = spawn(process.execPath, ["--import", preload, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
     const pending = new Map<number, (msg: any) => void>();
     const noise: string[] = [];
     createInterface({ input: child.stdout }).on("line", (line) => {
@@ -469,6 +469,18 @@ async function runCli(args: string[]) {
   });
 }
 
+test("e2e CLI: forecast-training-load takes DATE:TSS pairs and prints the projection; a malformed pair is refused", async () => {
+  const ok = await runCli(["forecast-training-load", "2026-09-29:100", "--as-of", "2026-09-28"]);
+  assert.equal(ok.code, 0, ok.stderr);
+  const out = JSON.parse(ok.stdout);
+  assert.deepEqual(out.series, [{ date: "2026-09-29", tss: 100, ctl: 2.4, atl: 13.3, tsb: -11 }]);
+  for (const bad of [["2026-09-29"], ["2026-09-29:"], ["2026-09-29:abc"], []]) {
+    const r = await runCli(["forecast-training-load", ...bad]);
+    assert.notEqual(r.code, 0, bad.join(" "));
+    assert.match(r.stderr, /Usage: forecast-training-load/);
+  }
+});
+
 test("e2e CLI: get-route and export-route print the route JSON and the GPX", async () => {
   const route = await runCli(["get-route", "6acd201e1cc20768cf51aa4f"]);
   assert.equal(route.code, 0, route.stderr);
@@ -874,4 +886,107 @@ test("e2e CLI: get-exercise-history rejects a bad --weeks before any request", a
     assert.notEqual(r.code, 0, weeks);
     assert.match(r.stderr, re);
   }
+});
+
+// ---------- forecast_training_load, adjust_guide, push_week_plan ----------
+
+test("e2e forecast_training_load: rolls the stub's state at the end of the 28th forward, rest days included", async () => {
+  await withMcp(async (call) => {
+    const { text, isError } = await call("forecast_training_load", { asOf: "2026-09-28", days: [{ date: "2026-09-30", tss: 60 }, { date: "2026-09-29", tss: 0 }] });
+    assert.equal(isError, false, text);
+    assert.ok(!text.includes("\n"), "compact JSON");
+    const out = JSON.parse(text);
+    assert.deepEqual(out.start, { ctl: 3.4, atl: 17.3, tsb: -13.9 }, "get_training_load's current values on the 28th (see above)");
+    // from 3.4 / 17.3: a rest day -> 3.32 / 15.0; then 60 TSS -> 4.65 / 20.99
+    assert.deepEqual(out.series, [
+      { date: "2026-09-29", tss: 0, ctl: 3.3, atl: 15, tsb: -11.7 },
+      { date: "2026-09-30", tss: 60, ctl: 4.7, atl: 21, tsb: -16.3 },
+    ]);
+    const bad = await call("forecast_training_load", { asOf: "2026-09-28", days: [{ date: "2026-09-28", tss: 10 }] });
+    assert.equal(bad.isError, true);
+    assert.match(bad.text, /after asOf/);
+    const invalid = await call("forecast_training_load", { days: [{ date: "2026-09-29", tss: -5 }] });
+    assert.equal(invalid.isError, true);
+    assert.match(invalid.text, /Invalid arguments/);
+  }, { STUB_WORKOUT_TSS: "50" });
+});
+
+const weekGuide = (title: string, date: string) => ({ title, date, exercises: [{ name: "Squat", detail: "80kg 3x5", sets: 3, restSec: 90 }, { name: "Row", detail: "60kg 3x8", sets: 3, restSec: 60 }] });
+
+test("e2e adjust_guide: HRV and waking recovery both below the stub's band -> reduced spec, nothing pushed", async () => {
+  await withMcp(
+    async (call) => {
+      const { text, isError } = await call("adjust_guide", { date: "2026-09-25", guide: weekGuide("Legs", "2026-09-26") });
+      assert.equal(isError, false, text);
+      const out = JSON.parse(text);
+      assert.equal(out.level, "reduced");
+      assert.deepEqual(out.signals, { hrv: "below", recoveryMorning: "below" });
+      assert.deepEqual(out.guide.exercises.map((e: any) => [e.sets, e.detail]), [[2, "72.5kg 2x5"], [2, "55kg 2x8"]]);
+      // no history for that day: nothing to compare, nothing changed
+      const none = JSON.parse((await call("adjust_guide", { date: "2026-08-01", guide: weekGuide("Legs", "2026-08-02") })).text);
+      assert.deepEqual([none.level, none.adjusted], ["unchanged", false]);
+      const bad = await call("adjust_guide", { guide: { title: "x", date: "2026-09-26" } });
+      assert.equal(bad.isError, true);
+      assert.match(bad.text, /Invalid arguments.*exercises/);
+    },
+    { STUB_HISTORY_DAYS: "40" },
+  );
+});
+
+test("e2e push_week_plan: dryRun is the default and makes no network call at all; dryRun false pushes one guide per date", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-week-"));
+  const log = join(dir, "fetch.log");
+  try {
+    const guides = [weekGuide("Legs", "2026-10-02"), weekGuide("Push", "2026-09-30")];
+    await withMcp(
+      async (call, _list, defs) => {
+        const tool = (await defs()).find((t) => t.name === "push_week_plan");
+        assert.equal(tool.annotations.readOnlyHint, false, "a write tool");
+        for (const args of [{ guides }, { guides, dryRun: true }]) {
+          const r = await call("push_week_plan", args);
+          assert.equal(r.isError, false, r.text);
+          const out = JSON.parse(r.text);
+          assert.equal(out.dryRun, true);
+          assert.deepEqual(out.wouldPush.map((g: any) => [g.date, g.title, g.sets]), [["2026-09-30", "Push", 6], ["2026-10-02", "Legs", 6]]);
+        }
+        const dup = await call("push_week_plan", { guides: [guides[0], guides[0]] });
+        assert.equal(dup.isError, true);
+        assert.match(dup.text, /more than once/);
+        const withId = await call("push_week_plan", { guides: [{ ...guides[0], guideId: "x" }] });
+        assert.equal(withId.isError, true);
+        assert.match(withId.text, /guideId/);
+        const noEx = await call("push_week_plan", { guides: [{ title: "x", date: "2026-09-30" }] });
+        assert.equal(noEx.isError, true);
+        assert.match(noEx.text, /exercises/);
+        // the network is only reached by a real push (and fails here: every fetch throws)
+        assert.equal((await readFile(log, "utf8").catch(() => "")), "", "nothing so far touched the network");
+        const real = await call("push_week_plan", { guides, dryRun: false });
+        assert.equal(real.isError, true);
+      },
+      { SUUNTO_APP_NAME: "app", FETCH_LOG: log },
+      new URL("../test-fixtures/throwing-fetch.mjs", import.meta.url).href,
+    );
+    const calls = (await readFile(log, "utf8")).trim().split("\n");
+    assert.equal(calls.length, 1, `the first push attempt failed and stopped the plan: ${calls.join(", ")}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+
+  await withMcp(
+    async (call) => {
+      const r = await call("push_week_plan", { guides: [weekGuide("Legs", "2026-10-02"), weekGuide("Push", "2026-09-30")], dryRun: false });
+      assert.equal(r.isError, false, r.text);
+      const out = JSON.parse(r.text);
+      assert.deepEqual([out.dryRun, out.ok], [false, true]);
+      assert.deepEqual(out.pushed.map((g: any) => [g.date, g.check]), [["2026-09-30", { verified: true }], ["2026-10-02", { verified: true }]]);
+      assert.equal(new Set(out.pushed.map((g: any) => g.id)).size, 2, "two separate guides");
+    },
+    { SUUNTO_APP_NAME: "app" },
+  );
+
+  await withMcp(async (call) => {
+    const r = await call("push_week_plan", { guides: [weekGuide("Legs", "2026-10-02")], dryRun: false });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /SUUNTO_APP_NAME/);
+  });
 });

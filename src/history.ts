@@ -106,6 +106,65 @@ export const COLS = [
   "restEndHr", "restDropTotal", "restT20S", "restCoverage", "deviations", "reliable", "journal",
 ] as const;
 
+// ---------- progression hint ----------
+
+const fmtKg = (kg: number | null): string => (kg === null ? "" : `@${Number(kg.toFixed(2))}kg`);
+const fmtReps = (reps: number[]): string => (reps.every((r) => r === reps[0]) ? `${reps.length}x${reps[0]}` : reps.join("/"));
+// "3x8" (sets x reps) in a detail text; not "2x20kg" (a load) and not a rep range ("3x8-12", "3x8 - 12", "3x8–12", "3 x 8 to 12").
+export const PLANNED = /(?<![\d.,])(\d+)\s*x\s*(\d+)(?!\d|\s*kg|\s*[-\u2010-\u2015\u2212]\s*\d|\s+to\s+\d)/i;
+
+const num = (n: number): number => Number(n.toFixed(2));
+// The largest step is `max` (default 2.5 kg), but at most 5% of the load rounded to 1.25 kg, and never below 1.25 kg
+// (so a 5 kg dumbbell goes up 1.25 kg, 100 kg goes up 2.5 kg).
+const stepFor = (kg: number, max: number): number => Math.min(max, Math.max(1.25, Math.round((kg * 0.05) / 1.25) * 1.25));
+
+// What to show next to an exercise on the watch: `last` (the newest session in a named get_exercise_history
+// result) and a simple `target`. The load goes up only when a log_session entry shows every planned set done
+// with every planned rep AT ONE WEIGHT (the watch records only the plan); then same sets x reps, load + stepFor.
+// Differing weights between sets, a rep range, a missing load or any short set -> repeat (at the weight of the sets
+// that reached the reps, the lowest if they differ). Suggests, never pushes.
+export function suggestProgression(
+  history: { sessions: { cols: readonly string[]; rows: unknown[][] } },
+  opts: { incrementKg?: number } = {},
+): { last: string | null; target: string | null; reason: string } {
+  const maxStep = opts.incrementKg ?? 2.5;
+  const { cols, rows } = history.sessions;
+  const row = rows[rows.length - 1];
+  if (!row) return { last: null, target: null, reason: "no sessions to learn from" };
+  const get = (c: string) => row[cols.indexOf(c)];
+  const detail = typeof get("detail") === "string" ? (get("detail") as string) : null;
+  const labelKg = typeof get("kg") === "number" ? (get("kg") as number) : null;
+  const m = detail === null ? null : PLANNED.exec(detail);
+  const planned = m ? { sets: Number(m[1]), reps: Number(m[2]) } : null;
+  const plannedAt = (kg: number | null) => (planned ? fmtReps(Array<number>(planned.sets).fill(planned.reps)) + fmtKg(kg) : null);
+  const logged = ((get("journal") as { sets?: { reps?: unknown; kg?: unknown }[] } | null)?.sets ?? [])
+    .filter((x) => typeof x.reps === "number")
+    .map((x) => ({ reps: x.reps as number, kg: typeof x.kg === "number" ? x.kg : null }));
+  if (logged.length === 0) {
+    const last = plannedAt(labelKg) ?? detail;
+    return { last, target: last, reason: last === null ? "nothing recorded for that session" : "only the guide's plan is known (log_session records what was done): repeat it" };
+  }
+  // sets logged without any weight take the label's; a mix of weighed and unweighed sets cannot be compared
+  const weighed = logged.some((x) => x.kg !== null);
+  const kgs = logged.map((x) => (weighed ? x.kg : labelKg));
+  const known = kgs.filter((k): k is number => k !== null);
+  const uniform = new Set(kgs).size === 1;
+  const reps = logged.map((x) => x.reps);
+  const last = uniform ? fmtReps(reps) + fmtKg(kgs[0]) : `${logged.map((x, i) => `${x.reps}${kgs[i] === null ? "" : `@${num(kgs[i]!)}`}`).join("/")}${known.length ? "kg" : ""}`;
+  if (planned === null) return { last, target: last, reason: "the planned sets x reps cannot be read from the guide's text (a rep range, or no 'NxM'): repeat what was done" };
+  if (known.length === 0) return { last, target: plannedAt(null), reason: "no load to increase: repeat" };
+  const hit = logged.map((x, i) => ({ ok: x.reps >= planned.reps, kg: kgs[i] })).filter((x) => x.ok && x.kg !== null).map((x) => x.kg as number);
+  if (!uniform) {
+    return { last, target: plannedAt(Math.min(...(hit.length ? hit : known))), reason: "logged weights differ between sets (or are missing for some): no increase; repeat at the lowest weight that reached the reps" };
+  }
+  const kg = kgs[0]!;
+  if (logged.length >= planned.sets && reps.every((r) => r >= planned.reps)) {
+    const step = stepFor(kg, maxStep);
+    return { last, target: `${planned.sets}x${planned.reps}${fmtKg(kg + step)}`, reason: `every set reached ${planned.reps} reps: +${num(step)} kg` };
+  }
+  return { last, target: plannedAt(kg), reason: `a set fell short of the planned ${planned.sets}x${planned.reps}: repeat the load` };
+}
+
 type Client = Pick<SuuntoClient, "listWorkouts" | "getWorkoutWithExtensions" | "getWorkoutFit">;
 export interface HistoryDeps {
   now?: number;
@@ -285,6 +344,7 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
     name: opts.name,
     ...head,
     sessions: { cols: COLS, rows },
+    suggestion: suggestProgression({ sessions: { cols: COLS, rows } }),
     summary: { sessions: rows.length, firstLoadKg, lastLoadKg, restEndHrMedian: endHrMedian === null ? null : Math.round(endHrMedian) },
     pending,
     errors,

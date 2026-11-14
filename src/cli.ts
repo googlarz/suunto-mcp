@@ -4,7 +4,7 @@ import { SuuntoClient } from "./api.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
-import { buildTrainingLoad } from "./training-load.js";
+import { buildTrainingLoad, forecastTrainingLoad } from "./training-load.js";
 import { compareWorkout } from "./compare.js";
 import { buildRestProfile } from "./rest-profile.js";
 import { buildExerciseHistory } from "./history.js";
@@ -31,6 +31,7 @@ Workout commands:
 
 Analysis commands:
   get-training-load    <YYYY-MM-DD> [--days N]
+  forecast-training-load <YYYY-MM-DD:TSS>... [--as-of YYYY-MM-DD]   (CTL/ATL/TSB for planned days, from today's values)
   compare-workout      <workoutKey>   (laps only, no plan comparison)
   get-workout-rest-profile <workoutKey>
   get-exercise-history [name] [--weeks N]   (load, sets, rest recovery per session; writes only the local cache)
@@ -152,6 +153,19 @@ export async function runCli(argv: string[]) {
         const days = values.days !== undefined ? Number(values.days) : undefined;
         if (days !== undefined && !Number.isInteger(days)) die(`--days must be a whole number, got "${values.days}"`);
         out(await buildTrainingLoad(suunto, { date, days }));
+        break;
+      }
+
+      case "forecast-training-load": {
+        const usage = "Usage: forecast-training-load <YYYY-MM-DD:TSS>... [--as-of YYYY-MM-DD]";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { "as-of": { type: "string" } } });
+        if (positionals.length === 0) die(usage);
+        const days = positionals.map((p) => {
+          const [date, tss, ...extra] = p.split(":");
+          if (!date || tss === undefined || tss === "" || extra.length > 0 || !Number.isFinite(Number(tss))) die(`"${p}" is not DATE:TSS (e.g. 2026-11-17:60). ${usage}`);
+          return { date, tss: Number(tss) };
+        });
+        out(await forecastTrainingLoad(suunto, { days, asOf: values["as-of"] }));
         break;
       }
 

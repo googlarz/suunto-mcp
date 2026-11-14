@@ -231,6 +231,19 @@ test("e2e demo: get_training_load has a non-zero CTL; get_baselines has bands", 
   });
 });
 
+test("e2e demo: forecast_training_load and adjust_guide read the synthetic data and write nothing", async () => {
+  await withDemo(async (call, _rpc, fetchLog) => {
+    const f = await ok(call, "forecast_training_load", { days: [{ date: addDays(today(), 1), tss: 80 }, { date: addDays(today(), 3), tss: 60 }] });
+    assert.equal(f.demo, true);
+    assert.deepEqual(f.series.map((p: any) => p.date), [1, 2, 3].map((n) => addDays(today(), n)));
+    assert.ok(f.start.ctl > 5);
+    const a = await ok(call, "adjust_guide", { guide: { title: "T", date: today(), exercises: [{ name: "Bench", detail: "70kg 4x8", sets: 4, restSec: 90 }] } });
+    assert.equal(a.demo, true);
+    assert.ok(["unchanged", "lighter", "reduced"].includes(a.level));
+    assert.equal(await fetchLog(), "");
+  });
+});
+
 test("e2e demo: list_workouts -> laps -> compare_workout_to_plan; one session deviates", async () => {
   await withDemo(async (call) => {
     const list = await ok(call, "list_workouts", { limit: 100 });
@@ -302,6 +315,7 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
       ["push_workout_guide", { title: "T", date: today(), exercises: [{ name: "A", detail: "x" }] }],
       ["push_interval_guide", { title: "T", date: today(), blocks: [{ segments: [{ label: "Warmup", durationSec: 60 }] }] }],
       ["push_strength_guide", { title: "T", date: today(), exercises: [{ name: "A", detail: "x", sets: 3, restSec: 60 }] }],
+      ["push_week_plan", { guides: [{ title: "T", date: today(), exercises: [{ name: "A", detail: "x", sets: 3, restSec: 60 }] }], dryRun: false }],
       ["delete_guide", { guideId: "demo0001" }],
       ["generate_daily_digest", { date: localDate(1) }],
       ["log_session", { workoutKey: "0123456789abcdef01234567", note: "x" }],
