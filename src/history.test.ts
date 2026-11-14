@@ -403,6 +403,16 @@ test("history by name: the journal's top set weight replaces the label's load, a
   });
 });
 
+test("history by name: journal tags do not change the merge", async () => {
+  await withCacheDir(async () => {
+    const { client, parse } = fakeClient([{ key: keyOf(1), startMs: at(7) }]);
+    const entries: JournalEntry[] = [{ workoutKey: keyOf(1), loggedAt: "x", tags: ["deload"], note: "easy" }];
+    const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 2, date: TODAY }, deps(parse, { loadJournal: journalOf(entries) }));
+    assert.deepEqual(out.sessions.rows[0][out.sessions.cols.indexOf("journal")], { note: "easy" });
+    assert.equal(out.notes.some((n: string) => /journal entr(y|ies) ignored/.test(n)), false);
+  });
+});
+
 test("history: an unreadable journal is reported in notes and the history still works", async () => {
   await withCacheDir(async () => {
     const { client, parse } = fakeClient([{ key: keyOf(1), startMs: at(7) }]);

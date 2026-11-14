@@ -365,7 +365,7 @@ const toolDefs = [
   {
     name: "log_session",
     description:
-      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each. Output: { saved, replaced, entries }.",
+      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling, no tags and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each, at most 8 tags of 1-24 characters each (stored on the entry; get_exercise_history does not use them). Output: { saved, replaced, entries }.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -373,6 +373,12 @@ const toolDefs = [
         workoutKey: { type: "string", minLength: 24, maxLength: 24, pattern: "^[0-9a-fA-F]{24}$", description: "The 24-character workoutKey of the session, from list_workouts or get_daily_snapshot." },
         note: { type: "string", maxLength: 500, description: "How the session went overall, in the user's words, e.g. 'all as planned except squat set 3'." },
         feeling: { type: "string", maxLength: 500, description: "How the user felt, e.g. 'tired', 'strong'." },
+        tags: {
+          type: "array",
+          maxItems: 8,
+          description: "Optional short labels for the session, e.g. ['deload', 'poor-sleep'] (at most 8, each 1-24 characters).",
+          items: { type: "string", minLength: 1, maxLength: 24 },
+        },
         exercises: {
           type: "array",
           maxItems: 40,
