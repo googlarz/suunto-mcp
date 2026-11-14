@@ -469,6 +469,18 @@ async function runCli(args: string[]) {
   });
 }
 
+test("e2e CLI: forecast-training-load takes DATE:TSS pairs and prints the projection; a malformed pair is refused", async () => {
+  const ok = await runCli(["forecast-training-load", "2026-09-29:100", "--as-of", "2026-09-28"]);
+  assert.equal(ok.code, 0, ok.stderr);
+  const out = JSON.parse(ok.stdout);
+  assert.deepEqual(out.series, [{ date: "2026-09-29", tss: 100, ctl: 2.4, atl: 13.3, tsb: -11 }]);
+  for (const bad of [["2026-09-29"], ["2026-09-29:"], ["2026-09-29:abc"], []]) {
+    const r = await runCli(["forecast-training-load", ...bad]);
+    assert.notEqual(r.code, 0, bad.join(" "));
+    assert.match(r.stderr, /Usage: forecast-training-load/);
+  }
+});
+
 test("e2e CLI: get-route and export-route print the route JSON and the GPX", async () => {
   const route = await runCli(["get-route", "6acd201e1cc20768cf51aa4f"]);
   assert.equal(route.code, 0, route.stderr);
