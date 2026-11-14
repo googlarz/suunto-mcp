@@ -106,6 +106,46 @@ export const COLS = [
   "restEndHr", "restDropTotal", "restT20S", "restCoverage", "deviations", "reliable", "journal",
 ] as const;
 
+// ---------- progression hint ----------
+
+const fmtKg = (kg: number | null): string => (kg === null ? "" : `@${Number(kg.toFixed(2))}kg`);
+const fmtReps = (reps: number[]): string => (reps.every((r) => r === reps[0]) ? `${reps.length}x${reps[0]}` : reps.join("/"));
+// "3x8" (sets x reps) in a detail text; not "2x20kg" (a load) and not a range such as "3x8-12".
+const PLANNED = /(?<![\d.,])(\d+)\s*x\s*(\d+)(?![\d-]|\s*kg)/i;
+
+// What to show next to an exercise on the watch: `last` (the newest session in a named get_exercise_history
+// result) and a simple `target`. Every planned rep hit in every planned set (needs a log_session entry: the
+// watch records only the plan) -> same sets x reps, load + incrementKg (default 2.5); anything else -> repeat.
+// Suggests, never pushes.
+export function suggestProgression(
+  history: { sessions: { cols: readonly string[]; rows: unknown[][] } },
+  opts: { incrementKg?: number } = {},
+): { last: string | null; target: string | null; reason: string } {
+  const inc = opts.incrementKg ?? 2.5;
+  const { cols, rows } = history.sessions;
+  const row = rows[rows.length - 1];
+  if (!row) return { last: null, target: null, reason: "no sessions to learn from" };
+  const get = (c: string) => row[cols.indexOf(c)];
+  const detail = typeof get("detail") === "string" ? (get("detail") as string) : null;
+  const kg = typeof get("kg") === "number" ? (get("kg") as number) : null;
+  const m = detail === null ? null : PLANNED.exec(detail);
+  const planned = m ? { sets: Number(m[1]), reps: Number(m[2]) } : null;
+  const plannedText = planned ? fmtReps(Array<number>(planned.sets).fill(planned.reps)) + fmtKg(kg) : null;
+  const logged = (get("journal") as { sets?: { reps?: unknown }[] } | null)?.sets;
+  const reps = (logged ?? []).map((s) => s.reps).filter((r): r is number => typeof r === "number");
+  if (reps.length === 0) {
+    const last = plannedText ?? detail;
+    return { last, target: last, reason: last === null ? "nothing recorded for that session" : "only the guide's plan is known (log_session records what was done): repeat it" };
+  }
+  const last = fmtReps(reps) + fmtKg(kg);
+  if (planned === null) return { last, target: last, reason: "the planned sets x reps cannot be read from the guide's text: repeat what was done" };
+  if (kg === null) return { last, target: plannedText, reason: "no load to increase: repeat" };
+  if (reps.length >= planned.sets && reps.every((r) => r >= planned.reps)) {
+    return { last, target: `${planned.sets}x${planned.reps}${fmtKg(kg + inc)}`, reason: `every set reached ${planned.reps} reps: +${inc} kg` };
+  }
+  return { last, target: plannedText, reason: `a set fell short of the planned ${planned.sets}x${planned.reps}: repeat the load` };
+}
+
 type Client = Pick<SuuntoClient, "listWorkouts" | "getWorkoutWithExtensions" | "getWorkoutFit">;
 export interface HistoryDeps {
   now?: number;
@@ -285,6 +325,7 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
     name: opts.name,
     ...head,
     sessions: { cols: COLS, rows },
+    suggestion: suggestProgression({ sessions: { cols: COLS, rows } }),
     summary: { sessions: rows.length, firstLoadKg, lastLoadKg, restEndHrMedian: endHrMedian === null ? null : Math.round(endHrMedian) },
     pending,
     errors,

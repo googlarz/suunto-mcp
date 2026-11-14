@@ -436,6 +436,8 @@ export interface StrengthExercise {
   sets: number; // 1-100
   restSec: number; // rest between sets within this exercise. Not applied between exercises — that's the self-paced prep stopwatch
   restTargetHr?: number; // bpm 41-200 — adds a targetHeartRate gauge (40..restTargetHr) to this exercise's between-set rest steps (both restModes). Not on prep/set steps.
+  last?: string; // what was done last time, e.g. "3x8@60kg" — shown in a popup on the prep step (see exerciseHint)
+  target?: string; // today's target, e.g. "3x8@62.5kg" — same popup
   plates?: string; // per-side plate breakdown for barbell exercises, e.g. "2x20+1x5/side" — shown on the prep screen INSTEAD of detail (that's the moment you're loading the bar, not mid-set). Omit for non-barbell exercises (dumbbell, machine, bodyweight, cable) — detail is shown there instead. The math is done by the caller, not this tool.
 }
 
@@ -544,6 +546,15 @@ function buildRestStep(
   };
 }
 
+// "Last 3x8@60kg > 3x8@62.5kg", cut to the same 36 chars as the detail line.
+// Shown as a popup, not in the step text, so lap labels stay what they were.
+function exerciseHint(ex: StrengthExercise): string | undefined {
+  const last = ex.last?.trim();
+  const target = ex.target?.trim();
+  const hint = last && target ? `Last ${last} > ${target}` : last ? `Last ${last}` : target ? `Target ${target}` : undefined;
+  return hint === undefined ? undefined : truncate(hint, 36);
+}
+
 // Before every exercise — the very first one and each one after another
 // exercise — the user needs time to walk to the station and set up the
 // weight, and decides how long that takes by looking at HR. So this is
@@ -560,6 +571,7 @@ function buildPrepStep(
   totalExercises: number,
 ): Record<string, unknown> {
   const loadInfo = ex.plates ?? ex.detail;
+  const hint = exerciseHint(ex);
   return {
     type: "fields",
     title: strengthTitle(exIndex, totalExercises),
@@ -568,6 +580,7 @@ function buildPrepStep(
       { type: "duration", window: "step" },
       { type: "text", value: twoLineText(loadInfo, ex.name, "second") },
     ],
+    ...(hint === undefined ? {} : { notification: { title: "TODAY", text: truncate(`${hint} | ${ex.name}`, 54) } }),
     transitions: [{ condition: { type: "manualLap" } }],
   };
 }

@@ -339,3 +339,22 @@ test("perExercise work step keeps the GO notification", () => {
   const g = buildStrengthGuideJson({ ...strengthPlan, lapGranularity: "perExercise" }, "app") as any;
   assert.equal(g.steps[1].notification.title, "GO");
 });
+
+test("hints: last/target show as a TODAY popup on the exercise's prep step and change no step text", () => {
+  const plain = buildStrengthGuideJson(strengthPlan, "app") as any;
+  const ex = strengthPlan.exercises;
+  const hinted = buildStrengthGuideJson({ ...strengthPlan, exercises: [{ ...ex[0], last: "3x10@60kg", target: "3x10@62.5kg" }, { ...ex[1], target: "2x8@42.5kg" }] }, "app") as any;
+  assert.deepEqual(hinted.steps[0].notification, { title: "TODAY", text: "Last 3x10@60kg > 3x10@62.5kg | Bench Press" });
+  assert.deepEqual(hinted.steps[6].notification, { title: "TODAY", text: "Target 2x8@42.5kg | Overhead Press" });
+  // everything except the two prep popups is identical, so lap labels (and compare_workout_to_plan) are unaffected
+  for (const g of [plain, hinted]) for (const i of [0, 6]) delete g.steps[i].notification;
+  assert.deepEqual(hinted, plain);
+});
+
+test("hints: only last, only target, none; the combined hint is cut to the 36-char detail cap", () => {
+  const popup = (extra: object) => oneEx({ name: "Squat", ...extra }).steps[0].notification;
+  assert.deepEqual(popup({ last: "3x5@100kg" }), { title: "TODAY", text: "Last 3x5@100kg | Squat" });
+  assert.equal(popup({}), undefined);
+  assert.equal(popup({ last: "", target: "" }), undefined);
+  assert.equal(popup({ last: "L".repeat(36), target: "T".repeat(36) }).text, `Last ${"L".repeat(31)} | Squat`);
+});

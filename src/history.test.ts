@@ -4,7 +4,7 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { buildExerciseHistory, clearFailedSessions, deriveRecord, nameMatches, parseLoadKg, MAX_FETCH, type HistoryDeps } from "./history.js";
+import { buildExerciseHistory, clearFailedSessions, deriveRecord, nameMatches, parseLoadKg, suggestProgression, COLS, MAX_FETCH, type HistoryDeps } from "./history.js";
 import { shapeLaps } from "./laps.js";
 import type { ParsedFit } from "./fit.js";
 import type { JournalEntry } from "./journal.js";
@@ -410,6 +410,9 @@ test("history by name: journal tags do not change the merge", async () => {
     const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 2, date: TODAY }, deps(parse, { loadJournal: journalOf(entries) }));
     assert.deepEqual(out.sessions.rows[0][out.sessions.cols.indexOf("journal")], { note: "easy" });
     assert.equal(out.notes.some((n: string) => /journal entr(y|ies) ignored/.test(n)), false);
+    // the named result carries the progression hint of its newest session (no sets logged: a repeat)
+    assert.equal(out.suggestion.last, out.suggestion.target);
+    assert.match(out.suggestion.reason, /log_session/);
   });
 });
 
@@ -548,4 +551,49 @@ test("history index: a cut name with two longer candidates is not merged; the no
     assert.deepEqual(rows.map((e: any) => [e.name, e.sessions]).sort(), [["Barbell Bulgarian Split S", 1], ["Barbell Bulgarian Split Squat", 1], ["Barbell Bulgarian Split Stance", 1]]);
     assert.match(index.notes.join(" "), /could not be told apart.*Barbell Bulgarian Split S.*Barbell Bulgarian Split Squat.*Barbell Bulgarian Split Stance/);
   });
+});
+
+// ---------- suggestProgression ----------
+
+// A history result with one row per session (oldest first): [detail, kg, journalSets].
+function hist(...sessions: [string | null, number | null, any[] | null][]) {
+  const rows = sessions.map(([detail, kg, sets], i) => COLS.map((c) => (c === "date" ? `2026-10-0${i + 1}` : c === "detail" ? detail : c === "kg" ? kg : c === "journal" ? (sets ? { sets } : null) : null)));
+  return { sessions: { cols: COLS, rows } };
+}
+const sets = (n: number, reps: number, kg: number) => Array.from({ length: n }, () => ({ reps, kg }));
+
+test("suggestProgression: every planned rep hit -> same sets x reps, load +2.5 kg", () => {
+  const r = suggestProgression(hist(["60kg 3x8", 60, sets(3, 8, 60)]));
+  assert.equal(r.last, "3x8@60kg");
+  assert.equal(r.target, "3x8@62.5kg");
+  assert.match(r.reason, /every set reached 8 reps/);
+  assert.equal(suggestProgression(hist(["60kg 3x8", 60, sets(3, 8, 60)]), { incrementKg: 5 }).target, "3x8@65kg");
+});
+
+test("suggestProgression: a short set repeats the load; extra reps and a heavier top set count as hit", () => {
+  const miss = suggestProgression(hist(["60kg 3x8", 60, [{ reps: 8, kg: 60 }, { reps: 8, kg: 60 }, { reps: 6, kg: 60 }]]));
+  assert.equal(miss.last, "8/8/6@60kg");
+  assert.equal(miss.target, "3x8@60kg");
+  assert.match(miss.reason, /repeat/);
+  assert.equal(suggestProgression(hist(["60kg 3x8", 60, sets(2, 8, 60)])).target, "3x8@60kg", "a missing set is not a hit");
+  assert.equal(suggestProgression(hist(["60kg 3x8", 65, sets(4, 9, 65)])).target, "3x8@67.5kg");
+});
+
+test("suggestProgression: uses the newest session only; no history, no load, a rep range or no log never invent a progression", () => {
+  const newest = suggestProgression(hist(["50kg 3x8", 50, sets(3, 8, 50)], ["60kg 3x8", 60, sets(3, 8, 60)]));
+  assert.equal(newest.last, "3x8@60kg");
+  assert.deepEqual(suggestProgression({ sessions: { cols: COLS, rows: [] } }), { last: null, target: null, reason: "no sessions to learn from" });
+  // bodyweight: nothing to add to
+  const bw = suggestProgression(hist(["BW 3x12", null, sets(3, 12, 0).map(({ reps }) => ({ reps }))]));
+  assert.equal(bw.last, "3x12");
+  assert.equal(bw.target, "3x12");
+  // a rep range: what counts as "hit" is a decision for the caller
+  assert.equal(suggestProgression(hist(["60kg 3x8-12", 60, sets(3, 12, 60)])).target, "3x12@60kg");
+  // only the guide's plan is known (nothing logged): repeat it, and say that nothing was verified
+  const planned = suggestProgression(hist(["60kg 3x8", 60, null]));
+  assert.equal(planned.last, "3x8@60kg");
+  assert.equal(planned.target, "3x8@60kg");
+  assert.match(planned.reason, /log_session/);
+  // an unreadable detail is passed through as it is
+  assert.equal(suggestProgression(hist(["RPE6 8-12", null, null])).last, "RPE6 8-12");
 });
