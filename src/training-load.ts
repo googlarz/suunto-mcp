@@ -218,6 +218,7 @@ export interface PlannedDay {
 export async function forecastTrainingLoad(client: SuuntoClient, opts: { days: PlannedDay[]; asOf?: string }) {
   const asOf = opts.asOf ?? localDate();
   if (!isValidCalendarDate(asOf)) throw new Error(`"${asOf}" is not a valid calendar date (YYYY-MM-DD).`);
+  if (asOf > localDate()) throw new Error(`asOf ${asOf} is in the future (today is ${localDate()}): workouts that have not happened cannot be read; list planned days in \`days\` instead.`);
   if (!Array.isArray(opts.days) || opts.days.length === 0) throw new Error("days must list at least one planned day: [{ date, tss }].");
   const planned = new Map<string, { tss: number }>();
   for (const [i, d] of opts.days.entries()) {

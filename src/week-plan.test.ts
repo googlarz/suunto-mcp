@@ -45,6 +45,8 @@ test("adjust: one signal below -> one set less on exercises with 3+ sets, loads 
   assert.equal(bench.plates, "1x20+1x5/side", "load unchanged, plates stay");
   assert.equal(bench.last, "3x10@57.5kg");
   assert.equal(bench.target, undefined, "a target built for a normal day no longer applies");
+  assert.match(r.reasons.join(" "), /Bench Press: target removed/, "the removal is explained, also when only a set was cut");
+  assert.doesNotMatch(r.reasons.join(" "), /Overhead Press: target removed/, "an unchanged exercise keeps its target");
   assert.deepEqual(r.changes[0], { exercise: "Bench Press", from: { sets: 3, detail: "60kg 3x10" }, to: { sets: 2, detail: "60kg 2x10" } });
   assert.deepEqual(input, guide(), "the input is not modified");
 });

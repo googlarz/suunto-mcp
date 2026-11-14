@@ -567,7 +567,12 @@ test("suggestProgression: every planned rep hit -> same sets x reps, load +2.5 k
   assert.equal(r.last, "3x8@60kg");
   assert.equal(r.target, "3x8@62.5kg");
   assert.match(r.reason, /every set reached 8 reps/);
-  assert.equal(suggestProgression(hist(["60kg 3x8", 60, sets(3, 8, 60)]), { incrementKg: 5 }).target, "3x8@65kg");
+  // the increase is capped at 5% of the load, in 1.25 kg steps, never below 1.25 kg
+  assert.equal(suggestProgression(hist(["60kg 3x8", 60, sets(3, 8, 60)]), { incrementKg: 5 }).target, "3x8@62.5kg");
+  assert.equal(suggestProgression(hist(["100kg 3x5", 100, sets(3, 5, 100)]), { incrementKg: 5 }).target, "3x5@105kg");
+  assert.equal(suggestProgression(hist(["100kg 3x5", 100, sets(3, 5, 100)])).target, "3x5@102.5kg");
+  assert.equal(suggestProgression(hist(["5kg 3x10", 5, sets(3, 10, 5)])).target, "3x10@6.25kg", "a 5 kg dumbbell goes up by 1.25 kg, not 2.5");
+  assert.equal(suggestProgression(hist(["30kg 3x10", 30, sets(3, 10, 30)])).target, "3x10@31.25kg");
 });
 
 test("suggestProgression: a short set repeats the load; extra reps and a heavier top set count as hit", () => {
@@ -587,6 +592,12 @@ test("suggestProgression: uses the newest session only; no history, no load, a r
   const bw = suggestProgression(hist(["BW 3x12", null, sets(3, 12, 0).map(({ reps }) => ({ reps }))]));
   assert.equal(bw.last, "3x12");
   assert.equal(bw.target, "3x12");
+  // every way of writing a rep range: no increase, whatever was logged
+  for (const detail of ["60kg 3x8–12", "60kg 3x8 - 12", "60kg 3 x 8 to 12", "60kg 3x8—12", "60kg 3x8−12"]) {
+    const r = suggestProgression(hist([detail, 60, sets(3, 12, 60)]));
+    assert.equal(r.target, "3x12@60kg", detail);
+    assert.match(r.reason, /cannot be read/, detail);
+  }
   // a rep range: what counts as "hit" is a decision for the caller
   assert.equal(suggestProgression(hist(["60kg 3x8-12", 60, sets(3, 12, 60)])).target, "3x12@60kg");
   // only the guide's plan is known (nothing logged): repeat it, and say that nothing was verified
@@ -596,4 +607,24 @@ test("suggestProgression: uses the newest session only; no history, no load, a r
   assert.match(planned.reason, /log_session/);
   // an unreadable detail is passed through as it is
   assert.equal(suggestProgression(hist(["RPE6 8-12", null, null])).last, "RPE6 8-12");
+});
+
+test("suggestProgression: logged weights that differ between sets never give an increase, and the top weight is never paired with other sets' reps", () => {
+  // 8@60, 8@60, 5@65 against 3x8: the 65 kg set missed; the sets that hit the reps were at 60
+  const miss = suggestProgression(hist(["60kg 3x8", 65, [{ reps: 8, kg: 60 }, { reps: 8, kg: 60 }, { reps: 5, kg: 65 }]]));
+  assert.equal(miss.last, "8@60/8@60/5@65kg");
+  assert.equal(miss.target, "3x8@60kg");
+  assert.match(miss.reason, /differ/);
+  // 8@60, 8@60, 8@70: every rep hit, but the weights differ: repeat at the lowest, no +2.5 on the 70
+  const mixed = suggestProgression(hist(["60kg 3x8", 70, [{ reps: 8, kg: 60 }, { reps: 8, kg: 60 }, { reps: 8, kg: 70 }]]));
+  assert.equal(mixed.last, "8@60/8@60/8@70kg");
+  assert.equal(mixed.target, "3x8@60kg");
+  assert.match(mixed.reason, /differ.*lowest/);
+  // some sets with a weight, some without: not comparable, no increase
+  const partial = suggestProgression(hist(["60kg 3x8", 60, [{ reps: 8, kg: 60 }, { reps: 8 }, { reps: 8, kg: 60 }]]));
+  assert.equal(partial.target, "3x8@60kg");
+  assert.match(partial.reason, /differ/);
+  // sets that missed only at the lowest weight: the weight of the sets that hit the reps is used
+  const lowMiss = suggestProgression(hist(["60kg 3x8", 70, [{ reps: 6, kg: 55 }, { reps: 8, kg: 70 }, { reps: 8, kg: 70 }]]));
+  assert.equal(lowMiss.target, "3x8@70kg");
 });

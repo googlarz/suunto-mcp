@@ -20,8 +20,8 @@ const KG = /(\d+(?:[.,]\d+)?)(\s*kg)/i;
 //   no signal below the band (or no reading) -> unchanged; it never adds load or sets
 //   one of HRV / recovery on waking below    -> one set less on every exercise with 3+ sets
 //   both below                                -> that, plus every load 10% lower, rounded to 2.5 kg
-// The text in `detail` is rewritten to match (first "NxM", first "<n>kg"), and a plate breakdown or a
-// target that described the old load is dropped. An exercise whose detail cannot be rewritten is left as it is.
+// The text in `detail` is rewritten to match (first "NxM", first "<n>kg"). A plate breakdown is dropped when the
+// load changed, and `target` whenever anything about the exercise changed (sets or load); `last` stays. An exercise whose detail cannot be rewritten is left as it is.
 export function adjustStrengthGuide(guide: StrengthPlan, readiness: Readiness) {
   const signals = { hrv: readiness.hrv ?? null, recoveryMorning: readiness.recoveryMorning ?? null };
   const below = [signals.hrv === "below" ? "HRV" : "", signals.recoveryMorning === "below" ? "recovery on waking" : ""].filter(Boolean);
@@ -63,7 +63,10 @@ export function adjustStrengthGuide(guide: StrengthPlan, readiness: Readiness) {
       }
     }
     if (ex.sets !== from.sets || ex.detail !== from.detail) {
-      delete ex.target; // a target built for a normal day no longer applies
+      if (ex.target !== undefined) {
+        delete ex.target; // it was set for the unreduced plan, whatever was changed
+        reasons.push(`${ex.name}: target removed (it was set for the unreduced plan).`);
+      }
       changes.push({ exercise: ex.name, from, to: { sets: ex.sets, detail: ex.detail } });
     }
   }

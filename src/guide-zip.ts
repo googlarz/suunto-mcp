@@ -546,13 +546,16 @@ function buildRestStep(
   };
 }
 
-// "Last 3x8@60kg > 3x8@62.5kg", cut to the same 36 chars as the detail line.
+// "Last 3x8@60kg > 3x8@62.5kg", at most 36 characters like the detail line. Never cut mid-number: when the whole hint
+// is too long, `last` is shortened first (a reps list "10/10/10/10/8@102.5kg" to its top reps "10@102.5kg"), then
+// dropped so the target stays whole, and when even that does not fit there is no hint at all.
 // Shown as a popup, not in the step text, so lap labels stay what they were.
 function exerciseHint(ex: StrengthExercise): string | undefined {
   const last = ex.last?.trim();
   const target = ex.target?.trim();
-  const hint = last && target ? `Last ${last} > ${target}` : last ? `Last ${last}` : target ? `Target ${target}` : undefined;
-  return hint === undefined ? undefined : truncate(hint, 36);
+  const compact = (l: string) => l.replace(/^(\d+(?:\/\d+)+)@/, (_, reps: string) => `${Math.max(...reps.split("/").map(Number))}@`);
+  const build = (l?: string, t?: string) => (l && t ? `Last ${l} > ${t}` : l ? `Last ${l}` : t ? `Target ${t}` : undefined);
+  return [build(last, target), build(last && compact(last), target), build(undefined, target)].find((h) => h !== undefined && h.length <= 36);
 }
 
 // Before every exercise — the very first one and each one after another

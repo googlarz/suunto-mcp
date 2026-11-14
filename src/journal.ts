@@ -60,10 +60,16 @@ function tagList(v: unknown): string[] | undefined {
   if (v === undefined) return undefined;
   if (!Array.isArray(v)) throw new Error("tags must be an array");
   if (v.length > MAX_TAGS) throw new Error(`tags can have at most ${MAX_TAGS} items`);
-  return v.map((t, i) => {
-    if (typeof t !== "string") throw new Error(`tags[${i}] must be a string`);
-    if (t.trim() === "") throw new Error(`tags[${i}] must not be empty`);
+  const seen = new Map<string, number>();
+  return v.map((raw, i) => {
+    if (typeof raw !== "string") throw new Error(`tags[${i}] must be a string`);
+    const t = raw.trim();
+    if (t === "") throw new Error(`tags[${i}] must not be empty`);
     if (t.length > MAX_TAG_LENGTH) throw new Error(`tags[${i}] must be at most ${MAX_TAG_LENGTH} characters`);
+    if (/\p{Cc}/u.test(t)) throw new Error(`tags[${i}] must not contain control characters`);
+    const key = t.toLowerCase();
+    if (seen.has(key)) throw new Error(`tags[${i}] duplicates tags[${seen.get(key)}] (ignoring case)`);
+    seen.set(key, i);
     return t;
   });
 }
@@ -196,10 +202,13 @@ let queue: Promise<unknown> = Promise.resolve();
 
 // Stores the entry, replacing one for the same workoutKey; returns the one it replaced (or null)
 // so nothing is lost silently.
+// A call with only tags does not replace: it sets the tags of the stored entry and keeps the rest of it.
 export function logSession(args: unknown, path = journalPath(), now = new Date()): Promise<{ saved: JournalEntry; replaced: JournalEntry | null; entries: number }> {
   const run = async () => {
-    const saved = parseLogInput(args, now);
-    const replaced = (await loadJournal(path))[saved.workoutKey] ?? null;
+    const parsed = parseLogInput(args, now);
+    const replaced = (await loadJournal(path))[parsed.workoutKey] ?? null;
+    const tagsOnly = !parsed.note?.trim() && !parsed.feeling?.trim() && !parsed.exercises?.length;
+    const saved = tagsOnly && replaced ? { ...replaced, loggedAt: parsed.loggedAt, tags: parsed.tags } : parsed;
     return { saved, replaced, entries: await saveJournal(path, saved) };
   };
   const result = queue.then(run);

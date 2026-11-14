@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dayFetchBounds } from "./api.js";
+import { dayFetchBounds, localDate } from "./api.js";
 import {
   aggregateByDay,
   buildTrainingLoad,
   forecastTrainingLoad,
   MAX_FORECAST_DAYS,
+  addDays,
   rollForward,
   weekStart,
   weeklyTotals,
@@ -243,4 +244,15 @@ test("forecastTrainingLoad: refuses bad plans before any request", async () => {
   await assert.rejects(f([{ date: "2026-07-11", tss: 5 }]), new RegExp(`${MAX_FORECAST_DAYS} days`));
   await assert.rejects(f([{ date: "2026-03-11", tss: 5 }], "2026-02-30"), /not a valid calendar date/);
   assert.equal(calls.length, 0);
+});
+
+test("forecastTrainingLoad: an asOf in the future is refused (its workouts cannot exist yet); today is fine", async () => {
+  const { client, calls } = fakeClient([]);
+  const today = localDate();
+  const tomorrow = addDays(today, 1);
+  await assert.rejects(forecastTrainingLoad(client, { asOf: tomorrow, days: [{ date: addDays(today, 2), tss: 50 }] }), new RegExp(`asOf ${tomorrow} is in the future.*today is ${today}`));
+  assert.equal(calls.length, 0);
+  const ok = await forecastTrainingLoad(client, { asOf: today, days: [{ date: tomorrow, tss: 50 }] });
+  assert.equal(ok.asOf, today);
+  assert.equal(calls.length, 1);
 });
