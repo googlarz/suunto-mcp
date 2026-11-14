@@ -24,7 +24,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "node:fs";
 import { loadConfig, assertCredentials } from "./config.js";
-import { SuuntoClient } from "./api.js";
+import { SuuntoClient, localDate } from "./api.js";
+import { adjustStrengthGuide, planWeek } from "./week-plan.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
 import { PROMPTS, getPrompt } from "./prompts.js";
@@ -36,7 +37,7 @@ import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 import { compareWorkout } from "./compare.js";
 import { buildRestProfile } from "./rest-profile.js";
 import { buildSnapshot, buildSnapshotRange } from "./snapshot.js";
-import { buildTrainingLoad } from "./training-load.js";
+import { buildTrainingLoad, forecastTrainingLoad } from "./training-load.js";
 import { buildBaselines } from "./baselines.js";
 import { buildExerciseHistory } from "./history.js";
 import { logSession } from "./journal.js";
@@ -263,6 +264,40 @@ const toolDefs = [
         },
       },
       required: ["date"],
+    },
+  },
+  {
+    name: "forecast_training_load",
+    description:
+      "Projects Fitness (CTL, 42-day), Fatigue (ATL, 7-day) and Form (TSB) for planned training days: the same model and constants as get_training_load, rolled forward from today's values. Give each planned day's training stress as `tss` (the unit get_training_load shows per day: a typical hour of easy training is about 40-60, a hard one 80-100+); a date left out of `days` between today and the last planned day is a rest day (tss 0). Starts from the state at the end of `asOf` (default today) read with get_training_load's own computation (one workouts request, warm-up included); every planned date must be after asOf, so to plan today pass yesterday as asOf. Workouts already in the account after asOf are not read: list them in `days`. Output (numbers to 1 decimal): { asOf, start: { ctl, atl, tsb }, series: [{ date, tss, ctl, atl, tsb }] (one per day from the day after asOf to the last planned day, values at the end of each day), notes }. A projection of the model, not a prediction of how you will respond; CTL can be about 1 point off the watch. At most 120 days after asOf. Read-only: it writes nothing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        days: {
+          type: "array",
+          minItems: 1,
+          maxItems: 120,
+          description: "The planned days, in any order, one entry per date.",
+          items: {
+            type: "object",
+            properties: {
+              date: { type: "string", format: "date", pattern: "^\\d{4}-\\d{2}-\\d{2}$", minLength: 10, maxLength: 10, description: "The day, YYYY-MM-DD, after asOf." },
+              tss: { type: "number", minimum: 0, maximum: 1000, description: "The day's total planned training stress (all sessions of that day together)." },
+            },
+            required: ["date", "tss"],
+          },
+        },
+        asOf: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-20"],
+          description: "The last local day whose workouts are counted as done, YYYY-MM-DD (default today). The projection starts the day after.",
+        },
+      },
+      required: ["days"],
     },
   },
   {
@@ -926,9 +961,51 @@ const toolDefs = [
   },
 ];
 
+// The tools that take a strength guide spec reuse push_strength_guide's schema (minus guideId) instead of copying it.
+const strengthSpec: any = (() => {
+  const { guideId: _guideId, ...properties } = (toolDefs.find((t) => t.name === "push_strength_guide")!.inputSchema as any).properties;
+  return { type: "object", properties, required: ["title", "date", "exercises"] };
+})();
+const specTools = [
+  {
+    name: "adjust_guide",
+    description:
+      "Adjusts a strength guide spec (the arguments of push_strength_guide) to how recovered the user is on `date` (default today), and RETURNS the adjusted spec with the reasons. It does not push anything: show the user the changes, and push the returned `guide` with push_strength_guide only if they agree. Reads get_baselines for `date`: HRV (metrics.hrv.latestVsBand) and recovery on waking (metrics.recoveryMorning.latestVsBand) against the user's own band of the last 28 days. Rules: neither below the band, or no reading yet -> unchanged (it never adds load or sets); one of the two below -> one set less on every exercise with 3 or more sets (the 'NxM' in detail is rewritten to match; an exercise whose detail has no matching 'NxM' keeps its sets and says so in reasons); both below -> that, plus every load in detail (the first '<n>kg', not bodyweight) 10% lower rounded to 2.5 kg, a plates breakdown and a target that described the old load are dropped. Output: { level ('unchanged' | 'lighter' | 'reduced'), adjusted (whether anything changed), signals: { hrv, recoveryMorning } (below | within | above | null), reasons, changes: [{ exercise, from: { sets, detail }, to: { sets, detail } }], guide (the full adjusted spec), baselineErrors (only when a baseline section failed) }. The band is the middle half of the user's own recent days, not a medical reference. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        guide: { ...strengthSpec, description: "The strength guide spec to adjust: the same arguments as push_strength_guide (without guideId)." },
+        date: {
+          type: "string",
+          format: "date",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+          minLength: 10,
+          maxLength: 10,
+          examples: ["2026-04-20"],
+          description: "The day whose HRV and recovery are compared with the band, YYYY-MM-DD (default today: the night that led into it). A day with no reading yet leaves the guide unchanged.",
+        },
+      },
+      required: ["guide"],
+    },
+  },
+  {
+    name: "push_week_plan",
+    description:
+      "Pushes a week of strength guides: one NEW SuuntoPlus guide per date, each built and sent exactly like push_strength_guide (same arguments per guide, without guideId; several dates coexist on the account). dryRun defaults to TRUE: then it only validates every guide (schema, unique dates, building each guide) and returns what it would push as { dryRun: true, ok, wouldPush: [{ date, title, exercises, sets }], notes } without contacting Suunto; show that to the user and call again with dryRun: false only when they agree. With dryRun false: everything is validated and built first, then the guides are pushed one after the other in date order (queued with a short pause, each read back from the guide list); the first failure stops the push, so the result is { dryRun: false, ok, pushed: [{ date, title, id, check: { verified, note? } }], failed?: { date, error }, notPushed?: [dates], notes } (ok false with failed set; say which days are missing). Pushing the same plan twice creates duplicates (list_guides / delete_guide to tidy up); to overwrite one guide use push_strength_guide with guideId. At most 14 guides. Requires SUUNTO_APP_NAME for a real push. Same delivery caveat as push_strength_guide: it appears after the phone's next normal Suunto app sync. Write operation (dryRun false).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        guides: { type: "array", minItems: 1, maxItems: 14, items: strengthSpec, description: "One strength guide spec per date (dates must differ)." },
+        dryRun: { type: "boolean", default: true, description: "true (default): validate only and return what would be pushed; false: push the guides." },
+      },
+      required: ["guides"],
+    },
+  },
+];
+
 // Titles + annotations live in tool-meta.ts; a tool without an entry there
 // fails at startup rather than shipping unannotated.
-const tools = toolDefs.map((t) => {
+const tools = [...toolDefs, ...specTools].map((t) => {
   const meta = TOOL_META[t.name];
   if (!meta) throw new Error(`Tool "${t.name}" has no entry in tool-meta.ts`);
   return { ...t, ...meta };
@@ -999,6 +1076,23 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await buildBaselines(suunto, { date: a.date, days: a.days })));
       case "get_training_load":
         return text(JSON.stringify(await buildTrainingLoad(suunto, { date: a.date, days: a.days, seedCtl: a.seedCtl, seedAtl: a.seedAtl })));
+      case "forecast_training_load":
+        return text(JSON.stringify(await forecastTrainingLoad(suunto, { days: a.days, asOf: a.asOf })));
+      case "adjust_guide": {
+        const baselines = await buildBaselines(suunto, { date: a.date ?? localDate() });
+        const m: any = baselines.metrics;
+        const adjusted = adjustStrengthGuide(a.guide, { hrv: m.hrv?.latestVsBand, recoveryMorning: m.recoveryMorning?.latestVsBand });
+        return text(JSON.stringify({ ...adjusted, ...(baselines.errors.length ? { baselineErrors: baselines.errors } : {}) }));
+      }
+      case "push_week_plan": {
+        const result = await planWeek(a.guides, {
+          dryRun: a.dryRun !== false,
+          appName: cfg.appName,
+          validate: (g) => validateAgainstSchema(strengthSpec, g, "guide"),
+          push: (zip, title) => suunto.pushGuideVerified(zip, title),
+        });
+        return text(JSON.stringify(result), !result.ok);
+      }
       case "get_workout_laps": {
         const data = await suunto.getWorkoutWithExtensions(a.workoutKey, LAP_EXTENSIONS);
         return text(JSON.stringify(shapeLaps(data)));

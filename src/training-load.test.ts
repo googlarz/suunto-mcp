@@ -4,6 +4,8 @@ import { dayFetchBounds } from "./api.js";
 import {
   aggregateByDay,
   buildTrainingLoad,
+  forecastTrainingLoad,
+  MAX_FORECAST_DAYS,
   rollForward,
   weekStart,
   weeklyTotals,
@@ -201,5 +203,44 @@ test("buildTrainingLoad: an invalid date or day count is refused before any requ
   await assert.rejects(buildTrainingLoad(client, { date: "2026-02-30" }), /not a valid calendar date/);
   await assert.rejects(buildTrainingLoad(client, { date: "2026-03-10", days: 121 }), /from 1 to 120/);
   await assert.rejects(buildTrainingLoad(client, { date: "2026-03-10", days: 0 }), /from 1 to 120/);
+  assert.equal(calls.length, 0);
+});
+
+// ---------- forecastTrainingLoad ----------
+
+test("forecastTrainingLoad: rolls the current state forward with the same 42/7 constants; gap days are rest days", async () => {
+  // CTL/ATL on 2026-03-10 from one 100-TSS workout that day: 2.35283133 / 13.31221002 (see rollForward above), shown at 1 decimal
+  const { client } = fakeClient([withTss("2026-03-10T08:00:00", 100)]);
+  const out = await forecastTrainingLoad(client, { asOf: "2026-03-10", days: [{ date: "2026-03-13", tss: 80 }, { date: "2026-03-11", tss: 60 }] });
+  assert.deepEqual(out.start, { ctl: 2.4, atl: 13.3, tsb: -11 });
+  assert.equal(out.asOf, "2026-03-10");
+  assert.deepEqual(out.series.map((p) => [p.date, p.tss]), [["2026-03-11", 60], ["2026-03-12", 0], ["2026-03-13", 80]]);
+  const expected = rollForward(tssMap({ "2026-03-11": 60, "2026-03-13": 80 }), "2026-03-11", "2026-03-13", { ctl: 2.4, atl: 13.3 });
+  out.series.forEach((p, i) => {
+    assert.equal(p.ctl, Math.round(expected[i].ctl * 10) / 10);
+    assert.equal(p.atl, Math.round(expected[i].atl * 10) / 10);
+    assert.equal(p.tsb, Math.round(expected[i].tsb * 10) / 10);
+  });
+  assert.ok(out.notes.some((n) => /not a prediction of your response/.test(n)));
+});
+
+test("forecastTrainingLoad: reads the current state with one workouts request and nothing else", async () => {
+  const { client, calls } = fakeClient([]);
+  await forecastTrainingLoad(client, { asOf: "2026-03-10", days: [{ date: "2026-03-11", tss: 0 }] });
+  assert.equal(calls.length, 1);
+});
+
+test("forecastTrainingLoad: refuses bad plans before any request", async () => {
+  const { client, calls } = fakeClient([]);
+  const f = (days: any, asOf = "2026-03-10") => forecastTrainingLoad(client, { asOf, days });
+  await assert.rejects(f([]), /at least one planned day/);
+  await assert.rejects(f("x"), /at least one planned day/);
+  await assert.rejects(f([{ date: "2026-02-30", tss: 5 }]), /not a valid calendar date/);
+  await assert.rejects(f([{ date: "2026-03-10", tss: 5 }]), /after asOf 2026-03-10/);
+  await assert.rejects(f([{ date: "2026-03-11", tss: -1 }]), /tss must be a number from 0 to 1000/);
+  await assert.rejects(f([{ date: "2026-03-11", tss: "50" }]), /tss must be a number/);
+  await assert.rejects(f([{ date: "2026-03-11", tss: 5 }, { date: "2026-03-11", tss: 6 }]), /more than once/);
+  await assert.rejects(f([{ date: "2026-07-11", tss: 5 }]), new RegExp(`${MAX_FORECAST_DAYS} days`));
+  await assert.rejects(f([{ date: "2026-03-11", tss: 5 }], "2026-02-30"), /not a valid calendar date/);
   assert.equal(calls.length, 0);
 });

@@ -111,7 +111,7 @@ export const COLS = [
 const fmtKg = (kg: number | null): string => (kg === null ? "" : `@${Number(kg.toFixed(2))}kg`);
 const fmtReps = (reps: number[]): string => (reps.every((r) => r === reps[0]) ? `${reps.length}x${reps[0]}` : reps.join("/"));
 // "3x8" (sets x reps) in a detail text; not "2x20kg" (a load) and not a range such as "3x8-12".
-const PLANNED = /(?<![\d.,])(\d+)\s*x\s*(\d+)(?![\d-]|\s*kg)/i;
+export const PLANNED = /(?<![\d.,])(\d+)\s*x\s*(\d+)(?![\d-]|\s*kg)/i;
 
 // What to show next to an exercise on the watch: `last` (the newest session in a named get_exercise_history
 // result) and a simple `target`. Every planned rep hit in every planned set (needs a log_session entry: the
