@@ -108,13 +108,35 @@ Suunto takes 3–4 weeks to approve API access. You don't have to wait to see wh
 
 What works: every read tool and the four prompts (`suunto-morning`, `suunto-weekly`, `suunto-gym-today`, `suunto-gym-review`) — workouts with guide-labelled gym laps (three sessions a week, one of them with a planted deviation for `compare_workout_to_plan` and one with a heart-rate dropout, so the `hrQuality` flag shows), one or two runs a week with TSS, nightly sleep with stages, score and HRV plus the odd nap, recovery every 30 minutes, daily steps and energy, two routes, three guides, and a small FIT file with heart rate for `get_workout_fit` and `get_workout_rest_profile`. Training load, baselines and snapshots are computed from that data by the normal code.
 
-`set_plan`, `get_plan`, `get_catchup`, `archive_workouts` and `get_archive_status` work too, on in-memory state only: the plan, the catch-up marker and the workout archive live as long as the server process and never reach the disk. `get_tag_effects` runs on a small synthetic journal (gym sessions tagged `strength`, Saturday runs `long-run`); your real journal is not read.
+`set_plan`, `get_plan`, `get_catchup`, `archive_workouts`, `get_archive_status` and `get_weekly_report` (its `save` too) work too, on in-memory state only: the plan, the catch-up marker and the workout archive live as long as the server process and never reach the disk. `get_tag_effects` runs on a small synthetic journal (gym sessions tagged `strength`, Saturday runs `long-run`); your real journal is not read.
 
 What does not: anything else that writes (`upload_workout`, `upload_route`, `push_*_guide`, `push_week_plan`, `delete_guide`, `generate_daily_digest`, `log_session`) writes nothing and only returns a short note on what it would do with real credentials. `get_upload_status` has no uploads to find.
 
 You can't mistake demo data for real data: every tool result is JSON with a top-level `"demo": true` (a result that is a list, or text such as a GPX file, comes back as `{ "demo": true, "data": … }`), the server's instructions and the prompts say the data is synthetic, and the startup line says DEMO MODE. Errors are unchanged. `npm run doctor` with `SUUNTO_DEMO=1` just reports that demo mode is on. When your API access arrives, remove `SUUNTO_DEMO` and follow the setup below. Demo mode applies to the MCP server only, not to the terminal commands.
 
 ---
+
+### One-click install (.mcpb bundle)
+
+If you do not want to touch a terminal, a `.mcpb` file is a single file you open with Claude Desktop. It carries its own copy of everything the server needs, so you do **not** need Node.js, Git or `npm`.
+
+**What you do (plain steps):**
+
+1. Get `suunto-mcp-<version>.mcpb`. There is no download link yet: whoever maintains your copy builds it with `npm run pack:mcpb` (it appears in the `build/` folder), or you build it yourself from the cloned folder the same way.
+2. Double-click the file, or open Claude Desktop and drag it into **Settings, Extensions**. Claude shows an install screen; click **Install**.
+3. The screen has a few boxes. Leave **Demo mode** ticked and everything else empty: you can ask Claude about a made-up training history straight away, with no Suunto account. Every answer is marked as demo data.
+4. To use your own data later: get Suunto's developer API access (the 3-4 week approval in Part 1 below, there is no way around it), untick **Demo mode**, fill in the client ID, client secret and subscription key from apizone.suunto.com, and restart Claude. Then do the one-time pairing (Step 7 below). The bundle does **not** add a new sign-in: pairing is still the existing `suunto-mcp-auth` command, which needs a terminal once (`npx -y -p suunto-mcp suunto-mcp-auth` with the same three values set as environment variables, or `npm run auth` in a cloned folder); the tokens it saves in `~/.suunto-mcp/tokens.json` are then used by the bundle too. The three boxes are stored by Claude Desktop as sensitive values.
+
+**What is in the file:** `manifest.json`, the compiled server (`dist/`), its production dependencies (`node_modules/`), a minimal `package.json` and the licence. Nothing else: no sources, tests, `.env`, token or credential files (the packer refuses any file with such a name, and a test checks the produced file's listing). Nothing is uploaded anywhere by the command; it only writes `build/suunto-mcp-<version>.mcpb` (the `build/` folder is not committed).
+
+**Not verified (read before relying on it):**
+
+- The file has not been opened in Claude Desktop or any other host: the manifest follows the published MCPB manifest spec (version 0.3), and a test starts the unpacked entry point the way a host does, but host-side behaviour is untested. In particular it is unknown how a given host writes a ticked box (the bundle accepts `true` or `1`) or an empty optional box (a blank value, or the literal `${user_config...}` text: both are treated as not set).
+- No signing: the file is unsigned, so a host may warn that it comes from an unknown publisher.
+- No automatic updates: a new version means a new file. The version in `manifest.json` must equal `package.json` (a test enforces it).
+- No icon: the manifest declares none.
+- Built as plain JavaScript (the optional OS-keychain module is left out, so `SUUNTO_TOKEN_STORAGE=keychain` is not available in the bundle); only the platform it was packed on has been checked.
+- Packing needs network access once (`npm ci` of the production dependencies from `package-lock.json`).
 
 ### Part 1: Register with Suunto's developer portal (~5 min to submit, then wait 3–4 weeks)
 
@@ -522,6 +544,7 @@ Set these in the `env` block of your Claude config (or in `.env` for terminal co
 | `SUUNTO_PLAN_PATH` | no | The `set_plan` / `get_plan` plan file; default `~/.suunto-mcp/plan.json` |
 | `SUUNTO_SEEN_PATH` | no | The `get_catchup` marker file; default `~/.suunto-mcp/seen.json` |
 | `SUUNTO_ARCHIVE_DIR` | no | Folder of the `archive_workouts` archive (FIT files and workout summaries); default `~/.suunto-mcp/archive/` |
+| `SUUNTO_REPORTS_DIR` | no | Folder where `get_weekly_report` with `save: true` writes `week-<Monday>.md`; default `~/.suunto-mcp/reports/` |
 | `SUUNTO_WEBHOOK_SECRET`, `SUUNTO_WEBHOOK_HOST`, `SUUNTO_WEBHOOK_LOG`, `SUUNTO_WEBHOOK_ALLOW_UNSIGNED`, `PORT` | webhook only | See the Webhooks section |
 
 ---
@@ -535,6 +558,7 @@ Besides the tokens, suunto-mcp keeps these on your computer (all under `~/.suunt
 - `plan.json` — the training plan you set with `set_plan` (goal, phases, planned sessions). Your own record too; it is never sent to Suunto or the watch. A damaged file is refused, not overwritten: fix or delete it.
 - `seen.json` — the small marker `get_catchup` uses to know what is new (the workouts already reported, the latest night and recovery sample seen, and the day its review window starts). Only written when `markSeen: true` is passed. Safe to delete: the next call looks back 7 days again. A damaged file stops the call and is never overwritten.
 - `archive/<workoutKey>.fit` and `archive/<workoutKey>.json` — what `archive_workouts` copied from Suunto: the FIT file as Suunto sent it, and the workout's summary from the list plus the FIT's size and SHA-256 (the `.json` is written last and marks the workout as archived). A few hundred KB per workout, so a few years of training is some hundred MB. Your own copy of your data: nothing rebuilds a file you delete except calling `archive_workouts` again, which downloads it again. The tool never overwrites or deletes anything: a file that is damaged, foreign or does not match its record is reported and left for you to fix or move. Files are linked into place under a temporary name, so not even a second process can overwrite one (the folder's filesystem must support hard links). A FIT file with no record, left by an interrupted call, is listed as `incomplete` by `get_archive_status` and completed by the next `archive_workouts`. No other tool reads the archive yet.
+- `reports/week-<Monday>.md` — what `get_weekly_report` wrote when you passed `save: true`: plain markdown for sharing, never any account id, token or workout key. A file that exists with different content is never replaced unless `overwrite: true` is passed. Your own copy: delete it whenever you like. `estimate_route_time` only reads the `archive/` files above and writes nothing.
 
 ## Disconnecting
 
@@ -629,7 +653,7 @@ node dist/index.js get-sleep 2026-04-20
 node dist/index.js list-recovery --from 2026-04-01 --to 2026-04-30
 ```
 
-Other commands: `get-plan [date]` (the plan from `set_plan`, local file only), `get-catchup` (what is new since the last `markSeen`; the terminal never moves the marker), `get-tag-effects [--days N] [--tag T]`, `get-benchmark --guide TITLE | --exercise NAME [--weeks N]`, `get-archive-status` (reads the archive folder only, no credentials; `archive_workouts` is MCP-only because it writes), `get-workout-fit`, `get-training-load`, `compare-workout`, `get-workout-rest-profile`, `list-routes`, `get-route`, `export-route`, `get-daily-activity`, `list-daily-activity`, `list-sleep`, `get-recovery`, `daily-digest`, `sync-to-health-skill`. Run it with `--help` for the full list and every option. Output is JSON (pipe into `jq` for filtering), except `export-route`, which prints GPX.
+Other commands: `get-plan [date]` (the plan from `set_plan`, local file only), `get-catchup` (what is new since the last `markSeen`; the terminal never moves the marker), `get-tag-effects [--days N] [--tag T]`, `get-benchmark --guide TITLE | --exercise NAME [--weeks N]`, `get-archive-status` (reads the archive folder only, no credentials; `archive_workouts` is MCP-only because it writes), `get-weekly-report [MONDAY] [--markdown]` (never saves: use the MCP tool for that), `estimate-route-time <routeId> [--activity walking|running] [--sunset ISO] [--margin MIN]`, `get-workout-fit`, `get-training-load`, `compare-workout`, `get-workout-rest-profile`, `list-routes`, `get-route`, `export-route`, `get-daily-activity`, `list-daily-activity`, `list-sleep`, `get-recovery`, `daily-digest`, `sync-to-health-skill`. Run it with `--help` for the full list and every option. Output is JSON (pipe into `jq` for filtering), except `export-route`, which prints GPX.
 
 </details>
 
@@ -688,6 +712,8 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `get_benchmark` | A repeatable session over time: give a `guide` title (e.g. `PUSH A`) or an `exercise` name and get, oldest first, each occurrence's duration, TSS, median end-of-rest heart rate and per exercise (one entry per session, repeated blocks merged) the load, planned reps and rest heart rate, with first / last / best and a trend per series. Trend rule: median of the older half against the median of the newer half of the occurrences (the middle one left out when odd), `up` / `down` beyond 3% of the older median, else `flat`; `insufficient` below 3 occurrences. Uses `get_exercise_history`'s reader, cache and 8-uncached-sessions-per-call limit (call again until `pending` is 0) |
 | `archive_workouts` | Copies your workouts to local files so your history is not limited to what Suunto's list reaches (or to the 600 workouts `get_training_load` reads): per workout the FIT file and a JSON record (summary, FIT size, SHA-256) in `~/.suunto-mcp/archive/`. Incremental: skips what is archived, downloads at most 20 FIT files per call, newest first, and reports `remaining` (call again until it is 0). Checks each FIT file (non-empty, FIT header, not truncated) before marking it archived. Writes only new local files: never changes anything at Suunto, never deletes or overwrites (a damaged or foreign file is reported in `refused` and left alone). Annotated not read-only, not destructive, not idempotent (each call archives the next batch), open-world |
 | `get_archive_status` | What the local archive holds: workouts archived, FIT bytes, the date span, and every file that does not check out. Local files only, read-only, needs no credentials |
+| `get_weekly_report` | A shareable report for one finished Monday-to-Sunday week (`week` = its Monday, default the last full week): workouts, sleep, HRV, waking recovery and steps as the week's median against your own 28 days before it, training load at the end of the week, the week's guided strength sessions, plan adherence and tag effects. Returns the numbers plus a self-contained `markdown` text with no account id, token, workout key or file path; a section without enough data says "insufficient data", and tag effects appear only when not insufficient. With `save: true` it also writes `~/.suunto-mcp/reports/week-<Monday>.md` (never replaces a different file unless `overwrite: true`). Reads about 30 requests from Suunto, changes nothing there |
+| `estimate_route_time` | How long a saved route takes **you**: reads the route's GPX and fits your own pace on flat, uphill and downhill ground to your archived walking/hiking (or running) workouts (run `archive_workouts` first). Gives the total, splits for ascent, descent and flat stretches, and with a `sunset` you supply (ISO time with offset, nothing is looked up) the latest start with a margin. With too little archived data it says `insufficient` and falls back to a clearly labelled generic Naismith estimate (5 km/h plus 1 h per 600 m climbed). An estimate of moving time, not a promise. Read-only |
 | `get_workout_fit` | Raw FIT file decoded to structured data (large — `full: true` is about 550 KB for a strength session) |
 | `get_workout_samples` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it; use `get_workout_fit` |
 | `export_workout_gpx` | **Hidden by default** — Suunto's servers reject this call (OperationNotFound, checked on one account, September 2026); set `SUUNTO_ENABLE_LEGACY_TOOLS=1` to list it |

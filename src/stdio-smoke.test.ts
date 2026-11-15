@@ -73,9 +73,9 @@ test("stdio: every tool has a title and annotations consistent with what it does
       assert.equal(typeof t.annotations.readOnlyHint, "boolean", `${t.name}: readOnlyHint must be explicit`);
       assert.equal(t.annotations.openWorldHint, !["log_session", "set_plan", "get_plan", "get_archive_status"].includes(t.name), `${t.name}: talks to Suunto's cloud (log_session, set_plan, get_plan and get_archive_status alone are local files)`);
 
-      // get_catchup reads by name but is not read-only: markSeen: true writes its local marker
-      const catchup = t.name === "get_catchup";
-      const readsOnly = /^(get|list|export|compare|forecast|adjust)_/.test(t.name) && !catchup;
+      // get_catchup and get_weekly_report read by name but are not read-only: markSeen: true and save: true write a local file
+      const catchup = t.name === "get_catchup" || t.name === "get_weekly_report";
+      const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate)_/.test(t.name) && !catchup;
       const writes = /^(push|delete|upload|generate|log|set|archive)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
@@ -84,7 +84,10 @@ test("stdio: every tool has a title and annotations consistent with what it does
       }
       // a replace wipes the stored plan; get_catchup only writes a small marker and is the same call twice
       if (t.name === "set_plan") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
-      if (catchup) assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
+      if (t.name === "get_catchup") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
+      // the report's save writes one local file, and overwrite: true can replace a different one (destructive); the same call twice leaves the same file
+      if (t.name === "get_weekly_report") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true });
+      if (t.name === "estimate_route_time") assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: true });
       // archive_workouts writes only new local files and reads Suunto: not destructive, not idempotent (each call archives more), open-world
       if (t.name === "archive_workouts") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
       if (t.name === "get_archive_status") assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });

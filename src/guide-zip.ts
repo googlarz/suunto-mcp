@@ -1,7 +1,7 @@
 // Builds the 3-file ZIP (manifest.json + guide.json + icon.png) required by
 // POST /v2/guides/files. Uses STORE (uncompressed) entries — no deflate
 // needed, keeps this dependency-free while still producing a valid PKZIP.
-import { deflateSync } from "node:zlib";
+import { deflateRawSync, deflateSync } from "node:zlib";
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -21,7 +21,9 @@ function crc32(buf: Buffer): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-export function buildZip(files: { name: string; data: Buffer }[]): Buffer {
+// `compress` (used for the .mcpb bundle, not for guide uploads): deflate each entry that gets smaller and stamp entries with
+// a valid DOS date (1980-01-01) instead of 0. Without it the output is the same store-only zip as always.
+export function buildZip(files: { name: string; data: Buffer }[], opts: { compress?: boolean } = {}): Buffer {
   const localParts: Buffer[] = [];
   const centralParts: Buffer[] = [];
   let offset = 0;
@@ -30,31 +32,35 @@ export function buildZip(files: { name: string; data: Buffer }[]): Buffer {
     const nameBuf = Buffer.from(file.name, "utf8");
     const crc = crc32(file.data);
     const size = file.data.length;
+    const packed = opts.compress && size > 0 ? deflateRawSync(file.data) : null;
+    const body = packed && packed.length < size ? packed : file.data;
+    const method = body === file.data ? 0 : 8;
+    const date = opts.compress ? 0x21 : 0;
 
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4); // version needed
     local.writeUInt16LE(0, 6); // flags
-    local.writeUInt16LE(0, 8); // method: store
+    local.writeUInt16LE(method, 8); // method: store (0) or deflate (8)
     local.writeUInt16LE(0, 10); // mod time
-    local.writeUInt16LE(0, 12); // mod date
+    local.writeUInt16LE(date, 12); // mod date
     local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(size, 18);
+    local.writeUInt32LE(body.length, 18);
     local.writeUInt32LE(size, 22);
     local.writeUInt16LE(nameBuf.length, 26);
     local.writeUInt16LE(0, 28);
-    localParts.push(local, nameBuf, file.data);
+    localParts.push(local, nameBuf, body);
 
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE(20, 4); // version made by
     central.writeUInt16LE(20, 6); // version needed
     central.writeUInt16LE(0, 8); // flags
-    central.writeUInt16LE(0, 10); // method: store
+    central.writeUInt16LE(method, 10); // method
     central.writeUInt16LE(0, 12); // mod time
-    central.writeUInt16LE(0, 14); // mod date
+    central.writeUInt16LE(date, 14); // mod date
     central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(size, 20);
+    central.writeUInt32LE(body.length, 20);
     central.writeUInt32LE(size, 24);
     central.writeUInt16LE(nameBuf.length, 28);
     central.writeUInt16LE(0, 30); // extra length
@@ -65,7 +71,7 @@ export function buildZip(files: { name: string; data: Buffer }[]): Buffer {
     central.writeUInt32LE(offset, 42);
     centralParts.push(central, nameBuf);
 
-    offset += local.length + nameBuf.length + file.data.length;
+    offset += local.length + nameBuf.length + body.length;
   }
 
   const centralStart = offset;

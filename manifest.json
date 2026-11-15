@@ -1,0 +1,79 @@
+{
+  "manifest_version": "0.3",
+  "name": "suunto-mcp",
+  "display_name": "Suunto MCP",
+  "version": "0.25.1",
+  "description": "Your Suunto watch data (workouts, sleep, recovery, training load) for Claude. Works out of the box on synthetic demo data.",
+  "long_description": "Connects your Suunto watch data to Claude: workouts, laps, sleep, HRV, recovery, 24/7 activity, training load, weekly reports and route time estimates. With the demo checkbox on (the default) it runs on generated sample data and needs no Suunto account. For your own data you need approved access to Suunto's developer API and a one-time pairing step; see the README on GitHub.",
+  "author": {
+    "name": "Dawid",
+    "url": "https://github.com/googlarz"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/googlarz/suunto-mcp"
+  },
+  "homepage": "https://github.com/googlarz/suunto-mcp#readme",
+  "documentation": "https://github.com/googlarz/suunto-mcp#readme",
+  "support": "https://github.com/googlarz/suunto-mcp/issues",
+  "license": "MIT",
+  "keywords": ["suunto", "fitness", "wearables", "training", "sleep", "recovery"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/mcpb-entry.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/mcpb-entry.js"],
+      "env": {
+        "SUUNTO_MCPB_DEMO": "${user_config.demo}",
+        "SUUNTO_CLIENT_ID": "${user_config.client_id}",
+        "SUUNTO_CLIENT_SECRET": "${user_config.client_secret}",
+        "SUUNTO_SUBSCRIPTION_KEY": "${user_config.subscription_key}",
+        "SUUNTO_APP_NAME": "${user_config.app_name}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "user_config": {
+    "demo": {
+      "type": "boolean",
+      "title": "Demo mode (synthetic data, no Suunto account)",
+      "description": "On: the tools run on generated sample data and nothing is sent to Suunto. Turn it off once you have your Suunto API credentials below and have paired your account.",
+      "default": true,
+      "required": false
+    },
+    "client_id": {
+      "type": "string",
+      "title": "Suunto client ID",
+      "description": "From your app on apizone.suunto.com. Leave empty in demo mode.",
+      "sensitive": true,
+      "required": false
+    },
+    "client_secret": {
+      "type": "string",
+      "title": "Suunto client secret",
+      "description": "From your app on apizone.suunto.com. Leave empty in demo mode.",
+      "sensitive": true,
+      "required": false
+    },
+    "subscription_key": {
+      "type": "string",
+      "title": "Suunto subscription key",
+      "description": "Your Developer API subscription key from apizone.suunto.com. Leave empty in demo mode.",
+      "sensitive": true,
+      "required": false
+    },
+    "app_name": {
+      "type": "string",
+      "title": "Suunto app name (only to push guides to the watch)",
+      "description": "The exact app name registered on apizone.suunto.com. Only needed to push strength or interval guides.",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

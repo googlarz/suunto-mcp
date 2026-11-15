@@ -139,6 +139,7 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
     SUUNTO_PLAN_PATH: join(cwd, "plan.json"),
     SUUNTO_SEEN_PATH: join(cwd, "seen.json"),
     SUUNTO_ARCHIVE_DIR: join(cwd, "archive"),
+    SUUNTO_REPORTS_DIR: join(cwd, "reports"),
   };
   const child = spawn(process.execPath, ["--import", throwingFetch, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
   const pending = new Map<number, (msg: any) => void>();
@@ -179,7 +180,7 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
     };
     await fn(call, rpc, () => readFile(fetchLogPath, "utf8").catch(() => ""));
     // demo data must never reach the cache, the journal, the plan or the seen marker
-    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => ["cache", "journal.json", "plan.json", "seen.json", "archive"].includes(x))), []);
+    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => ["cache", "journal.json", "plan.json", "seen.json", "archive", "reports"].includes(x))), []);
     assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     assert.equal(await readFile(fetchLogPath, "utf8").catch(() => ""), "", "demo mode made a network call");
   } finally {
@@ -334,8 +335,8 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     ];
     const tools: any[] = (await rpc("tools/list")).result.tools;
     const nonRead = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
-    // set_plan, get_catchup and archive_workouts are not read-only either, but in demo mode they work on in-memory state (tested below)
-    assert.deepEqual(nonRead.filter((n) => n !== "set_plan" && n !== "get_catchup" && n !== "archive_workouts"), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
+    // set_plan, get_catchup, archive_workouts and get_weekly_report are not read-only either, but in demo mode they work on in-memory state (tested below)
+    assert.deepEqual(nonRead.filter((n) => !["set_plan", "get_catchup", "archive_workouts", "get_weekly_report"].includes(n)), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
     for (const [name, args] of writes) {
       const r = await call(name, args);
       assert.equal(r.isError, false, `${name}: ${r.text}`);
@@ -448,6 +449,50 @@ test("e2e demo: archive_workouts and get_archive_status work in memory, bounded 
     assert.equal((await call("archive_workouts", { limit: 21 })).isError, true);
     assert.equal(await fetchLog(), "");
     // the archive folder the server was given (SUUNTO_ARCHIVE_DIR) is checked by withDemo: it must not exist afterwards
+  });
+});
+
+test("e2e demo: get_weekly_report assembles the synthetic week, saves only in memory and writes nothing to disk", async () => {
+  await withDemo(async (call, rpc, fetchLog) => {
+    const tools: any[] = (await rpc("tools/list")).result.tools;
+    assert.deepEqual(tools.find((t) => t.name === "get_weekly_report").annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true });
+    const r = await ok(call, "get_weekly_report");
+    assert.match(r.markdown, /^# Weekly training report: \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}\n\n> DEMO DATA \(synthetic\)/);
+    assert.ok(r.workouts.count > 0);
+    assert.deepEqual(r.errors, []);
+    assert.equal(r.saved, null);
+    const saved = await ok(call, "get_weekly_report", { week: r.week.from, save: true });
+    assert.deepEqual([saved.saved.status, saved.saved.path], ["written", null]);
+    assert.equal((await ok(call, "get_weekly_report", { week: r.week.from, save: true })).saved.status, "unchanged");
+    assert.equal((await call("get_weekly_report", { week: "2026-11-03" })).isError, true, "not a Monday");
+    assert.equal((await call("get_weekly_report", { overwrite: true })).isError, true, "overwrite without save");
+    assert.equal((await call("get_weekly_report", { save: "yes" })).isError, true, "schema type");
+    assert.equal(await fetchLog(), "");
+    // the reports folder the server was given (SUUNTO_REPORTS_DIR) is checked by withDemo: it must not exist afterwards
+  });
+});
+
+test("e2e demo: estimate_route_time falls back to labelled Naismith (the demo FIT files carry no altitude), adds the latest start, and writes nothing", async () => {
+  await withDemo(async (call, rpc, fetchLog) => {
+    const tools: any[] = (await rpc("tools/list")).result.tools;
+    assert.deepEqual(tools.find((t) => t.name === "estimate_route_time").annotations, { readOnlyHint: true, openWorldHint: true });
+    const id = "d3e000000000000000000001";
+    const plain = await ok(call, "estimate_route_time", { routeId: id });
+    assert.equal(plain.basis, "generic-naismith");
+    assert.equal(plain.model.status, "insufficient");
+    assert.equal(plain.latestStart, null);
+    assert.ok(plain.route.distanceM > 3000 && plain.estimate.totalTimeS > 2400, `${plain.route.distanceM} m, ${plain.estimate.totalTimeS} s`);
+    // with archived demo workouts the running ones have no distance or altitude records: skipped, still insufficient
+    while ((await ok(call, "archive_workouts")).remaining > 0);
+    const running = await ok(call, "estimate_route_time", { routeId: id, activity: "running", sunset: "2026-11-15T16:05:00+01:00", marginMinutes: 20 });
+    assert.equal(running.model.status, "insufficient");
+    assert.ok(running.model.skipped.noMotionData > 0);
+    assert.equal(Date.parse(running.latestStart.latestStartUtc), Date.parse("2026-11-15T16:05:00+01:00") - (20 * 60 + running.estimate.totalTimeS) * 1000);
+    assert.equal((await call("estimate_route_time", { routeId: id, sunset: "tomorrow evening" })).isError, true);
+    assert.equal((await call("estimate_route_time", { routeId: id, activity: "cycling" })).isError, true, "schema enum");
+    assert.equal((await call("estimate_route_time", { routeId: id, marginMinutes: 400, sunset: "2026-11-15T16:05:00Z" })).isError, true, "schema maximum");
+    assert.equal((await call("estimate_route_time", { routeId: "nope" })).isError, true);
+    assert.equal(await fetchLog(), "");
   });
 });
 

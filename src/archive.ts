@@ -44,6 +44,8 @@ export interface ArchiveStore {
   scan(): Promise<ArchiveScan>;
   // The FIT first, then the record. Throws rather than overwrite a file that is already there and different.
   save(key: string, fit: Buffer, record: ArchiveRecord): Promise<void>;
+  // The stored FIT file of an archived workout (estimate_route_time reads them); throws for a key that is not archived.
+  readFit(key: string): Promise<Buffer>;
 }
 
 // A FIT file: a 12 or 14 byte header whose bytes 8-11 read ".FIT", and at least as long as the header says (header + data
@@ -72,7 +74,7 @@ function parseRecord(raw: unknown, key: string): ArchiveRecord {
 // Writes `data` to `path` only if nothing is there: the file is written complete under a temporary name and then linked
 // to `path`, which fails if `path` exists (so even another process racing for the same name cannot be overwritten).
 // An existing identical file is fine when `sameIsFine`; anything else there is left untouched and refused.
-async function writeNew(path: string, data: Buffer, sameIsFine: boolean): Promise<void> {
+export async function writeNew(path: string, data: Buffer, sameIsFine: boolean): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
     await writeFile(tmp, data, { mode: 0o600 });
@@ -129,6 +131,10 @@ export function fileArchiveStore(dir = archiveDir()): ArchiveStore {
       await writeNew(join(dir, `${key}.fit`), fit, true); // an identical file is what an interrupted earlier run left
       await writeNew(join(dir, `${key}.json`), Buffer.from(JSON.stringify(record, null, 2)), false);
     },
+    async readFit(key) {
+      if (!KEY.test(key)) throw new Error(`"${key}" is not a workout key`);
+      return readFile(join(dir, `${key}.fit`));
+    },
   };
 }
 
@@ -138,6 +144,11 @@ export function memoryArchiveStore(): ArchiveStore {
   return {
     scan: async () => ({ dir: null, records: new Map([...held].map(([k, v]) => [k, v.record])), problems: [], incomplete: [], otherFiles: 0 }),
     save: async (key, fit, record) => void held.set(key, { fit, record }),
+    readFit: async (key) => {
+      const hit = held.get(key);
+      if (!hit) throw new Error(`workout ${key} is not archived`);
+      return hit.fit;
+    },
   };
 }
 

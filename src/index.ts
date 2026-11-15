@@ -46,6 +46,8 @@ import { buildCatchup, fileSeenStore, memorySeenStore } from "./catchup.js";
 import { buildTagEffects } from "./tag-effects.js";
 import { archiveStatus, archiveWorkouts, fileArchiveStore, memoryArchiveStore } from "./archive.js";
 import { buildBenchmark } from "./benchmark.js";
+import { buildWeeklyReport, fileReportStore, memoryReportStore } from "./report.js";
+import { estimateRouteTime } from "./route-time.js";
 import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoWriteResult, isDemo, markDemo } from "./demo.js";
 
 const cfg = loadConfig();
@@ -57,9 +59,11 @@ const planStore = demo ? memoryPlanStore() : filePlanStore();
 const seenStore = demo ? memorySeenStore() : fileSeenStore();
 // The local workout archive (archive_workouts / get_archive_status): in memory in demo mode, never on disk.
 const archiveStore = demo ? memoryArchiveStore() : fileArchiveStore();
+// Where get_weekly_report saves its markdown: in memory in demo mode, never on disk.
+const reportStore = demo ? memoryReportStore() : fileReportStore();
 // Not read-only (they can write local state) but they never change anything at Suunto, so demo mode runs them on the
 // in-memory stores instead of answering with the generic "nothing was written" note.
-const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup", "archive_workouts"]);
+const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup", "archive_workouts", "get_weekly_report"]);
 // These only touch local files, so they work before any Suunto credentials are set up.
 const NO_CREDENTIALS_TOOLS = new Set(["set_plan", "get_plan", "get_archive_status"]);
 
@@ -1093,6 +1097,34 @@ const specTools = [
     },
   },
   {
+    name: "get_weekly_report",
+    description:
+      "A shareable report for one FINISHED Monday-to-Sunday week, assembled from the same builders as the other tools: the week's workouts (get_daily_snapshot), sleep, HRV, waking recovery and steps as the week's median against the user's own 28 days before the week (get_baselines: below / within / above the middle half), training load at the end of the week (get_training_load: CTL/ATL/TSB, the week's TSS and the week before), the guided strength sessions of the week (get_exercise_history), plan adherence (get_plan's plan: a planned date with any workout is done, else missed; no plan or no session that week says so) and tag effects (get_tag_effects, only a tag whose verdict is not 'insufficient'). `week` is the Monday of the week (default: the last full week before today); a week that has not ended yet, a date that is not a Monday and an invalid date are refused. Output: { week: { from, to }, workouts: { count, totalTimeS, kcal, restDays, days: [{ date, sessions: [{ startLocal, totalTimeS, tss, guide }] }] } | null, recovery: { baselineFrom, baselineTo, stepsTotal, metrics: { sleepDurationS | sleepScore | hrv | recoveryMorning | steps: { unavailable, n (days with a value), median (null below 4 days), baseline: { n, median, p25, p75 } | null, vsBaseline: 'below' | 'within' | 'above' | null } } } | null, load: { asOf, ctl, atl, tsb, rampRate7d, weekTss, previousWeekTss, notes } | null, strength: { sessions, exercises: [{ name, sessions, lastDetail }], pending } | null, plan: { goal, planned, done, missed, adherencePct, items } | null, tagEffects: { window, tags, insufficientTags, minNightsPerGroup } | null, markdown, saved, errors, notes }. A section that fails is null and explained in errors; a section without enough data says 'insufficient data' instead of a number. `markdown` is a self-contained text meant to be shared: it holds no account id, token, workout key or file path (only the week's own numbers, the plan goal and session titles, and journal tag names). Toward Suunto it only reads, about 30 requests (the strength section reads at most 8 uncached guided sessions; its `pending` says how many are left). With `save: true` it also writes the markdown to ~/.suunto-mcp/reports/week-<Monday>.md (SUUNTO_REPORTS_DIR moves it; file 0600, a folder it creates 0700): it never replaces a different existing file unless `overwrite: true` is also given (a refused save is saved.status 'refused' with the reason and the report is still returned; the same content again is 'unchanged'); `overwrite` without `save` is refused. Local files only, nothing is sent anywhere. In demo mode the markdown opens with a synthetic-data notice and a save stays in memory. Annotated not read-only (and destructive only through overwrite: true; idempotent) because save writes a local file, so clients may ask for permission; the call itself changes nothing at Suunto.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        week: { ...dateProp("The Monday of the week, YYYY-MM-DD (default: the last full Monday-to-Sunday week before today). The week must be finished."), examples: ["2026-11-02"] },
+        save: { type: "boolean", default: false, description: "true: also write the markdown to the reports folder as week-<Monday>.md. false (default): return it only." },
+        overwrite: { type: "boolean", default: false, description: "With save: replace a DIFFERENT existing file of that name. Without it such a file is left untouched and the save is refused." },
+      },
+    },
+  },
+  {
+    name: "estimate_route_time",
+    description:
+      "How long a saved Suunto route will take THIS user, from their own pace on hills. It reads the route's GPX (one request, as export_route) and the user's local workout archive (archive_workouts; no Suunto request for them) and fits time = flat pace x distance + extra time per metre climbed + extra time per metre descended (Naismith's rule with the three constants fitted by least squares to the 100 m pieces of the user's archived walking and hiking workouts, or running ones with activity 'running': record-level distance, altitude and time from each FIT file, pauses over 30 s left out, implausible speeds and altitude glitches dropped; the newest 25 usable ones of the 40 newest archived). It needs at least 3 usable workouts of 1 km or more, 15 km of track, 300 m of climbing and 300 m of descent together; otherwise model.status is 'insufficient' with the reason, and the estimate falls back to the generic Naismith rule (5 km/h plus 1 h per 600 m climbed, nothing for descent), labelled basis 'generic-naismith': say so to the user, it is NOT their pace (the demo archive has no altitude, so demo mode always falls back). A route without altitude on every point is estimated as flat ground, with a note. Output: { route: { name, points, distanceM, ascentM, descentM, hasElevation }, activity, basis ('personal' | 'generic-naismith'), model: { status, reason?, workoutsUsed, workoutsConsidered, skipped: { otherSport, noMotionData, unreadable }, distanceM, ascentM, descentM, flatPaceSPerKm, ascentSPerM (extra seconds per metre climbed), descentSPerM, inSampleErrorPct (median error of the model against the user's own workouts' total times: fit to the past, not a forecast) }, estimate: { totalTimeS, totalTime, byKind: { flat | ascent | descent: { distanceM, timeS } }, splits: [{ kind, startM, distanceM, ascentM, descentM, timeS }] } (pieces at or above +3 % are ascent, at or below -3 % descent, else flat; stretches under 300 m are merged into the one before), latestStart: { sunset, marginMinutes, latestStart (in the sunset's own UTC offset), latestStartUtc, finishBy, alreadyPast } | null, assumptions, notes }. `sunset` is an ISO 8601 date-time WITH its UTC offset that the USER supplies (no sunset is looked up and nothing external is called); latestStart = sunset minus marginMinutes (default 30, 0-360) minus the estimated time; daylight after sunset is not considered. It is an ESTIMATE of moving time: no stops, weather, load, surface or fatigue. Read-only: it writes nothing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        routeId: { type: "string", minLength: 1, description: "Route ID, e.g. from list_routes or upload_route." },
+        activity: { type: "string", enum: ["walking", "running"], default: "walking", description: "Which of the user's archived workouts set the pace: 'walking' (FIT sport walking or hiking, the default) or 'running'." },
+        sunset: { type: "string", minLength: 16, maxLength: 40, examples: ["2026-11-15T16:05:00+01:00"], description: "Optional: the sunset (or any finish-by time) as ISO 8601 date-time with its UTC offset, supplied by the user. Adds latestStart." },
+        marginMinutes: { type: "integer", minimum: 0, maximum: 360, default: 30, description: "With sunset: minutes to be back before it (default 30)." },
+      },
+      required: ["routeId"],
+    },
+  },
+  {
     name: "adjust_guide",
     description:
       "Adjusts a strength guide spec (the arguments of push_strength_guide) to how recovered the user is on `date` (default today), and RETURNS the adjusted spec with the reasons. It does not push anything: show the user the changes, and push the returned `guide` with push_strength_guide only if they agree. Reads get_baselines for `date`: HRV (metrics.hrv.latestVsBand) and recovery on waking (metrics.recoveryMorning.latestVsBand) against the user's own band of the last 28 days. Rules: neither below the band, or no reading yet -> unchanged (it never adds load or sets); one of the two below -> one set less on every exercise with 3 or more sets (the 'NxM' in detail is rewritten to match; an exercise whose detail has no matching 'NxM' keeps its sets and says so in reasons); both below -> that, plus every load in detail (the first '<n>kg', not bodyweight) 10% lower rounded to 2.5 kg, a plates breakdown is dropped when the load changed, and an exercise's `target` is dropped whenever that exercise changed at all (sets or load; a reason says so, `last` stays). Output: { level ('unchanged' | 'lighter' | 'reduced'), adjusted (whether anything changed), signals: { hrv, recoveryMorning } (below | within | above | null), reasons, changes: [{ exercise, from: { sets, detail }, to: { sets, detail } }], guide (the full adjusted spec), baselineErrors (only when a baseline section failed) }. The band is the middle half of the user's own recent days, not a medical reference. Read-only.",
@@ -1220,6 +1252,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await buildTagEffects(suunto, { date: a.date, days: a.days, tag: a.tag }, demo ? { loadJournal: () => (suunto as DemoClient).demoJournal() } : {})));
       case "get_benchmark":
         return text(JSON.stringify(await buildBenchmark(suunto, { guide: a.guide, exercise: a.exercise, weeks: a.weeks, date: a.date })));
+      case "get_weekly_report":
+        return text(JSON.stringify(await buildWeeklyReport(suunto, { week: a.week, save: a.save === true, overwrite: a.overwrite === true }, { planStore, reportStore, demo, loadJournal: demo ? () => (suunto as DemoClient).demoJournal() : undefined })));
+      case "estimate_route_time":
+        return text(JSON.stringify(await estimateRouteTime(suunto, archiveStore, { routeId: a.routeId, activity: a.activity, sunset: a.sunset, marginMinutes: a.marginMinutes })));
       case "archive_workouts":
         return text(JSON.stringify(await archiveWorkouts(suunto, archiveStore, { limit: a.limit })));
       case "get_archive_status":

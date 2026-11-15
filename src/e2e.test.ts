@@ -490,6 +490,28 @@ test("e2e CLI: get-route and export-route print the route JSON and the GPX", asy
   assert.match(gpx.stdout, /<gpx[^>]*>[\s\S]*<name>Stub route<\/name>/);
 });
 
+test("e2e estimate_route_time: read-only, asks Suunto for the route GPX and refuses a one-point route; the CLI mirror and get-weekly-report refuse bad input without a request", async () => {
+  await withMcp(async (call, _list, defs) => {
+    const tool = (await defs()).find((t) => t.name === "estimate_route_time");
+    assert.deepEqual(tool.annotations, { readOnlyHint: true, openWorldHint: true });
+    const r = await call("estimate_route_time", { routeId: "6acd201e1cc20768cf51aa4f" });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /fewer than 2 track points/);
+    const badSunset = await call("estimate_route_time", { routeId: "6acd201e1cc20768cf51aa4f", sunset: "5pm" });
+    assert.equal(badSunset.isError, true);
+    assert.match(badSunset.text, /UTC offset|Invalid arguments/);
+  });
+  const cli = await runCli(["estimate-route-time", "6acd201e1cc20768cf51aa4f", "--margin", "ten"]);
+  assert.notEqual(cli.code, 0);
+  assert.match(cli.stderr, /marginMinutes only applies together with sunset|whole number/);
+  const none = await runCli(["estimate-route-time"]);
+  assert.notEqual(none.code, 0);
+  assert.match(none.stderr, /Usage: estimate-route-time/);
+  const week = await runCli(["get-weekly-report", "2026-11-03"]);
+  assert.notEqual(week.code, 0);
+  assert.match(week.stderr, /must be a Monday/);
+});
+
 test("e2e CLI: a new command without its argument exits non-zero with the usage line", async () => {
   const r = await runCli(["compare-workout"]);
   assert.notEqual(r.code, 0);
@@ -989,4 +1011,41 @@ test("e2e push_week_plan: dryRun is the default and makes no network call at all
     assert.equal(r.isError, true);
     assert.match(r.text, /SUUNTO_APP_NAME/);
   });
+});
+
+test("e2e get_weekly_report: assembles a past week from the stub, saves 0600 into SUUNTO_REPORTS_DIR, refuses to replace a different file, and leaks no credential", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-report-"));
+  const reports = join(dir, "reports");
+  try {
+    await withMcp(
+      async (call, _list, defs) => {
+        const tool = (await defs()).find((t) => t.name === "get_weekly_report");
+        assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true });
+        const week = "2026-09-21"; // the stub's workouts and sleep are on 2026-09-27 / 28
+        const r = await call("get_weekly_report", { week, save: true });
+        assert.equal(r.isError, false, r.text);
+        const out = JSON.parse(r.text);
+        assert.deepEqual(out.week, { from: week, to: "2026-09-27" });
+        assert.equal(out.saved.status, "written");
+        assert.equal(out.saved.path, join(reports, `week-${week}.md`));
+        assert.equal(await readFile(out.saved.path, "utf8"), out.markdown);
+        assert.equal((await stat(out.saved.path)).mode & 0o777, 0o600);
+        assert.equal((await stat(reports)).mode & 0o777, 0o700);
+        assert.doesNotMatch(out.markdown, /Bearer|tokens\.json|apizone/);
+        assert.doesNotMatch(out.markdown, /[0-9a-f]{24}/, "no workout key");
+        const again = JSON.parse((await call("get_weekly_report", { week, save: true })).text);
+        assert.equal(again.saved.status, "unchanged");
+        await writeFile(out.saved.path, "my own notes");
+        const refused = JSON.parse((await call("get_weekly_report", { week, save: true })).text);
+        assert.equal(refused.saved.status, "refused");
+        assert.equal(await readFile(out.saved.path, "utf8"), "my own notes");
+        assert.equal(JSON.parse((await call("get_weekly_report", { week, save: true, overwrite: true })).text).saved.status, "overwritten");
+        assert.equal((await call("get_weekly_report", { week: "2026-09-22" })).isError, true, "not a Monday");
+        assert.equal((await call("get_weekly_report", { week: "2999-01-04" })).isError, true, "a week that has not ended");
+      },
+      { SUUNTO_REPORTS_DIR: reports, SUUNTO_CACHE: "off" },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
