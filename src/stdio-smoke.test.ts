@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -71,12 +71,12 @@ test("stdio: every tool has a title and annotations consistent with what it does
       assert.ok(t.title && t.title.length > 3, `${t.name}: missing title`);
       assert.ok(t.annotations, `${t.name}: missing annotations`);
       assert.equal(typeof t.annotations.readOnlyHint, "boolean", `${t.name}: readOnlyHint must be explicit`);
-      assert.equal(t.annotations.openWorldHint, !["log_session", "set_plan", "get_plan"].includes(t.name), `${t.name}: talks to Suunto's cloud (log_session, set_plan and get_plan alone are local files)`);
+      assert.equal(t.annotations.openWorldHint, !["log_session", "set_plan", "get_plan", "get_archive_status"].includes(t.name), `${t.name}: talks to Suunto's cloud (log_session, set_plan, get_plan and get_archive_status alone are local files)`);
 
       // get_catchup reads by name but is not read-only: markSeen: true writes its local marker
       const catchup = t.name === "get_catchup";
       const readsOnly = /^(get|list|export|compare|forecast|adjust)_/.test(t.name) && !catchup;
-      const writes = /^(push|delete|upload|generate|log|set)_/.test(t.name) || catchup;
+      const writes = /^(push|delete|upload|generate|log|set|archive)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
       if (/^(push_.*_guide|delete_guide|generate_daily_digest|log_session)$/.test(t.name)) {
@@ -85,6 +85,9 @@ test("stdio: every tool has a title and annotations consistent with what it does
       // a replace wipes the stored plan; get_catchup only writes a small marker and is the same call twice
       if (t.name === "set_plan") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
       if (catchup) assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
+      // archive_workouts writes only new local files and reads Suunto: not destructive, not idempotent (each call archives more), open-world
+      if (t.name === "archive_workouts") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
+      if (t.name === "get_archive_status") assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
     }
   });
 });
@@ -140,6 +143,41 @@ test("CLI: get-plan works with no Suunto credentials", async () => {
     });
     assert.equal(out.code, 0, out.stderr);
     assert.equal(JSON.parse(out.stdout).plan, null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stdio and CLI: get_archive_status needs no Suunto credentials, creates nothing, and reports a damaged record without touching it; archive_workouts still needs them", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-archive-smoke-"));
+  const archive = join(dir, "archive");
+  const key = "5e1f7c0de000000000000001";
+  try {
+    await withServer(async (call) => {
+      const st = JSON.parse((await call("tools/call", { name: "get_archive_status", arguments: {} })).result.content[0].text);
+      assert.deepEqual([st.archived, st.dir, st.problems], [0, archive, []]);
+      const w = (await call("tools/call", { name: "archive_workouts", arguments: {} })).result;
+      assert.equal(w.isError, true);
+      assert.match(w.content[0].text, /SUUNTO_CLIENT_ID|credentials/i);
+    }, { SUUNTO_ARCHIVE_DIR: archive });
+    await assert.rejects(stat(archive), /ENOENT/, "reading the status does not create the folder");
+
+    await mkdir(archive);
+    await writeFile(join(archive, `${key}.json`), "not an archive record");
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("SUUNTO_") && k !== "PORT")) as Record<string, string>;
+    const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(process.execPath, [serverPath, "get-archive-status"], { cwd: dir, env: { ...env, SUUNTO_ARCHIVE_DIR: archive }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c: Buffer) => (stdout += c));
+      child.stderr.on("data", (c: Buffer) => (stderr += c));
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+    assert.equal(out.code, 0, out.stderr);
+    const status = JSON.parse(out.stdout);
+    assert.equal(status.archived, 0);
+    assert.equal(status.problems[0].workoutKey, key);
+    assert.equal(await readFile(join(archive, `${key}.json`), "utf8"), "not an archive record");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

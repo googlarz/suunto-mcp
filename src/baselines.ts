@@ -68,7 +68,7 @@ export function bandOf(window: (number | null)[], latest: number | null, round: 
 const roundTo = (digits: number) => (n: number) => Math.round(n * 10 ** digits) / 10 ** digits;
 
 type Section = "sleep" | "recovery" | "activity";
-const METRICS: { name: string; round: (n: number) => number; needs: Section[]; latestIsPartial: boolean }[] = [
+export const METRICS: { name: string; round: (n: number) => number; needs: Section[]; latestIsPartial: boolean }[] = [
   { name: "sleepDurationS", round: roundTo(0), needs: ["sleep"], latestIsPartial: false },
   { name: "sleepScore", round: roundTo(1), needs: ["sleep"], latestIsPartial: false },
   { name: "hrv", round: roundTo(1), needs: ["sleep"], latestIsPartial: false },
@@ -76,6 +76,18 @@ const METRICS: { name: string; round: (n: number) => number; needs: Section[]; l
   { name: "recoveryLow", round: roundTo(2), needs: ["recovery"], latestIsPartial: true },
   { name: "steps", round: roundTo(1), needs: ["activity"], latestIsPartial: true },
 ];
+
+// The per-day values of the sleep metrics: the main sleep of the night that led INTO the day, and the Balance nearest its
+// end. get_tag_effects reads its nights through this too, so both tools see the same numbers. null: that section is unread.
+export function nightMetrics(nightRows: any[] | null, dayRecoveryRows: any[] | null) {
+  const main = nightRows === null ? null : summarizeSleep(nightRows).main;
+  return {
+    sleepDurationS: main?.durationS ?? null,
+    sleepScore: main?.score ?? null,
+    hrv: main?.avgHrv ?? null,
+    recoveryMorning: dayRecoveryRows === null ? null : nearestSample(dayRecoveryRows, main?.bedtimeEnd)?.balance ?? null,
+  };
+}
 
 const rowsOf = (res: any): any[] => (Array.isArray(res) ? res : res?.payload ?? []);
 
@@ -144,12 +156,12 @@ export async function buildBaselines(client: SuuntoClient, opts: BaselinesOption
   const dates: string[] = [];
   for (let d = from; d <= date; d = addDays(d, 1)) dates.push(d);
   for (const d of dates) {
-    const main = nights === null ? null : summarizeSleep(nights.get(previousDate(d)) ?? []).main;
     const dayRows = recovery?.get(d) ?? [];
-    perDay.sleepDurationS.push(main?.durationS ?? null);
-    perDay.sleepScore.push(main?.score ?? null);
-    perDay.hrv.push(main?.avgHrv ?? null);
-    perDay.recoveryMorning.push(recovery === null ? null : nearestSample(dayRows, main?.bedtimeEnd)?.balance ?? null);
+    const night = nightMetrics(nights === null ? null : nights.get(previousDate(d)) ?? [], recovery === null ? null : dayRows);
+    perDay.sleepDurationS.push(night.sleepDurationS);
+    perDay.sleepScore.push(night.sleepScore);
+    perDay.hrv.push(night.hrv);
+    perDay.recoveryMorning.push(night.recoveryMorning);
     perDay.recoveryLow.push(recovery === null ? null : summarizeRecovery(dayRows)?.low.balance ?? null);
     // Each day is read from its own piece only: a piece also returns the day after its end.
     const piece = stats?.find((c) => d >= c.from && d <= c.to);

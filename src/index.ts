@@ -43,6 +43,9 @@ import { buildExerciseHistory } from "./history.js";
 import { logSession } from "./journal.js";
 import { filePlanStore, getPlan, memoryPlanStore, setPlan } from "./plan.js";
 import { buildCatchup, fileSeenStore, memorySeenStore } from "./catchup.js";
+import { buildTagEffects } from "./tag-effects.js";
+import { archiveStatus, archiveWorkouts, fileArchiveStore, memoryArchiveStore } from "./archive.js";
+import { buildBenchmark } from "./benchmark.js";
 import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoWriteResult, isDemo, markDemo } from "./demo.js";
 
 const cfg = loadConfig();
@@ -52,11 +55,13 @@ const suunto = demo ? new DemoClient() : new SuuntoClient(cfg);
 // Local state of set_plan / get_plan / get_catchup: in demo mode it lives in memory and never reaches the disk.
 const planStore = demo ? memoryPlanStore() : filePlanStore();
 const seenStore = demo ? memorySeenStore() : fileSeenStore();
+// The local workout archive (archive_workouts / get_archive_status): in memory in demo mode, never on disk.
+const archiveStore = demo ? memoryArchiveStore() : fileArchiveStore();
 // Not read-only (they can write local state) but they never change anything at Suunto, so demo mode runs them on the
 // in-memory stores instead of answering with the generic "nothing was written" note.
-const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup"]);
-// These two only touch the local plan file, so they work before any Suunto credentials are set up.
-const NO_CREDENTIALS_TOOLS = new Set(["set_plan", "get_plan"]);
+const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup", "archive_workouts"]);
+// These only touch local files, so they work before any Suunto credentials are set up.
+const NO_CREDENTIALS_TOOLS = new Set(["set_plan", "get_plan", "get_archive_status"]);
 
 // Read the version from package.json instead of hardcoding it here — a
 // hardcoded string silently drifts from the real published version on
@@ -410,7 +415,7 @@ const toolDefs = [
   {
     name: "log_session",
     description:
-      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling, no tags and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each, at most 8 tags of 1-24 characters each (trimmed; no control characters; no duplicates, ignoring case; stored on the entry, get_exercise_history does not use them). A call with ONLY tags does not replace the entry: it sets the entry's tags and keeps its note, feeling and exercises (a tags-only entry is created when none exists). Output: { saved, replaced, entries }.",
+      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling, no tags and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each, at most 8 tags of 1-24 characters each (trimmed; no control characters; no duplicates, ignoring case; stored on the entry; get_tag_effects compares the nights after tagged sessions with the others, get_exercise_history does not use them). A call with ONLY tags does not replace the entry: it sets the entry's tags and keeps its note, feeling and exercises (a tags-only entry is created when none exists). Output: { saved, replaced, entries }.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1044,6 +1049,50 @@ const specTools = [
     },
   },
   {
+    name: "get_tag_effects",
+    description:
+      "Does the night after a session with a given tag (log_session `tags`) look different from the night after a session without it? Per tag and per metric (sleepDurationS, sleepScore, hrv, recoveryMorning: the same per-night values as get_baselines) it compares the nights that followed a day with a tagged session with the nights that followed other training days, over the `days` nights ending the day before `date` (default 90, 30-180, date default today; the night that led into `date` itself may still be recording and is left out). A day without a session is a rest day and is in neither group; a session with no journal entry counts as untagged; a day with several sessions is ONE night, tagged when any of its sessions is; tags match ignoring case. Output: { date, from, to, nights, sessionDays, thresholds, journal: { entries, ignored }, tags: [{ tag, taggedSessions, taggedNights, untaggedNights, verdict, metrics: { <metric>: { nTagged, nControl (nights with a value), taggedMedian, controlMedian, medianDiff (tagged minus control), meanDiff, controlIqr, noiseThreshold, verdict } }, statement (one sentence with n, the minimum and 'an association, not a cause') }], notes, errors }, tags with most tagged nights first. HONEST VERDICTS: a metric's verdict is 'insufficient' unless there are at least 15 tagged AND 15 untagged nights with a value for it; then 'tagged-higher' / 'tagged-lower' only when |medianDiff| is LARGER than noiseThreshold = 3 * 1.25 * (controlIqr / 1.35) * sqrt(1/nTagged + 1/nControl) (3 standard errors of the difference of two medians, the spread from the untagged nights' own IQR; equal counts as within noise; compared as printed, rounded), else 'within-noise'. 4 metrics are tested per tag, so a tag's verdict is 'differs' when ANY is higher or lower ('within-noise', or 'insufficient' when all are): with no real difference a simulation flags about 9% of tags at 15 nights per group, 5% at 20 and 3% at 30, and 11% to 22% when nights are correlated 0.3, so treat one 'differs' as a lead, not a finding. It reports an ASSOCIATION in the user's own data and NEVER a cause: say so when you present it, and state n and the thresholds (they are in the result). Consecutive days are not independent samples. A session that starts after midnight counts on its own calendar day. Needs no tags to run: without any it says how to add them. Reads Suunto's workout, sleep and recovery lists (one request each) and the local journal; writes nothing. An unreadable journal file is an error. In demo mode the synthetic sessions carry the tags 'strength' and 'long-run'. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: { ...dateProp("The day after the last night to read, YYYY-MM-DD (default today)."), examples: ["2026-11-15"] },
+        days: { type: "integer", minimum: 30, maximum: 180, description: "How many nights the window covers, ending the day before `date` (default 90)." },
+        tag: { type: "string", minLength: 1, maxLength: 24, description: "Only this tag (ignoring case). Omit for every tag found on a session in the window." },
+      },
+    },
+  },
+  {
+    name: "archive_workouts",
+    description:
+      "Copies the user's workouts to local files so the history does not depend on how far back Suunto's list reaches: per workout <workoutKey>.fit (the FIT file as Suunto sent it) and <workoutKey>.json (the workout's summary from the list with its summary and intensity extensions, the FIT's size and SHA-256) in ~/.suunto-mcp/archive/ (SUUNTO_ARCHIVE_DIR moves it; files are 0600 and a folder the tool creates is 0700, an existing folder keeps its mode; each file is written complete under a temporary name and linked into place, which fails if the name exists, so not even another process can overwrite one: the folder's filesystem must support hard links). Incremental: a workout whose record exists is skipped, at most `limit` FIT files are downloaded per call (1-20, default 20, newest workouts first), and the result's `remaining` says how many are still missing: CALL AGAIN until remaining is 0, unless a note says it will not help (failed downloads are listed in `errors` and tried after the others next time). Each FIT file is checked before its record is written (non-empty, a FIT header, not shorter than the header says; the CRC is not checked); a bad download writes nothing and is reported. Only NEW files are written: nothing at Suunto is changed, and nothing is ever deleted or overwritten; a record that is damaged, of another version, filed under another key or whose FIT is missing or has another size is reported in `refused` and left as it is (the user fixes or moves it), and a FIT file already there that differs blocks that workout with an error. The record file is written last and is the mark 'archived', so an interrupted call is completed by the next one. Reads the newest 1000 workouts from the list per call (50 per request): older ones are not reachable. Output: { dir, listed, alreadyArchived, newlyArchived, archived, remaining, refused: [{ workoutKey, problem }], errors: [{ workoutKey, error }], notes }. get_exercise_history, get_training_load and the other tools do NOT read the archive. Annotated not read-only (it writes local files), not destructive, NOT idempotent (each call archives the next batch) and open-world (it contacts Suunto). In demo mode the archive lives in memory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 20, description: "Most FIT files to download in this call (default and maximum 20)." },
+      },
+    },
+  },
+  {
+    name: "get_archive_status",
+    description:
+      "What is in the local workout archive made by archive_workouts (~/.suunto-mcp/archive/, SUUNTO_ARCHIVE_DIR moves it), from the folder alone: { dir, archived (workouts whose record and FIT file check out), fitBytes, oldest, newest (local dates of the archived workouts), problems: [{ workoutKey, problem }] (a damaged or foreign record, a missing FIT file, a FIT file whose size differs from its record: never repaired or deleted), incomplete: [{ workoutKey, problem }] (a FIT file with no record, left by an interrupted archive_workouts: not counted as archived; the next archive_workouts completes it while the workout is still listed and the download is identical), otherFiles (files in the folder that are not part of the archive, never touched), notes }. A FIT file is checked by its size against its record, not read again or re-hashed. A folder that does not exist is an empty archive and is not created. Local files only: never contacts Suunto, needs no Suunto credentials, writes nothing. It cannot say how many workouts are still missing: archive_workouts reports `remaining`. In demo mode it describes the in-memory archive. Read-only.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_benchmark",
+    description:
+      "One repeatable session as a series over its occurrences, to see whether it is getting better: give `guide` (a guide's title, e.g. 'PUSH A': the sessions that ran it, by the guide name in the workout list) or `exercise` (the sessions that contain that exercise, as in get_exercise_history), over the `weeks` weeks (default 8, max 26) ending at `date`. It reads the guided sessions with get_exercise_history's own reader (the same local cache, the same limit of 8 uncached sessions per call, the same `pending`: CALL AGAIN until pending is 0 before drawing conclusions, and the same journal), and adds the workout list's own duration and TSS. Output: { mode, name, from, to, occurrences, sessions: [{ date, workoutKey, guide, durationS, tss (Suunto's HR-based, null when none), restEndHrMedian (median end-of-rest HR after set 1 over the session's exercises with reliable heart-rate data, rounded), exercises: [{ name (one entry per exercise per session: an exercise that appears twice is merged: heaviest block's detail, load and reps, sets added, median rest HR, reliable only if every block is; parts counts the blocks), detail, kg (the guide's label weight, or the top logged weight with loadSource 'journal'; null when none, never guessed), loadSource, reps (the planned reps per set from 'NxM' in the label; null for a range or no 'NxM'), setsDone, plannedSets, restEndHr (null when unreliable), reliable }] }] oldest first, series: { durationS, tss, restEndHrMedian, exercises: [{ name, kg, reps, restEndHr }] } where each series is { n (occurrences with a value), first, last, best (highest kg and reps, lowest duration and heart rate; null for TSS, which has no better direction), better, trend, change }, pending, errors, notes }. TREND RULE: with at least 3 values, the median of the older half is compared with the median of the newer half (floor(n/2) values each; the middle one is left out when n is odd): 'up' or 'down' when they differ by more than 3% of the older median (exactly 3% is flat), else 'flat'; change is that difference; with fewer than 3 values the trend is 'insufficient'. There is no significance test: it says what moved, not that the move is real; 'up' is not 'better' for every series (see `better`). Weights and reps are what the guide PLANNED unless a log_session entry logged weights. Writes only get_exercise_history's local cache; never changes anything at Suunto. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        guide: { type: "string", minLength: 1, maxLength: 100, description: "A guide's title as shown by list_guides or get_daily_snapshot's `guide`, e.g. 'PUSH A' (matched ignoring case, accents and punctuation). Give this or `exercise`." },
+        exercise: { type: "string", minLength: 1, maxLength: 200, description: "An exercise name as in get_exercise_history's index, e.g. 'Back Squat'. Give this or `guide`." },
+        weeks: { type: "integer", minimum: 1, maximum: 26, description: "How many weeks the series covers, ending at `date` (default 8)." },
+        date: { ...dateProp("The last local calendar day of the range, YYYY-MM-DD (default today)."), examples: ["2026-11-15"] },
+      },
+    },
+  },
+  {
     name: "adjust_guide",
     description:
       "Adjusts a strength guide spec (the arguments of push_strength_guide) to how recovered the user is on `date` (default today), and RETURNS the adjusted spec with the reasons. It does not push anything: show the user the changes, and push the returned `guide` with push_strength_guide only if they agree. Reads get_baselines for `date`: HRV (metrics.hrv.latestVsBand) and recovery on waking (metrics.recoveryMorning.latestVsBand) against the user's own band of the last 28 days. Rules: neither below the band, or no reading yet -> unchanged (it never adds load or sets); one of the two below -> one set less on every exercise with 3 or more sets (the 'NxM' in detail is rewritten to match; an exercise whose detail has no matching 'NxM' keeps its sets and says so in reasons); both below -> that, plus every load in detail (the first '<n>kg', not bodyweight) 10% lower rounded to 2.5 kg, a plates breakdown is dropped when the load changed, and an exercise's `target` is dropped whenever that exercise changed at all (sets or load; a reason says so, `last` stays). Output: { level ('unchanged' | 'lighter' | 'reduced'), adjusted (whether anything changed), signals: { hrv, recoveryMorning } (below | within | above | null), reasons, changes: [{ exercise, from: { sets, detail }, to: { sets, detail } }], guide (the full adjusted spec), baselineErrors (only when a baseline section failed) }. The band is the middle half of the user's own recent days, not a medical reference. Read-only.",
@@ -1166,6 +1215,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await getPlan(planStore, { date: a.date })));
       case "get_catchup":
         return text(JSON.stringify(await buildCatchup(suunto, seenStore, planStore, { markSeen: a.markSeen === true })));
+      case "get_tag_effects":
+        // demo mode has a journal of its own (the real file is never read there)
+        return text(JSON.stringify(await buildTagEffects(suunto, { date: a.date, days: a.days, tag: a.tag }, demo ? { loadJournal: () => (suunto as DemoClient).demoJournal() } : {})));
+      case "get_benchmark":
+        return text(JSON.stringify(await buildBenchmark(suunto, { guide: a.guide, exercise: a.exercise, weeks: a.weeks, date: a.date })));
+      case "archive_workouts":
+        return text(JSON.stringify(await archiveWorkouts(suunto, archiveStore, { limit: a.limit })));
+      case "get_archive_status":
+        return text(JSON.stringify(await archiveStatus(archiveStore)));
       case "push_week_plan": {
         const result = await planWeek(a.guides, {
           dryRun: a.dryRun !== false,

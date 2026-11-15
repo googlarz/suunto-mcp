@@ -138,6 +138,7 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
     SUUNTO_JOURNAL_PATH: join(cwd, "journal.json"),
     SUUNTO_PLAN_PATH: join(cwd, "plan.json"),
     SUUNTO_SEEN_PATH: join(cwd, "seen.json"),
+    SUUNTO_ARCHIVE_DIR: join(cwd, "archive"),
   };
   const child = spawn(process.execPath, ["--import", throwingFetch, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
   const pending = new Map<number, (msg: any) => void>();
@@ -178,7 +179,7 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
     };
     await fn(call, rpc, () => readFile(fetchLogPath, "utf8").catch(() => ""));
     // demo data must never reach the cache, the journal, the plan or the seen marker
-    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => ["cache", "journal.json", "plan.json", "seen.json"].includes(x))), []);
+    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => ["cache", "journal.json", "plan.json", "seen.json", "archive"].includes(x))), []);
     assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     assert.equal(await readFile(fetchLogPath, "utf8").catch(() => ""), "", "demo mode made a network call");
   } finally {
@@ -333,8 +334,8 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     ];
     const tools: any[] = (await rpc("tools/list")).result.tools;
     const nonRead = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
-    // set_plan and get_catchup are not read-only either, but in demo mode they work on in-memory state (tested below)
-    assert.deepEqual(nonRead.filter((n) => n !== "set_plan" && n !== "get_catchup"), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
+    // set_plan, get_catchup and archive_workouts are not read-only either, but in demo mode they work on in-memory state (tested below)
+    assert.deepEqual(nonRead.filter((n) => n !== "set_plan" && n !== "get_catchup" && n !== "archive_workouts"), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
     for (const [name, args] of writes) {
       const r = await call(name, args);
       assert.equal(r.isError, false, `${name}: ${r.text}`);
@@ -382,6 +383,71 @@ test("e2e demo: set_plan / get_plan / get_catchup work in memory and write nothi
     assert.deepEqual([after.newWorkouts.length, after.newNights.length], [0, 0]);
     assert.equal(after.since.firstCall, false);
     assert.equal(await fetchLog(), "");
+  });
+});
+
+test("e2e demo: get_tag_effects and get_benchmark work on the synthetic sessions and write nothing to disk", async () => {
+  await withDemo(async (call, _rpc, fetchLog) => {
+    const tags = await ok(call, "get_tag_effects", { days: 56 });
+    assert.deepEqual(tags.tags.map((t: any) => t.tag).sort(), ["long-run", "strength"]);
+    const strength = tags.tags.find((t: any) => t.tag === "strength");
+    assert.ok(strength.taggedNights >= 15, `strength nights ${strength.taggedNights}`);
+    assert.equal(tags.thresholds.minTaggedNights, 15);
+    assert.deepEqual(Object.keys(strength.metrics).sort(), ["hrv", "recoveryMorning", "sleepDurationS", "sleepScore"]);
+    assert.ok(["insufficient", "within-noise", "differs"].includes(strength.verdict));
+    assert.deepEqual(tags.errors, []);
+    assert.equal((await ok(call, "get_tag_effects", { days: 56, tag: "STRENGTH" })).tags.length, 1);
+    assert.equal((await call("get_tag_effects", { days: 29 })).isError, true, "days below 30 is refused by the schema");
+
+    // three guides, each about 8 occurrences in the 8 demo weeks; the guide mode and the exercise mode agree
+    for (let i = 0; i < 4; i++) {
+      const pending = (await ok(call, "get_benchmark", { guide: "push a", weeks: 8 })).pending;
+      if (pending === 0) break;
+    }
+    const push = await ok(call, "get_benchmark", { guide: "push a", weeks: 8 });
+    assert.equal(push.mode, "guide");
+    assert.ok(push.occurrences >= 6 && push.occurrences <= 9, `occurrences ${push.occurrences}`);
+    assert.ok(push.sessions.every((s: any) => s.guide === "PUSH A" && typeof s.durationS === "number" && typeof s.tss === "number"));
+    assert.ok(push.series.exercises.some((e: any) => e.name === "Bench Press" && e.kg.n === push.occurrences));
+    assert.ok(["up", "down", "flat"].includes(push.series.durationS.trend));
+    const bench = await ok(call, "get_benchmark", { exercise: "Bench Press", weeks: 8 });
+    assert.equal(bench.mode, "exercise");
+    assert.equal(bench.occurrences, push.occurrences);
+    assert.equal((await call("get_benchmark", {})).isError, true);
+    assert.equal((await call("get_benchmark", { guide: "a", exercise: "b" })).isError, true);
+    assert.equal(await fetchLog(), "");
+  });
+});
+
+test("e2e demo: archive_workouts and get_archive_status work in memory, bounded per call, and write nothing to disk", async () => {
+  await withDemo(async (call, rpc, fetchLog) => {
+    const tools: any[] = (await rpc("tools/list")).result.tools;
+    const ann = (n: string) => tools.find((t) => t.name === n).annotations;
+    assert.deepEqual(ann("archive_workouts"), { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
+    assert.deepEqual(ann("get_archive_status"), { readOnlyHint: true, openWorldHint: false });
+
+    const empty = await ok(call, "get_archive_status");
+    assert.deepEqual([empty.archived, empty.dir, empty.problems], [0, null, []]);
+    const first = await ok(call, "archive_workouts", { limit: 5 });
+    assert.deepEqual([first.newlyArchived, first.archived, first.dir], [5, 5, null]);
+    assert.ok(first.remaining > 0);
+    assert.equal((await ok(call, "get_archive_status")).archived, 5);
+    // about 8 weeks of workouts: more than the 20 one call may download, so it takes a second call
+    const second = await ok(call, "archive_workouts");
+    assert.equal(second.newlyArchived, 20);
+    assert.equal(second.remaining, first.remaining - 20);
+    const rest = await ok(call, "archive_workouts");
+    assert.equal(rest.remaining, 0);
+    assert.equal(rest.newlyArchived, second.remaining);
+    assert.deepEqual(rest.errors, []);
+    const again = await ok(call, "archive_workouts");
+    assert.deepEqual([again.newlyArchived, again.remaining, again.alreadyArchived], [0, 0, rest.archived]);
+    const st = await ok(call, "get_archive_status");
+    assert.equal(st.archived, rest.archived);
+    assert.ok(st.fitBytes > 0 && st.oldest <= st.newest);
+    assert.equal((await call("archive_workouts", { limit: 21 })).isError, true);
+    assert.equal(await fetchLog(), "");
+    // the archive folder the server was given (SUUNTO_ARCHIVE_DIR) is checked by withDemo: it must not exist afterwards
   });
 });
 

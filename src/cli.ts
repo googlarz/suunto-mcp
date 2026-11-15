@@ -10,6 +10,9 @@ import { buildRestProfile } from "./rest-profile.js";
 import { buildExerciseHistory } from "./history.js";
 import { filePlanStore, getPlan } from "./plan.js";
 import { buildCatchup, fileSeenStore } from "./catchup.js";
+import { buildTagEffects } from "./tag-effects.js";
+import { buildBenchmark } from "./benchmark.js";
+import { archiveStatus, fileArchiveStore } from "./archive.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -38,6 +41,9 @@ Analysis commands:
   get-workout-rest-profile <workoutKey>
   get-exercise-history [name] [--weeks N]   (load, sets, rest recovery per session; writes only the local cache)
   get-plan             [YYYY-MM-DD]   (the plan from set_plan: today and the next 7 days, or one day; reads the local plan file only)
+  get-tag-effects      [--days N] [--tag T] [--date YYYY-MM-DD]   (journal tags against the next night's sleep, HRV and recovery; read-only)
+  get-benchmark        --guide TITLE | --exercise NAME [--weeks N]   (a repeatable session over time: load, rest HR, duration, TSS; writes only the local cache)
+  get-archive-status   (what the local workout archive holds; reads the archive folder only, no credentials)
   get-catchup          (what is new since the last markSeen: workouts, nights, recovery, plan items; never moves the marker, use the MCP tool with markSeen for that)
 
 Route commands:
@@ -95,6 +101,17 @@ export async function runCli(argv: string[]) {
     if (rest.length > 1) die("Usage: get-plan [YYYY-MM-DD]");
     try {
       out(await getPlan(filePlanStore(), { date: rest[0] }));
+    } catch (err: any) {
+      die(err.message ?? String(err));
+    }
+    return;
+  }
+
+  // only reads the local archive folder, so it needs no Suunto credentials either (archive_workouts is MCP-only: it writes)
+  if (cmd === "get-archive-status") {
+    if (rest.length > 0) die("Usage: get-archive-status (it takes no options)");
+    try {
+      out(await archiveStatus(fileArchiveStore()));
     } catch (err: any) {
       die(err.message ?? String(err));
     }
@@ -204,6 +221,25 @@ export async function runCli(argv: string[]) {
         const weeks = values.weeks !== undefined ? Number(values.weeks) : undefined;
         if (weeks !== undefined && !Number.isInteger(weeks)) die(`--weeks must be a whole number, got "${values.weeks}"`);
         out(await buildExerciseHistory(suunto, { name: positionals[0], weeks }));
+        break;
+      }
+
+      case "get-tag-effects": {
+        const usage = "Usage: get-tag-effects [--days N] [--tag T] [--date YYYY-MM-DD]";
+        const { values } = parseArgs({ args: rest, options: { days: { type: "string" }, tag: { type: "string" }, date: { type: "string" } } });
+        const days = values.days !== undefined ? Number(values.days) : undefined;
+        if (days !== undefined && !Number.isInteger(days)) die(`--days must be a whole number, got "${values.days}". ${usage}`);
+        out(await buildTagEffects(suunto, { date: values.date, days, tag: values.tag }));
+        break;
+      }
+
+      case "get-benchmark": {
+        const usage = "Usage: get-benchmark --guide TITLE | --exercise NAME [--weeks N]";
+        const { values } = parseArgs({ args: rest, options: { guide: { type: "string" }, exercise: { type: "string" }, weeks: { type: "string" } } });
+        const weeks = values.weeks !== undefined ? Number(values.weeks) : undefined;
+        if (weeks !== undefined && !Number.isInteger(weeks)) die(`--weeks must be a whole number, got "${values.weeks}". ${usage}`);
+        if ((values.guide === undefined) === (values.exercise === undefined)) die(usage);
+        out(await buildBenchmark(suunto, { guide: values.guide, exercise: values.exercise, weeks }));
         break;
       }
 

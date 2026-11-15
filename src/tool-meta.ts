@@ -4,7 +4,7 @@
 // readOnlyHint tools as safe in plan mode and for concurrent calls, and
 // clients may ask before running destructive ones.
 //
-// Every tool talks to Suunto's cloud, so openWorldHint is true throughout, except log_session, set_plan and get_plan (local files only).
+// Every tool talks to Suunto's cloud, so openWorldHint is true throughout, except log_session, set_plan, get_plan and get_archive_status (local files only).
 export interface ToolAnnotations {
   readOnlyHint: boolean;
   destructiveHint?: boolean;
@@ -38,6 +38,13 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_plan: { title: "Get the training plan (today and the next 7 days)", annotations: { readOnlyHint: true, openWorldHint: false } },
   // Reads Suunto. Without markSeen it is a pure read; with markSeen: true it writes the local marker (the same state again if repeated), so it is not read-only.
   get_catchup: { title: "Catch up: what is new since last time", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+  // Reads Suunto and the local journal; its one write is the same rebuildable cache as get_exercise_history.
+  get_benchmark: { title: "Get benchmark: a repeatable session over time", annotations: READ },
+  // Reads Suunto's list and the local journal; writes nothing.
+  get_tag_effects: { title: "Get tag effects: journal tags against the next night", annotations: READ },
+  // Reads Suunto (list + FIT downloads) and writes ONLY new files in the local archive folder: never overwrites or deletes, so not destructive. Not idempotent: each call archives the next batch, so the same call twice has a different effect.
+  archive_workouts: { title: "Archive workouts to local files (writes nothing at Suunto)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+  get_archive_status: { title: "Get the local workout archive status", annotations: { readOnlyHint: true, openWorldHint: false } },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },
