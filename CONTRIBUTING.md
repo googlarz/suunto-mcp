@@ -57,7 +57,6 @@ Never regenerate to make a BREAKING difference pass. A new read-only tool also n
   entitlement uses a different prefix, set `SUUNTO_DAILY_PREFIX` and (if
   it's general) submit a fix.
 - **Webhook subscription CRUD** is on the roadmap but not built.
-- **MCP Prompts** (preset templates) aren't wired up yet.
 
 ## PR checklist
 

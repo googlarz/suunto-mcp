@@ -568,6 +568,10 @@ Set these in the `env` block of your Claude config (or in `.env` for terminal co
 | `SUUNTO_SEEN_PATH` | no | The `get_catchup` marker file; default `~/.suunto-mcp/seen.json` |
 | `SUUNTO_ARCHIVE_DIR` | no | Folder of the `archive_workouts` archive (FIT files and workout summaries); default `~/.suunto-mcp/archive/` |
 | `SUUNTO_REPORTS_DIR` | no | Folder where `get_weekly_report` with `save: true` writes `week-<Monday>.md`; default `~/.suunto-mcp/reports/` |
+| `SUUNTO_ENABLE_LEGACY_TOOLS` | no | `1` lists the three hidden tools (`get_workout_samples`, `export_workout_gpx`, `list_subscriptions`) that Suunto's servers no longer answer |
+| `SUUNTO_DAILY_PREFIX` | no | Path prefix of the 24/7 (sleep, recovery, daily activity) endpoints; default `/247samples`. Only change it if your apizone entitlement uses another one |
+| `SUUNTO_HEALTH_EXPORT_STATE_PATH` | no | State file of `sync-to-health-skill` (which days were already copied); default `~/.suunto-mcp/health-export-state.json` |
+| `SUUNTO_WRITE_GAP_MS`, `SUUNTO_ROUTE_IMPORT_GAP_MS`, `SUUNTO_ROUTE_VERIFY_DELAY_MS`, `SUUNTO_UPLOAD_POLL_MS` | no | Pacing of writes to Suunto in milliseconds (all default to 2000 except the route read-back delay, 3000): the pause between guide pushes and workout uploads, between route imports, before a route is read back, and between upload status polls. Leave them alone unless you are testing |
 | `SUUNTO_WEBHOOK_SECRET`, `SUUNTO_WEBHOOK_HOST`, `SUUNTO_WEBHOOK_LOG`, `SUUNTO_WEBHOOK_ALLOW_UNSIGNED`, `PORT` | webhook only | See the Webhooks section |
 
 ---
