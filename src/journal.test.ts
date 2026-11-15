@@ -224,3 +224,23 @@ test("journal: validEntries keeps what log_session could have written and counts
   assert.deepEqual(entries[KEY], good);
   assert.equal(ignored, 5);
 });
+
+test("journal: an optional source 'draft' (set when the user confirmed a draft_session_log) is kept on the entry; any other source is refused", async () => {
+  assert.deepEqual(parseLogInput({ workoutKey: KEY, note: "ok", source: "draft" }, NOW), { workoutKey: KEY, loggedAt: NOW.toISOString(), note: "ok", source: "draft" });
+  assert.equal("source" in parseLogInput({ workoutKey: KEY, note: "ok" }, NOW), false, "without it the entry is exactly what 1.0 stored");
+  for (const source of ["manual", "", "DRAFT", 1, null, ["draft"]]) assert.throws(() => parseLogInput({ workoutKey: KEY, note: "ok", source }, NOW), /source must be "draft"/);
+  // a source alone is not something to log
+  assert.throws(() => parseLogInput({ workoutKey: KEY, source: "draft" }, NOW), /nothing to log/);
+  await withDir(async (path) => {
+    await logSession({ workoutKey: KEY, exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }] }], source: "draft" }, path, NOW);
+    const stored = (await loadJournal(path))[KEY];
+    assert.equal(stored.source, "draft");
+    assert.equal(validEntries({ [KEY]: stored }).entries[KEY].source, "draft", "an entry with a source is a valid entry when read back");
+    // a tags-only call keeps what was logged, the source included
+    await logSession({ workoutKey: KEY, tags: ["heavy"] }, path, NOW);
+    assert.deepEqual([(await loadJournal(path))[KEY].source, (await loadJournal(path))[KEY].tags], ["draft", ["heavy"]]);
+    // logging again without the source replaces the entry, which then has none
+    await logSession({ workoutKey: KEY, note: "corrected" }, path, NOW);
+    assert.equal((await loadJournal(path))[KEY].source, undefined);
+  });
+});

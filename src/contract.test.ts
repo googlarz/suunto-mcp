@@ -283,6 +283,8 @@ async function withDemoServer<T>(fn: (rpc: (method: string, params?: unknown) =>
     SUUNTO_SEEN_PATH: join(cwd, "seen.json"),
     SUUNTO_ARCHIVE_DIR: join(cwd, "archive"),
     SUUNTO_REPORTS_DIR: join(cwd, "reports"),
+    SUUNTO_PREDICTIONS_PATH: join(cwd, "predictions.json"),
+    SUUNTO_EXPERIMENTS_PATH: join(cwd, "experiments.json"),
   };
   const child = spawn(process.execPath, ["--import", fixedClock, "--import", throwingFetch, serverPath], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
   const pending = new Map<number, (msg: any) => void>();
@@ -372,6 +374,12 @@ const OUTPUT_CALLS: Record<string, (c: Ctx) => Record<string, unknown>> = {
   estimate_route_time: (c) => ({ routeId: c.routeId }),
   adjust_guide: () => ({ guide: GUIDE }),
   push_week_plan: () => ({ guides: [GUIDE] }), // not read-only; dryRun (the default) validates and sends nothing, in demo mode too
+  get_prediction_stats: () => ({}), // the demo ledger is scored first (see takeSnapshot), so the statistics are filled in
+  get_experiment: () => ({}),
+  "get_experiment#one": () => ({ id: "e1" }), // the finished demo experiment, with its schedule and log
+  analyze_experiment: () => ({}),
+  draft_session_log: (c) => ({ workoutKey: c.gymKey }),
+  "draft_session_log#date": (c) => ({ date: c.gymDate }),
 };
 // Read-only tools with nothing to record in demo mode.
 const SKIPPED: Record<string, string> = {
@@ -450,6 +458,8 @@ async function takeSnapshot(): Promise<Snapshot> {
     const gymDate = new Date(gym.startTime + gym.timeOffsetInMinutes * 60_000).toISOString().slice(0, 10);
     const ctx: Ctx = { gymKey: gym.workoutKey, runKey: run.workoutKey, routeId: routes[0].id, gymDate };
     await call("set_plan", PLAN);
+    // the demo ledger starts with predictions that are due: score them (20 per call), so the statistics show their full shape
+    for (let i = 0; i < 5 && (await call("score_predictions", {})).remaining > 0; i++);
 
     const readOnly = list.filter((t) => t.annotations.readOnlyHint === true).map((t) => t.name as string);
     const recorded = new Set(Object.keys(OUTPUT_CALLS).map((k) => k.split("#")[0]));

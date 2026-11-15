@@ -4,7 +4,9 @@
 // readOnlyHint tools as safe in plan mode and for concurrent calls, and
 // clients may ask before running destructive ones.
 //
-// Every tool talks to Suunto's cloud, so openWorldHint is true throughout, except log_session, set_plan, get_plan and get_archive_status (local files only).
+// Every tool talks to Suunto's cloud, so openWorldHint is true throughout, except the tools that touch local files only: log_session, set_plan, get_plan,
+// get_archive_status, and the prediction ledger and experiment tools that never read Suunto (log_prediction, void_prediction, get_prediction_stats, start_experiment,
+// get_experiment, log_experiment_day, stop_experiment).
 export interface ToolAnnotations {
   readOnlyHint: boolean;
   destructiveHint?: boolean;
@@ -49,6 +51,21 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   // Reads one route from Suunto and the local archive; writes nothing.
   estimate_route_time: { title: "Estimate a route's time from your own pace (and the latest start before sunset)", annotations: READ },
   get_archive_status: { title: "Get the local workout archive status", annotations: { readOnlyHint: true, openWorldHint: false } },
+  // The prediction ledger (predictions.json). Nothing is ever replaced or deleted: a new prediction is a new entry (so not idempotent), a void and an outcome are added to the entry.
+  log_prediction: { title: "Log a prediction before the fact (local ledger, immutable)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+  void_prediction: { title: "Void a prediction before its due date (kept, with the reason)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  // Reads Suunto; writes the outcomes of due predictions to the local ledger, at most 20 per call (the next call scores the next ones), hence not idempotent.
+  score_predictions: { title: "Score due predictions against Suunto's data (hit / miss / unresolvable)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+  get_prediction_stats: { title: "Get prediction statistics: hit rate, Brier score, calibration", annotations: { readOnlyHint: true, openWorldHint: false } },
+  // The experiments file (experiments.json): nothing is replaced or deleted; stop keeps everything and a corrected day log keeps the earlier answer.
+  start_experiment: { title: "Start a randomized self-experiment (pre-registered, schedule drawn up front)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+  get_experiment: { title: "Get experiments: today's assignment, progress, adherence", annotations: { readOnlyHint: true, openWorldHint: false } },
+  log_experiment_day: { title: "Log what actually happened on an experiment day", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  // Reads Suunto's sleep and recovery lists and the local file; writes nothing.
+  analyze_experiment: { title: "Analyze an experiment: intention to treat and per protocol, permutation test", annotations: READ },
+  stop_experiment: { title: "Stop an experiment (nothing is deleted)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  // Reads one session's laps and FIT; writes nothing: logging the draft is a separate log_session call after the user confirmed it.
+  draft_session_log: { title: "Draft a session log from the watch data (read-only; the user confirms, then log_session)", annotations: READ },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },

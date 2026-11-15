@@ -24,6 +24,7 @@ export interface JournalEntry {
   feeling?: string;
   tags?: string[];
   exercises?: JournalExercise[];
+  source?: "draft"; // set when the user confirmed a draft_session_log: the reps and weights began as the guide's plan
 }
 
 const WORKOUT_KEY = /^[0-9a-f]{24}$/i;
@@ -85,7 +86,7 @@ function onlyKeys(o: Record<string, unknown>, allowed: string[], path: string): 
 // Strict shape check of one entry (log_session's arguments, or an entry read back from the file).
 function parseEntry(args: unknown, loggedAt: string): JournalEntry {
   if (!isObject(args)) throw new Error("arguments must be an object");
-  onlyKeys(args, ["workoutKey", "note", "feeling", "tags", "exercises"], "");
+  onlyKeys(args, ["workoutKey", "note", "feeling", "tags", "exercises", "source"], "");
   const key = args.workoutKey;
   if (typeof key !== "string" || !WORKOUT_KEY.test(key)) throw new Error("workoutKey must be the 24-character hex key from list_workouts");
   let exercises: JournalExercise[] | undefined;
@@ -114,6 +115,7 @@ function parseEntry(args: unknown, loggedAt: string): JournalEntry {
       return defined({ name: text(e.name, `${p}.name`, true)!, sets, note: text(e.note, `${p}.note`) });
     });
   }
+  if (args.source !== undefined && args.source !== "draft") throw new Error('source must be "draft" when given');
   return defined({
     workoutKey: key.toLowerCase(),
     loggedAt,
@@ -121,6 +123,7 @@ function parseEntry(args: unknown, loggedAt: string): JournalEntry {
     feeling: text(args.feeling, "feeling"),
     tags: tagList(args.tags),
     exercises,
+    source: args.source as "draft" | undefined,
   });
 }
 

@@ -41,6 +41,10 @@ import { buildTrainingLoad, forecastTrainingLoad } from "./training-load.js";
 import { buildBaselines } from "./baselines.js";
 import { buildExerciseHistory } from "./history.js";
 import { logSession } from "./journal.js";
+import { buildDraft } from "./draft.js";
+import { KINDS as PREDICTION_KINDS, filePredictionStore, logPrediction, memoryPredictionStore, predictionStats, scorePredictions, voidPrediction } from "./predictions.js";
+import { OUTCOME_METRICS, WEEKDAYS, analyzeExperiment, fileExperimentStore, getExperiment, logExperimentDay, memoryExperimentStore, startExperiment, stopExperiment } from "./experiments.js";
+import { seedDemoState } from "./demo-state.js";
 import { filePlanStore, getPlan, memoryPlanStore, setPlan } from "./plan.js";
 import { buildCatchup, fileSeenStore, memorySeenStore } from "./catchup.js";
 import { buildTagEffects } from "./tag-effects.js";
@@ -61,11 +65,15 @@ const seenStore = demo ? memorySeenStore() : fileSeenStore();
 const archiveStore = demo ? memoryArchiveStore() : fileArchiveStore();
 // Where get_weekly_report saves its markdown: in memory in demo mode, never on disk.
 const reportStore = demo ? memoryReportStore() : fileReportStore();
+// The prediction ledger and the experiments: in memory in demo mode (seeded with deterministic demo data), never on disk.
+const predictionStore = demo ? memoryPredictionStore() : filePredictionStore();
+const experimentStore = demo ? memoryExperimentStore() : fileExperimentStore();
+if (demo) await seedDemoState(predictionStore, experimentStore);
 // Not read-only (they can write local state) but they never change anything at Suunto, so demo mode runs them on the
 // in-memory stores instead of answering with the generic "nothing was written" note.
-const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup", "archive_workouts", "get_weekly_report"]);
+const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment"]);
 // These only touch local files, so they work before any Suunto credentials are set up.
-const NO_CREDENTIALS_TOOLS = new Set(["set_plan", "get_plan", "get_archive_status"]);
+const NO_CREDENTIALS_TOOLS = new Set(["set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment"]);
 
 // Read the version from package.json instead of hardcoding it here — a
 // hardcoded string silently drifts from the real published version on
@@ -419,7 +427,7 @@ const toolDefs = [
   {
     name: "log_session",
     description:
-      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling, no tags and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each, at most 8 tags of 1-24 characters each (trimmed; no control characters; no duplicates, ignoring case; stored on the entry; get_tag_effects compares the nights after tagged sessions with the others, get_exercise_history does not use them). A call with ONLY tags does not replace the entry: it sets the entry's tags and keeps its note, feeling and exercises (a tags-only entry is created when none exists). Output: { saved, replaced, entries }.",
+      "Records what the user says ACTUALLY happened in a gym session (reps, weights, RPE, notes), because the watch only records the guide's planned text. Writes only the local file ~/.suunto-mcp/journal.json (SUUNTO_JOURNAL_PATH overrides it) and never contacts Suunto. One entry per workoutKey: logging the same workoutKey again REPLACES that entry, and the result returns the previous one as `replaced` so nothing is lost silently. A call with no note, no feeling, no tags and no exercises is refused ('nothing to log'): it would wipe the stored entry. Unknown fields at any level (e.g. `weight`) are refused with an error naming the field, never dropped: use `kg` inside a set. get_exercise_history attaches the entry as `journal` and uses the top set's kg as the load when sets carry kg. Only record what the user told you; leave out what they did not say. Exercise names should be the ones get_exercise_history or compare_workout_to_plan show. Limits: reps integer 0-200, kg 0-1000, rpe 1-10, texts up to 500 characters, at most 40 exercises and 20 sets each, at most 8 tags of 1-24 characters each (trimmed; no control characters; no duplicates, ignoring case; stored on the entry; get_tag_effects compares the nights after tagged sessions with the others, get_exercise_history does not use them). A call with ONLY tags does not replace the entry: it sets the entry's tags and keeps its note, feeling and exercises (a tags-only entry is created when none exists). Optional `source: 'draft'` marks an entry made from a confirmed draft_session_log. Output: { saved, replaced, entries }.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -433,6 +441,7 @@ const toolDefs = [
           description: "Optional short labels for the session, e.g. ['deload', 'poor-sleep'] (at most 8, each 1-24 characters, trimmed, no duplicates). Sent alone, they set the tags of the existing entry without touching the rest.",
           items: { type: "string", minLength: 1, maxLength: 24 },
         },
+        source: { type: "string", enum: ["draft"], description: "Pass 'draft' when the exercises come from a draft_session_log that the user confirmed or corrected (the reps and weights began as the guide's plan). Stored on the entry; nothing else changes." },
         exercises: {
           type: "array",
           maxItems: 40,
@@ -1158,6 +1167,153 @@ const specTools = [
       required: ["guides"],
     },
   },
+  {
+    name: "log_prediction",
+    description:
+      "Writes down a prediction BEFORE the fact, with a probability, in the local ledger ~/.suunto-mcp/predictions.json (SUUNTO_PREDICTIONS_PATH overrides it). Writes only that file, never contacts Suunto, needs no Suunto credentials. A prediction is immutable once logged: it cannot be edited or deleted, only voided (void_prediction, with a reason, before its due date). The server scores it itself later (score_predictions) from Suunto's data and the journal, and get_prediction_stats says whether the stated probabilities were any good. `kind` is one of: 'session_done' (about = a date: a workout exists on that date), 'hrv_in_band' (about = a date D: the night AFTER D, the one leading into D+1, has an HRV within the user's own p25..p75 band as get_baselines shows it, edges included), 'recovery_morning_at_least' (about = D, plus `threshold`, a Balance from 0 to 1 where x100 is the watch's Resources %: the morning recovery after the night after D is at least that), 'reps_hit' (about = a date or a workoutKey, plus `exercise`, `sets`, `reps` and optionally `kg`: at least that many sets reached that many reps at that weight or more; the watch records only the guide's text, so this is scored from log_session entries and can be 'unresolvable' until the sets are logged). `probability` 0 to 1 is how likely the prediction is to come true in the caller's honest judgement; `rule` optionally names the rule or skill that made it, for the per-rule statistics; `note` is free text. A date must be today or later (not in the past) and at most 60 days ahead; a workoutKey is for reps_hit only. A prediction is due, and scored, from the second day after the date it is about (a day's data may sync late). Unknown fields and fields that do not belong to the kind are refused. At most 2000 predictions. Output: { saved: { id, madeAt, about, kind, probability, ..., due }, predictions (the count), note }. Not read-only (writes the ledger), not destructive (adds an entry), not idempotent (the same call again adds another prediction). In demo mode the ledger is kept in memory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        about: { type: "string", minLength: 10, maxLength: 24, description: "A local date YYYY-MM-DD (today or later, at most 60 days ahead), or for reps_hit the 24-character workoutKey." },
+        kind: { type: "string", enum: [...PREDICTION_KINDS], description: "What is predicted: session_done, hrv_in_band, recovery_morning_at_least or reps_hit." },
+        probability: { type: "number", minimum: 0, maximum: 1, description: "How likely it is to come true, 0 to 1." },
+        exercise: { type: "string", minLength: 1, maxLength: 200, description: "reps_hit: the exercise name as in get_exercise_history." },
+        sets: { type: "integer", minimum: 1, maximum: 20, description: "reps_hit: how many sets are predicted to reach the reps." },
+        reps: { type: "integer", minimum: 1, maximum: 200, description: "reps_hit: reps per set." },
+        kg: { type: "number", minimum: 0, maximum: 1000, description: "reps_hit: the weight, in kg, at which each set is predicted to reach the reps (that or more). Leave out for any weight." },
+        threshold: { type: "number", minimum: 0, maximum: 1, description: "recovery_morning_at_least: the Balance on waking, 0 to 1 (0.6 = 60% Resources)." },
+        note: { type: "string", maxLength: 500, description: "Free text, e.g. why." },
+        rule: { type: "string", minLength: 1, maxLength: 64, description: "The rule or skill that made the prediction, e.g. 'weekly-plan'." },
+      },
+      required: ["about", "kind", "probability"],
+    },
+  },
+  {
+    name: "void_prediction",
+    description:
+      "Voids a prediction with a reason, only BEFORE its due date (the due date is in the log_prediction result): after that it is scored whatever the caller now thinks. The prediction stays in the ledger with the reason and is never scored; get_prediction_stats counts voided predictions, so voiding cannot hide one. A scored prediction cannot be voided. Voiding twice changes nothing and returns the first void (alreadyVoided: true). Local file only (predictions.json): never contacts Suunto, needs no credentials. Output: { id, voided: { at, reason }, alreadyVoided }. Not read-only, not destructive (nothing is removed), idempotent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", minLength: 2, maxLength: 20, description: "The prediction's id, e.g. 'p3'." },
+        reason: { type: "string", minLength: 1, maxLength: 500, description: "Why it is withdrawn." },
+      },
+      required: ["id", "reason"],
+    },
+  },
+  {
+    name: "score_predictions",
+    description:
+      "Scores every DUE, unscored prediction in the ledger (log_prediction) as 'hit', 'miss' or 'unresolvable', and stores the outcome in ~/.suunto-mcp/predictions.json. Toward Suunto it only reads (workout list, sleep and recovery lists, laps of the guided sessions it needs; the same numbers as get_baselines and compare_workout_to_plan). Rules: session_done = a workout exists on the date (a miss only when the watch has synced data from a LATER day, else unresolvable); hrv_in_band = HRV of the night after the date against the user's 28-day band (get_baselines), inclusive; recovery_morning_at_least = Balance on waking after that night, at least the threshold (compared as printed, 2 decimals); reps_hit = the journal's logged sets of that exercise decide (a logged set without a weight takes the guide label's), and without logged sets only fewer set laps than predicted in a reliable per-set guide proves a miss. UNRESOLVABLE means the data to decide was missing (no HRV that night, fewer than 7 nights for a band, nothing logged, an unsynced watch): it is never guessed, and counts as neither hit nor miss. A failed request is NOT unresolvable: that prediction stays unscored, the error is in `errors`, and the next call tries again. Scored outcomes are final; an unresolvable one is read again only with rescoreUnresolvable: true (and written only if the answer changed). At most 20 predictions per call, oldest due first: `remaining` says how many are left, call again. Calling it again with nothing newly due changes nothing and does not call Suunto. Output: { today, scored: [{ id, about, kind, result, detail }], hits, misses, unresolvable, pending (workoutKey predictions whose workout is under 2 days old), notDue, remaining, errors, notes }. Annotated not read-only (it writes outcomes locally), not destructive and not idempotent (each call scores the next batch); it never changes anything at Suunto. In demo mode the demo ledger is scored against the synthetic data and the outcomes stay in memory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        rescoreUnresolvable: { type: "boolean", default: false, description: "true: also read again the predictions that were 'unresolvable' (more data may have arrived, e.g. after log_session). Default false." },
+      },
+    },
+  },
+  {
+    name: "get_prediction_stats",
+    description:
+      "How good the logged predictions were, from the local ledger only (never contacts Suunto, needs no credentials, writes nothing): overall, per kind and per `rule`: logged, n (scored: hit or miss), hits, misses, unresolvable, voided, unscored; and, ONLY with at least 20 scored predictions in that group, hitRate, meanProbability, brier (the mean of (probability - outcome)^2; 0 is perfect; lower is better), brierBaseRate (what always saying the overall hit rate would have scored: a brier below it means the probabilities carried information) and a calibration table by stated probability (0-0.2, 0.2-0.4, 0.4-0.6, 0.6-0.8, 0.8-1: n, meanProbability, and hitRate when the bucket has at least 5). Below 20 scored the rates are null, verdict is 'insufficient' and statement says how many are missing: no claim is made. Unresolvable, voided and unscored predictions are never scored. Also: dueUnscored (call score_predictions), thresholds, recent (the 10 newest predictions with their status: hit, miss, unresolvable, void, due, open), notes. Output: { today, thresholds, dueUnscored, overall, byKind: [{ kind, ... }], byRule: [{ rule (null: none given), ... }], recent, notes }. Read-only.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "start_experiment",
+    description:
+      "Starts a randomized self-experiment on one nightly outcome, e.g. 'does no caffeine after noon change my sleep score?'. It PRE-REGISTERS the hypothesis and the analysis plan (stored in the result and the file) and draws the whole schedule up front: each day from the start is an intervention day, a control day, a washout day (the `washout` days after each intervention day, never analysed) or unassigned (a weekday not in `eligible`). Eligible days are paired in order and each pair holds one intervention and one control day in random order, drawn by a seeded generator (the seed is stored; the schedule is never redrawn), so the two arms are exactly balanced; a last unpaired day is dropped. The experiment starts tomorrow unless startDate (today or later, at most 60 days ahead) says otherwise; it needs at least 6 intervention and 6 control days (the least that can ever give a verdict) or it is refused. Only one active (upcoming or running) experiment per outcome metric at a time. Outcome `metric` is the night AFTER each assigned day, one of the per-night values get_baselines and get_tag_effects use: sleepDurationS, sleepScore, hrv, recoveryMorning. Follow it with get_experiment (today's assignment) and log_experiment_day (what really happened), then analyze_experiment after the planned end. Local file ~/.suunto-mcp/experiments.json (SUUNTO_EXPERIMENTS_PATH overrides it); never contacts Suunto, needs no credentials. Output: { saved (summary), experiment: { id, name, intervention, control, metric, days, washout, eligible, startDate, endDate, seed, hypothesis, analysisPlan, schedule: [{ date, arm ('intervention' | 'control' | 'washout' | 'none'), block }], log }, note }. Not read-only (writes the file), not destructive, not idempotent (each call starts another experiment). In demo mode it is kept in memory, and a finished demo experiment is already there.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", minLength: 1, maxLength: 100, description: "A short name, e.g. 'No caffeine after noon'." },
+        intervention: { type: "string", minLength: 1, maxLength: 500, description: "What to do on an intervention day, in plain words." },
+        control: { type: "string", minLength: 1, maxLength: 500, description: "What to do on a control day, e.g. 'usual routine'." },
+        metric: { type: "string", enum: [...OUTCOME_METRICS], description: "The nightly outcome: sleepDurationS, sleepScore, hrv or recoveryMorning (read for the night after each assigned day)." },
+        days: { type: "integer", minimum: 14, maximum: 60, description: "How many calendar days the experiment lasts from its start." },
+        eligible: { type: "array", maxItems: 7, items: { type: "string", enum: [...WEEKDAYS] }, description: "Weekdays that may carry an intervention or control day (default: every day), e.g. ['mon','tue','wed','thu']." },
+        washout: { type: "integer", minimum: 0, maximum: 2, default: 0, description: "Days after each intervention day that are left out, to let carry-over pass (default 0)." },
+        startDate: { ...dateProp("First day, YYYY-MM-DD (default tomorrow; today or later).") },
+      },
+      required: ["name", "intervention", "control", "metric", "days"],
+    },
+  },
+  {
+    name: "get_experiment",
+    description:
+      "Reads the experiments from ~/.suunto-mcp/experiments.json: for each one its status ('upcoming', 'running', 'finished' (past its last day) or 'stopped'), the outcome metric, the dates, and TODAY's assignment: { date, arm ('intervention' | 'control' | 'washout' | 'none', or null before the start / after the end), instruction (the text to follow today), followed (what was logged, or null) }, progress (days elapsed, planned intervention and control days) and adherence (trial days so far, how many are logged, followed, not followed, not logged, in total and per arm). With `id`, `selected` is the whole experiment: hypothesis, analysis plan, seed, the full schedule and the day log. Local file only: never contacts Suunto, needs no credentials, writes nothing. A damaged or other-version file is an error naming it. Output: { today, experiments: [summary], selected, note }. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", minLength: 2, maxLength: 20, description: "An experiment id, e.g. 'e1', to get its full schedule and log in `selected`." },
+      },
+    },
+  },
+  {
+    name: "log_experiment_day",
+    description:
+      "Records what ACTUALLY happened on an experiment day: `followed` true or false (did the user do what that day's arm said), with an optional note. Only intervention and control days can be logged (not washout or unassigned days), not future days and not after the experiment was stopped. `date` defaults to today; `id` defaults to the one experiment running today (needed when none or several run). Logging a day again with a different answer keeps the earlier answer under `earlier` (nothing is lost); the same answer again changes nothing. analyze_experiment reports intention to treat (every assigned day) and per protocol (only days logged as followed), so honest logging, including false, matters. Local file only (experiments.json): never contacts Suunto, needs no credentials. Output: { id, date, arm, saved: { followed, note, loggedAt, earlier }, changed }. Not read-only, not destructive, idempotent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", minLength: 2, maxLength: 20, description: "The experiment id (default: the one running today)." },
+        date: { ...dateProp("The day, YYYY-MM-DD (default today; not in the future).") },
+        followed: { type: "boolean", description: "true: the user did what that day's arm said. false: they did not." },
+        note: { type: "string", maxLength: 500, description: "Optional, e.g. 'coffee at 15:00'." },
+      },
+      required: ["followed"],
+    },
+  },
+  {
+    name: "analyze_experiment",
+    description:
+      "Analyzes an experiment (default: the newest): the difference in MEDIANS of the outcome metric on the night after intervention days minus the night after control days, with a two-sided permutation test over the very scheme that was randomized (the arms swapped within each pair: every swap is equally likely if the intervention does nothing; exact when there are at most 15 informative pairs, else 20000 draws with a fixed seed, so the same data always gives the same p), the effect against the same noise scale get_tag_effects uses (noiseThreshold = 3 * 1.25 * (IQR of the control nights / 1.35) * sqrt(1/nIntervention + 1/nControl), effectInStandardErrors), the nights per arm, the missing nights per arm, and a verdict. Both analyses are reported: intentionToTreat (every assigned day counts as assigned, followed or not; the PRIMARY one) and perProtocol (only days logged as followed; not protected by the randomization). verdict: 'insufficient' with fewer than 6 nights with a value in either arm (nothing is claimed; 6 is the least with which a permutation test over pairs can reach p < 0.05); 'intervention-higher' / 'intervention-lower' only when p <= 0.05 AND the median difference is larger than noiseThreshold (compared as printed); else 'no-clear-difference', which does not show there is no effect. `statement` says it in plain language, `randomized` says what was randomized and `notControlled` what was not (everything else on those days, no blinding, carry-over between nights, the watch's estimate, missing nights). Allowed only from the second day after the planned end (the last night must be recorded); before it an early look needs early: true and is flagged exploratory (exploratory: true, the statement starts with 'Exploratory'), as is a stopped experiment (analysed up to the day it was stopped). Reads Suunto's sleep list (and the recovery list for recoveryMorning), one request each, and the local file; writes nothing. A failed request is an error, never silently 'missing nights'. Output: { id, name, metric, today, status, exploratory, exploratoryReason, window: { from, through, plannedEnd }, hypothesis, verdict, statement, intentionToTreat: { nIntervention, nControl, interventionMedian, controlMedian, medianDiff, meanDiff, noiseThreshold, effectInStandardErrors, pValue, test: { method, permutations, informativePairs }, missingNights: { intervention, control }, verdict }, perProtocol (the same fields + note), adherence, randomized, notControlled, thresholds, notes }. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", minLength: 2, maxLength: 20, description: "The experiment id (default: the newest)." },
+        early: { type: "boolean", default: false, description: "true: analyze before the planned end (exploratory, flagged as such). Default false: refused until the last night is recorded." },
+      },
+    },
+  },
+  {
+    name: "stop_experiment",
+    description:
+      "Stops an experiment with a reason, e.g. when life got in the way. Nothing is deleted: the schedule, the seed and the log stay in the file, and analyze_experiment still analyzes what was logged up to the stop date, flagged exploratory. A stopped experiment no longer blocks a new one on the same metric, and no more days can be logged for it. An experiment past its last day cannot be stopped (analyze it). Stopping twice changes nothing. Local file only (experiments.json): never contacts Suunto, needs no credentials. Output: { id, stopped: { at, date, reason }, alreadyStopped, note }. Not read-only, not destructive, idempotent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", minLength: 2, maxLength: 20, description: "The experiment id, e.g. 'e1'." },
+        reason: { type: "string", minLength: 1, maxLength: 500, description: "Why it is stopped." },
+      },
+      required: ["id", "reason"],
+    },
+  },
+  {
+    name: "draft_session_log",
+    description:
+      "ZERO-LOGGING DRAFT: proposes the log_session payload for a guided gym session so the user only has to confirm it. Give `workoutKey`, or `date` for the latest guided session of that day (exactly one of the two). It reads the session's laps (the same mapping as compare_workout_to_plan; `plan` is the same optional exercises array) and its FIT file (heart-rate quality only), and builds, per exercise, the guide's text as sets x reps @ load. IMPORTANT: the watch records only the guide's PLANNED text, never the reps and weights done, so every rep count and weight in the draft is an ASSUMPTION (assumed: true) and must be confirmed or corrected by the user before anything is logged. In a per-set guide the number of sets is the number of set laps the watch recorded; in a per-exercise or workout guide the watch has one lap per exercise, so the number of sets is the plan's. It lists every deviation the watch data shows per exercise and for the session (missing, extra, short or long sets, a lap pressed during a rest, laps after 'Session complete', an unreliable mapping, a session that stopped early, missing exercises when `plan` is given) and the exact things to ask: `confirm`. A distance or time after the x ('3x40m') is not taken as reps, a missing weight is left out, never guessed. It NEVER writes anything, here or at Suunto: after the user has confirmed or corrected the draft, call log_session with `draft` (corrected) and source: 'draft'. Output: { workoutKey, date, status ('ok' | 'no-laps' | 'no-guide-labels' | 'unknown-label-format' | 'no-workout'), assumed: true, draft: { workoutKey, source: 'draft', exercises: [{ name, sets: [{ reps, kg }] }] } | null (valid arguments for log_session as they are), review: [{ n, name, detail, planned: { sets, reps, kg } | null, recordedSetLaps, proposedSets, assumed: true, mustConfirm ('reps', 'kg', 'setCount'), issues: [{ code, detail }], whyNotFilled }], sessionIssues, mapping: { format, complete, reliable, note }, hrQuality: { reliable, reasons, coverage } | null, confirm (plain sentences: what to ask the user), notes }. About 1-4 KB; downloads the FIT file (about 550 KB). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workoutKey: { type: "string", minLength: 24, maxLength: 24, pattern: "^[0-9a-fA-F]{24}$", description: "The 24-character workoutKey of the session, from list_workouts or get_daily_snapshot." },
+        date: { ...dateProp("Instead of workoutKey: the local date; the latest guided session (with guide laps) of that day is drafted.") },
+        plan: {
+          type: "array",
+          minItems: 1,
+          description: "Optional: what the session was meant to be, in order (the exercises array given to push_strength_guide), as for compare_workout_to_plan: adds missing, extra and reordered exercises and set counts to the issues.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1, description: "Exercise name as pushed to the guide." },
+              sets: { type: "integer", minimum: 1, maximum: 100, description: "Planned number of sets." },
+              restSec: { type: "integer", minimum: 1, description: "Planned rest between sets, in seconds." },
+            },
+            required: ["name"],
+          },
+        },
+      },
+    },
+  },
 ];
 
 // Titles + annotations live in tool-meta.ts; a tool without an entry there
@@ -1262,6 +1418,26 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await archiveWorkouts(suunto, archiveStore, { limit: a.limit })));
       case "get_archive_status":
         return text(JSON.stringify(await archiveStatus(archiveStore)));
+      case "log_prediction":
+        return text(JSON.stringify(await logPrediction(a, predictionStore)));
+      case "void_prediction":
+        return text(JSON.stringify(await voidPrediction(a, predictionStore)));
+      case "score_predictions":
+        return text(JSON.stringify(await scorePredictions(suunto, predictionStore, { rescoreUnresolvable: a.rescoreUnresolvable === true }, demo ? { loadJournal: () => (suunto as DemoClient).demoJournal() } : {})));
+      case "get_prediction_stats":
+        return text(JSON.stringify(predictionStats(await predictionStore.load())));
+      case "start_experiment":
+        return text(JSON.stringify(await startExperiment(a, experimentStore)));
+      case "get_experiment":
+        return text(JSON.stringify(await getExperiment(experimentStore, { id: a.id })));
+      case "log_experiment_day":
+        return text(JSON.stringify(await logExperimentDay(a, experimentStore)));
+      case "analyze_experiment":
+        return text(JSON.stringify(await analyzeExperiment(suunto, experimentStore, { id: a.id, early: a.early === true })));
+      case "stop_experiment":
+        return text(JSON.stringify(await stopExperiment(a, experimentStore)));
+      case "draft_session_log":
+        return text(JSON.stringify(await buildDraft(suunto, { workoutKey: a.workoutKey, date: a.date, plan: a.plan })));
       case "push_week_plan": {
         const result = await planWeek(a.guides, {
           dryRun: a.dryRun !== false,
