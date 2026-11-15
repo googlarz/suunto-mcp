@@ -4,7 +4,7 @@
 // files archive_workouts keeps). Without enough such data it says so (model.status "insufficient") and falls back to
 // Naismith's generic rule, clearly labelled. Reads one GPX from Suunto and the local archive; writes nothing.
 import type { SuuntoClient } from "./api.js";
-import { checkFit, type ArchiveStore } from "./archive.js";
+import type { ArchiveStore } from "./archive.js";
 import { parseFit, type ParsedFit } from "./fit.js";
 import { isValidCalendarDate } from "./schema-validate.js";
 
@@ -179,6 +179,11 @@ export interface ModelResult {
   descentM: number;
   model?: Model;
   inSampleErrorPct?: number | null;
+  gradeRange?: GradeRange; // the steepest descent and ascent among the pieces the model was fitted to (fractions, 0.1 = 10 %)
+}
+export interface GradeRange {
+  min: number;
+  max: number;
 }
 
 // `workouts`: the pieces of each candidate workout. Needs MIN_WORKOUTS workouts of at least MIN_WORKOUT_M each and, together,
@@ -200,7 +205,8 @@ export function buildModel(workouts: Piece[][]): ModelResult {
   const errs = used.map((w) => Math.abs(sum(w.map((p) => predict(p, model))) - sum(w.map((p) => p.time!))) / sum(w.map((p) => p.time!))).sort((a, b) => a - b);
   const mid = errs.length >> 1;
   const median = errs.length % 2 ? errs[mid] : (errs[mid - 1] + errs[mid]) / 2;
-  return { status: "ok", ...stats, model, inSampleErrorPct: Math.round(median * 1000) / 10 };
+  const grades = all.map((p) => p.dEle / p.dist);
+  return { status: "ok", ...stats, model, inSampleErrorPct: Math.round(median * 1000) / 10, gradeRange: { min: Math.min(...grades), max: Math.max(...grades) } };
 }
 
 // ---------- the estimate ----------
@@ -212,9 +218,12 @@ export interface Split {
   ascentM: number;
   descentM: number;
   timeS: number;
+  outsideRangeM: number; // metres in this split steeper (up or down) than anything the model was fitted to
 }
 
-export function estimate(pieces: Piece[], m: Model) {
+// `range`: the gradients the model was fitted to. A piece outside it is extrapolation, so it is counted (and the call says so)
+// instead of passing as if it were as well founded as the rest.
+export function estimate(pieces: Piece[], m: Model, range?: GradeRange) {
   // consecutive pieces of one kind form a run; a run shorter than MIN_SPLIT_M is merged into the one before it
   const runs: Split[] = [];
   let at = 0;
@@ -223,14 +232,17 @@ export function estimate(pieces: Piece[], m: Model) {
     const { up, down } = climb(p);
     const time = predict(p, m);
     total += time;
-    const kind = kindOf(p.dEle / p.dist);
+    const grade = p.dEle / p.dist;
+    const kind = kindOf(grade);
+    const outside = range && (grade < range.min || grade > range.max) ? p.dist : 0;
     const last = runs[runs.length - 1];
     if (last && last.kind === kind) {
       last.distanceM += p.dist;
       last.ascentM += up;
       last.descentM += down;
       last.timeS += time;
-    } else runs.push({ kind, startM: at, distanceM: p.dist, ascentM: up, descentM: down, timeS: time });
+      last.outsideRangeM += outside;
+    } else runs.push({ kind, startM: at, distanceM: p.dist, ascentM: up, descentM: down, timeS: time, outsideRangeM: outside });
     at += p.dist;
   }
   const merged: Split[] = [];
@@ -241,10 +253,11 @@ export function estimate(pieces: Piece[], m: Model) {
       last.ascentM += r.ascentM;
       last.descentM += r.descentM;
       last.timeS += r.timeS;
+      last.outsideRangeM += r.outsideRangeM;
     } else merged.push({ ...r });
   }
-  const splits = merged.map((s) => ({ ...s, startM: Math.round(s.startM), distanceM: Math.round(s.distanceM), ascentM: Math.round(s.ascentM), descentM: Math.round(s.descentM), timeS: Math.round(s.timeS) }));
-  return { totalTimeS: Math.round(total), splits };
+  const splits = merged.map((s) => ({ ...s, startM: Math.round(s.startM), distanceM: Math.round(s.distanceM), ascentM: Math.round(s.ascentM), descentM: Math.round(s.descentM), timeS: Math.round(s.timeS), outsideRangeM: Math.round(s.outsideRangeM) }));
+  return { totalTimeS: Math.round(total), outsideRangeM: sum(splits.map((s) => s.outsideRangeM)), splits };
 }
 
 const fmtDur = (s: number): string => {
@@ -314,11 +327,7 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
   for (const r of records) {
     if (workouts.length >= MAX_USED) break;
     try {
-      const bytes = await store.readFit(r.workoutKey);
-      // fit-file-parser can spin forever on bytes that are not a FIT file (seen on repeated garbage input), so only a file
-      // that passes the archive's own header and length check reaches it
-      if (checkFit(bytes) !== null) throw new Error("not a complete FIT file");
-      const fit = await parse(bytes);
+      const fit = await parse(await store.readFit(r.workoutKey)); // parseFit refuses a file that is not a complete FIT file
       const sport = String(fit.sessions?.[0]?.sport ?? "").toLowerCase();
       if (!(GROUPS[activity] as readonly string[]).includes(sport)) {
         skipped.otherSport++;
@@ -334,7 +343,7 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
   const fitted = buildModel(workouts);
   const personal = fitted.status === "ok";
   const model = personal ? fitted.model! : GENERIC;
-  const est = estimate(routePieces, model);
+  const est = estimate(routePieces, model, personal ? fitted.gradeRange : undefined);
 
   const sumOf = (f: (p: Piece) => number) => Math.round(sum(routePieces.map(f)));
   const byKind = Object.fromEntries((["flat", "ascent", "descent"] as const).map((k) => {
@@ -345,6 +354,11 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
     "An ESTIMATE of walking (or running) time without stops, photos, food or navigation pauses: add time for those. Weather, load, trail surface and fatigue are not modelled, and a route's altitude (often from a map, not a barometer) differs from what your watch records.",
   ];
   if (!personal) notes.push(`Your own pace could not be modelled (${fitted.reason}); the estimate below is the generic Naismith rule (5 km/h plus 1 h per 600 m climbed, nothing for descent), NOT your pace. Archive more ${activity} workouts with archive_workouts (FIT files with altitude and distance) to get a personal estimate.`);
+  if (personal && est.outsideRangeM > 0) {
+    const g = fitted.gradeRange!;
+    const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)} %`;
+    notes.push(`About ${est.outsideRangeM} m (${Math.round((100 * est.outsideRangeM) / sumOf((p) => p.dist))} %) of the route is steeper than anything in your workouts (${pct(g.min)} to ${pct(g.max)}): there the estimate extends your fitted pace beyond what it was fitted to, so trust those stretches less (they are marked in splits[].outsideRangeM).`);
+  }
   if (activity === "running" && !personal) notes.push("The generic fallback is a WALKING rule even though activity is running.");
   if (!hasElevation) notes.push("The route has no altitude on every point, so climbing and descent are not counted: the estimate is flat-ground time and a hilly route will take longer.");
   if (records.length === 0) notes.push("The local archive is empty or missing: run archive_workouts first.");
@@ -362,9 +376,10 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
       distanceM: fitted.distanceM,
       ascentM: fitted.ascentM,
       descentM: fitted.descentM,
+      ...(personal ? { gradeRangePct: { min: Math.round(fitted.gradeRange!.min * 1000) / 10, max: Math.round(fitted.gradeRange!.max * 1000) / 10 } } : {}),
       ...(personal ? { flatPaceSPerKm: Math.round(model.flat * 1000), ascentSPerM: Math.round(model.up * 100) / 100, descentSPerM: Math.round(model.down * 100) / 100, inSampleErrorPct: fitted.inSampleErrorPct } : {}),
     },
-    estimate: { totalTimeS: est.totalTimeS, totalTime: fmtDur(est.totalTimeS), byKind, splits: est.splits },
+    estimate: { totalTimeS: est.totalTimeS, totalTime: fmtDur(est.totalTimeS), outsideRangeM: est.outsideRangeM, byKind, splits: est.splits },
     latestStart: opts.sunset === undefined ? null : latestStart(est.totalTimeS, opts.sunset, margin, deps.now),
     assumptions: [
       "Time = flat pace x distance + extra time per metre climbed + extra time per metre descended; constants fitted by least squares to the pieces (100 m each) of your archived workouts of the same kind (walking and hiking, or running), the newest 25 usable ones of the 40 newest archived.",

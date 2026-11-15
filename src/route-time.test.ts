@@ -156,6 +156,43 @@ test("estimate: a steep descent never takes less than half the flat time of the 
   assert.equal(estimate([p], { flat: 0.8, up: 5, down: -2 }).totalTimeS, 40); // 80 - 100 would be negative
 });
 
+test("buildModel: reports the steepest descent and ascent seen in the training pieces", () => {
+  const r = buildModel(three());
+  assert.deepEqual(r.gradeRange, { min: -0.1, max: 0.1 });
+  assert.equal(buildModel([workout(), workout()]).gradeRange, undefined, "no model, no range");
+});
+
+test("estimate: pieces steeper than anything in the user's workouts are marked, not silently extrapolated (the range edge itself is inside)", () => {
+  const range = { min: -0.1, max: 0.1 };
+  const route = [0, 10, 10.01, 15, -10, -10.01, -12].map((d) => piece(d));
+  const e = estimate(route, TRUE, range);
+  assert.equal(e.outsideRangeM, 400, "10.01 %, 15 %, -10.01 % and -12 % are outside; +10 % and -10 % are not");
+  assert.equal(estimate(route, TRUE).outsideRangeM, 0, "without a range nothing is marked");
+  assert.deepEqual(estimate([piece(10), piece(10)], TRUE, range).splits.map((s) => s.outsideRangeM), [0]);
+  assert.deepEqual(estimate([piece(10), piece(15), piece(15), piece(15)], TRUE, range).splits.map((s) => [s.kind, s.distanceM, s.outsideRangeM]), [["ascent", 400, 300]]);
+});
+
+test("estimateRouteTime: a route steeper than the user's own workouts gets a note and the metres that are extrapolated", async () => {
+  const store = memoryArchiveStore();
+  for (let i = 0; i < 3; i++) await archived(store, walk(profile(), 1_800_000_000 + i * 86_400), 1_800_000_000_000 + i * 86_400_000);
+  // 3 km at 8 % (inside the workouts' +/-10 %), then 2 km at 20 % (outside)
+  const gentle = await estimateRouteTime(clientOf(gpxOf((i) => 100 + Math.min(i, 30) * 8, 30)), store, { routeId: "r" });
+  assert.equal(gentle.basis, "personal");
+  assert.equal(gentle.estimate.outsideRangeM, 0);
+  assert.ok(!gentle.notes.some((x: string) => /steeper than anything/.test(x)));
+  const steep = await estimateRouteTime(clientOf(gpxOf((i) => 100 + (i < 30 ? i * 8 : 240 + (i - 30) * 20), 50)), store, { routeId: "r" });
+  assert.equal(steep.basis, "personal");
+  assert.ok(steep.estimate.outsideRangeM >= 1900 && steep.estimate.outsideRangeM <= 2100, `${steep.estimate.outsideRangeM}`);
+  assert.ok(Math.abs(steep.model.gradeRangePct!.min + 10) < 1.5 && Math.abs(steep.model.gradeRangePct!.max - 10) < 1.5, JSON.stringify(steep.model.gradeRangePct)); // +/-10 % up to the FIT altitude's 0.2 m steps
+  const note = steep.notes.find((x: string) => /steeper than anything/.test(x))!;
+  assert.match(note, /About [12]\d{3} m \(\d+ %\) of the route is steeper than anything in your workouts \(-\d+(\.\d)? % to \+\d+(\.\d)? %\)/);
+  assert.ok(steep.estimate.splits.some((s) => s.outsideRangeM > 0));
+  // the generic fallback has no personal range to be outside of
+  const generic = await estimateRouteTime(clientOf(gpxOf((i) => 100 + i * 20, 30)), memoryArchiveStore(), { routeId: "r" });
+  assert.equal(generic.estimate.outsideRangeM, 0);
+  assert.ok(!generic.notes.some((x: string) => /steeper than anything/.test(x)));
+});
+
 // ---------- the sunset ----------
 
 test("latestStart: sunset minus the margin minus the time, in the sunset's own offset", () => {

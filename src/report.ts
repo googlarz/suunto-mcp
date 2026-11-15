@@ -172,6 +172,9 @@ export async function buildWeeklyReport(
           count: all.length,
           totalTimeS: Math.round(all.reduce((s, w) => s + (w.totalTimeS ?? 0), 0)),
           kcal: all.reduce((s, w) => s + (w.kcal ?? 0), 0),
+          // the table's rows and this total are the same numbers (the snapshot's per-workout TSS); the load model reads another field
+          tss: Math.round(all.reduce((s, w) => s + (w.tss ?? 0), 0) * 10) / 10,
+          noTss: all.filter((w) => typeof w.tss !== "number").length,
           restDays: perDay.filter((d) => d.sessions.length === 0).length,
           days: perDay.map((d) => ({ date: d.date, sessions: d.sessions.map((w) => ({ startLocal: w.startLocal, totalTimeS: w.totalTimeS, tss: w.tss, guide: w.guide })) })),
         };
@@ -218,6 +221,8 @@ export async function buildWeeklyReport(
           weekTss: weekOf(from)?.tss ?? 0,
           previousWeekTss: weekOf(addDays(from, -7))?.tss ?? null,
           notes: load.notes.filter((n) => /Little history|Reached the|No workouts at all|no TSS/.test(n)),
+          // what the shared markdown says about those notes, in plain words
+          flags: { littleHistory: load.notes.some((n) => /^Little history/.test(n)), limitReached: load.notes.some((n) => /^Reached the/.test(n)) },
         };
 
   // ---- the guided strength sessions of the week ----
@@ -246,7 +251,7 @@ export async function buildWeeklyReport(
     minNightsPerGroup: tags.thresholds.minTaggedNights,
   };
 
-  const report = { week: { from, to }, workouts, recovery: recovery && { ...recovery, stepsTotal: steps && steps.length ? steps.reduce((a, b) => a + b, 0) : null }, load: loadOut, strength, plan, tagEffects };
+  const report = { week: { from, to }, workouts, recovery: recovery && { ...recovery, stepsTotal: steps && steps.length ? steps.reduce((a, b) => a + b, 0) : null, stepsDays: steps ? steps.length : 0 }, load: loadOut, strength, plan, tagEffects };
   const markdown = renderMarkdown(report, errors, deps.demo === true);
 
   let saved: null | { status: SaveStatus | "refused"; path: string | null; reason?: string } = null;
@@ -288,7 +293,23 @@ const METRIC_LABEL: Record<string, { label: string; fmt: (n: number | null) => s
   steps: { label: "Steps per day", fmt: (n) => fmtNum(n, 0) },
 };
 
-function renderMarkdown(r: any, errors: { section: string }[], demo: boolean): string {
+// Text the user wrote (guide, exercise and tag names, plan goal and titles) goes into a text that is shared and may be shown
+// as markdown or HTML, so it is data and never markup: whitespace (newlines too) collapses to single spaces, `\`, backtick,
+// `|`, `[` and `]` are backslash-escaped, `&`, `<` and `>` become entities, and a marker that would start a heading, list
+// item or quote at the beginning of the text is escaped.
+export function mdText(text: string): string {
+  return text
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\\`|[\]]/g, (c) => `\\${c}`)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/^(#{1,6}|[-+*])(?=\s|$)/, "\\$1")
+    .replace(/^(\d+)([.)])(?=\s|$)/, "$1\\$2");
+}
+
+export function renderMarkdown(r: any, errors: { section: string }[], demo: boolean): string {
   const out: string[] = [`# Weekly training report: ${r.week.from} to ${r.week.to}`, ""];
   if (demo) out.push(`> ${DEMO_NOTICE} Every number below is generated.`, "");
   const down = [...new Set(errors.map((e) => e.section))];
@@ -301,7 +322,7 @@ function renderMarkdown(r: any, errors: { section: string }[], demo: boolean): s
   else {
     const m = r.recovery.metrics;
     out.push(`- Sleep: ${m.sleepDurationS.unavailable ? "unavailable" : m.sleepDurationS.median === null ? `insufficient data (${m.sleepDurationS.n} of 7 nights)` : `median ${fmtDur(m.sleepDurationS.median)} over ${m.sleepDurationS.n} nights`}.`);
-    out.push(`- Steps: ${m.steps.unavailable ? "unavailable" : r.recovery.stepsTotal === null ? "insufficient data" : `${fmtNum(r.recovery.stepsTotal, 0)} in total`}.`);
+    out.push(`- Steps: ${m.steps.unavailable ? "unavailable" : r.recovery.stepsTotal === null ? "insufficient data" : `${fmtNum(r.recovery.stepsTotal, 0)} over ${r.recovery.stepsDays} of 7 days`}.`);
   }
   if (r.load) out.push(`- Training load at the end of the week: Fitness (CTL) ${fmtNum(r.load.ctl)}, Fatigue (ATL) ${fmtNum(r.load.atl)}, Form (TSB) ${fmtNum(r.load.tsb)}.`);
 
@@ -310,7 +331,8 @@ function renderMarkdown(r: any, errors: { section: string }[], demo: boolean): s
   else if (r.workouts.count === 0) out.push("No workouts this week.");
   else {
     out.push("| Date | Start | Duration | TSS | Guide |", "|---|---|---|---|---|");
-    for (const d of r.workouts.days) for (const w of d.sessions) out.push(`| ${d.date} | ${w.startLocal ?? "n/a"} | ${fmtDur(w.totalTimeS)} | ${fmtNum(w.tss)} | ${w.guide ?? ""} |`);
+    for (const d of r.workouts.days) for (const w of d.sessions) out.push(`| ${d.date} | ${w.startLocal ?? "n/a"} | ${fmtDur(w.totalTimeS)} | ${fmtNum(w.tss)} | ${w.guide ? mdText(w.guide) : ""} |`);
+    out.push(`| Total | | ${fmtDur(r.workouts.totalTimeS)} | ${fmtNum(r.workouts.tss)} | |`);
   }
 
   out.push("", "## Sleep and recovery against your usual", "");
@@ -331,8 +353,15 @@ function renderMarkdown(r: any, errors: { section: string }[], demo: boolean): s
   else {
     out.push(`- Fitness (CTL) ${fmtNum(r.load.ctl)}, Fatigue (ATL) ${fmtNum(r.load.atl)}, Form (TSB) ${fmtNum(r.load.tsb)} at the end of ${r.load.asOf}.`);
     if (r.load.rampRate7d !== null) out.push(`- Fitness changed by ${fmtNum(r.load.rampRate7d)} over the 7 days.`);
-    out.push(`- Training stress this week: ${fmtNum(r.load.weekTss)}${r.load.previousWeekTss === null ? "" : ` (the week before: ${fmtNum(r.load.previousWeekTss)})`}.`);
-    for (const n of r.load.notes) out.push(`- ${n}`);
+    // one source for the figure: the workouts table's own rows; the load model's figure (another TSS field of Suunto's) is only
+    // stated when it differs, with the reason
+    if (r.workouts) {
+      out.push(`- Training stress this week: ${fmtNum(r.workouts.tss)} (the sum of the workouts above${r.workouts.noTss > 0 ? `; ${r.workouts.noTss} without TSS counted as 0` : ""}).`);
+      if (Math.abs(r.load.weekTss - r.workouts.tss) > 0.5) out.push(`- The load model behind the Fitness numbers counted ${fmtNum(r.load.weekTss)} for the week: it reads another TSS field of Suunto's, which can differ from the per-workout values above.`);
+    } else out.push(`- Training stress this week (load model): ${fmtNum(r.load.weekTss)}.`);
+    if (r.load.previousWeekTss !== null) out.push(`- The week before (load model): ${fmtNum(r.load.previousWeekTss)}.`);
+    if (r.load.flags.littleHistory) out.push("- Fitness (CTL) needs about 4 to 6 weeks of history to settle, so it may read low.");
+    if (r.load.flags.limitReached) out.push("- Some older workouts may be missing from the load calculation, so fitness may read low.");
     out.push("- Computed from each workout's TSS; CTL can be about 1 point off the watch.");
   }
 
@@ -341,23 +370,24 @@ function renderMarkdown(r: any, errors: { section: string }[], demo: boolean): s
   else if (r.strength.exercises.length === 0) out.push("No guided strength sessions this week.");
   else {
     out.push(`${r.strength.sessions} guided session${r.strength.sessions === 1 ? "" : "s"}. Loads are what the guide planned unless you logged them.`, "");
-    for (const e of r.strength.exercises.slice(0, 15)) out.push(`- ${e.name}: ${e.sessions} session${e.sessions === 1 ? "" : "s"}${e.lastDetail ? `, last ${e.lastDetail}` : ""}`);
+    for (const e of r.strength.exercises.slice(0, 15)) out.push(`- ${mdText(e.name)}: ${e.sessions} session${e.sessions === 1 ? "" : "s"}${e.lastDetail ? `, last ${mdText(e.lastDetail)}` : ""}`);
     if (r.strength.pending > 0) out.push("", `${r.strength.pending} session(s) were not read yet, so this list may be incomplete.`);
   }
 
   out.push("", "## Plan", "");
-  if (r.plan === null) out.push("No plan was set, so there is no adherence to report.");
-  else if (r.plan.planned === 0) out.push(`Plan "${r.plan.goal}": no session was planned this week.`);
+  if (r.plan === null && down.includes("plan")) out.push("Unavailable.");
+  else if (r.plan === null) out.push("No plan was set, so there is no adherence to report.");
+  else if (r.plan.planned === 0) out.push(`Plan "${mdText(r.plan.goal)}": no session was planned this week.`);
   else {
-    out.push(`Plan "${r.plan.goal}": ${r.plan.done} of ${r.plan.planned} planned sessions done (${r.plan.adherencePct} %). Any workout on a planned date counts as done; the sport and guide are not compared.`, "");
-    for (const i of r.plan.items) out.push(`- ${i.date} ${i.title}: ${i.status}`);
+    out.push(`Plan "${mdText(r.plan.goal)}": ${r.plan.done} of ${r.plan.planned} planned sessions done (${r.plan.adherencePct} %). Any workout on a planned date counts as done; the sport and guide are not compared.`, "");
+    for (const i of r.plan.items) out.push(`- ${i.date} ${mdText(i.title)}: ${i.status}`);
   }
 
   out.push("", "## Tag effects", "");
   if (r.tagEffects === null) out.push("Unavailable.");
   else if (r.tagEffects.tags.length === 0) out.push(`Insufficient data: a tag needs at least ${r.tagEffects.minNightsPerGroup} nights after tagged sessions and ${r.tagEffects.minNightsPerGroup} after other training days before anything is said${r.tagEffects.insufficientTags > 0 ? ` (${r.tagEffects.insufficientTags} tag(s) checked)` : ", and no session carries a tag yet"}.`);
   else {
-    for (const t of r.tagEffects.tags) out.push(`- ${t.statement}`);
+    for (const t of r.tagEffects.tags) out.push(`- ${mdText(t.statement)}`);
     out.push("", "These are associations in your own data, not causes.");
   }
 

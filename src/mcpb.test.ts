@@ -241,6 +241,45 @@ async function initialize(env: Record<string, string>): Promise<any> {
   }
 }
 
+async function listToolNames(): Promise<string[]> {
+  const entry = fileURLToPath(new URL("./index.js", import.meta.url));
+  const cwd = await mkdtemp(join(tmpdir(), "suunto-mcpb-tools-"));
+  const clean = Object.fromEntries(Object.entries(process.env).filter(([k, v]) => v !== undefined && !k.startsWith("SUUNTO_"))) as Record<string, string>;
+  const child = spawn(process.execPath, [entry], { cwd, env: { ...clean, SUUNTO_DEMO: "1" }, stdio: ["pipe", "pipe", "ignore"] });
+  try {
+    const reply = new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("no tools/list response within 15 s")), 15_000);
+      createInterface({ input: child.stdout }).on("line", (line) => {
+        const msg = JSON.parse(line);
+        if (msg.id === 2) {
+          clearTimeout(timer);
+          resolve(msg);
+        }
+      });
+    });
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "mcpb-test", version: "1" } } }) + "\n");
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) + "\n");
+    return (await reply).result.tools.map((t: { name: string }) => t.name);
+  } finally {
+    child.kill();
+    await rm(cwd, { recursive: true, force: true });
+  }
+}
+
+test("manifest.json: privacy_policies points at the README's Privacy section, and tools lists exactly the tools the server lists", async () => {
+  const manifest = JSON.parse(await readFile(join(repo, "manifest.json"), "utf8"));
+  const readme = await readFile(join(repo, "README.md"), "utf8");
+  assert.deepEqual(manifest.privacy_policies, ["https://github.com/googlarz/suunto-mcp#privacy"]);
+  assert.match(readme, /^## Privacy$/m, "the policy URL needs a Privacy heading to land on");
+  const privacy = readme.split(/^## Privacy$/m)[1].split(/^## /m)[0];
+  for (const claim of [/stay on your computer|stays? (on|local)/i, /Suunto's API|Suunto's servers/, /nothing else is sent|no third-party/i, /demo mode makes no/i]) assert.match(privacy, claim);
+  assert.equal(manifest.tools_generated, undefined, "every tool is listed, none is generated at run time");
+  const listed = manifest.tools.map((t: any) => t.name);
+  assert.deepEqual([...listed].sort(), (await listToolNames()).sort(), "manifest.json tools and the server's tools/list must be the same names");
+  assert.equal(new Set(listed).size, listed.length);
+  for (const t of manifest.tools) assert.ok(typeof t.description === "string" && t.description.length > 10 && t.description.length < 200 && !/\n/.test(t.description), t.name);
+});
+
 test("mcpb-entry: the demo checkbox on starts the server in demo mode with no credentials; off starts it normally", async () => {
   const on = await initialize({ SUUNTO_MCPB_DEMO: "true", SUUNTO_CLIENT_ID: "${user_config.client_id}" });
   assert.match(on.instructions, /DEMO MODE/);

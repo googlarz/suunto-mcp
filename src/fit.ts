@@ -45,7 +45,21 @@ export function developerInfo(parsed: ParsedFit): DeveloperInfo | null {
   return { apps, fields, devChannels };
 }
 
+// A FIT file: a 12 or 14 byte header whose bytes 8-11 read ".FIT", and at least as long as the header says (header + data
+// + 2 byte CRC): a download cut short fails here. null when it passes. The CRC itself is not checked.
+export function checkFit(bytes: Buffer): string | null {
+  if (bytes.length === 0) return "the download is empty";
+  const headerSize = bytes[0];
+  if (bytes.length < 12 || (headerSize !== 12 && headerSize !== 14) || bytes.toString("latin1", 8, 12) !== ".FIT") return "not a FIT file (no FIT header)";
+  const needed = headerSize + bytes.readUInt32LE(4) + 2;
+  return bytes.length < needed ? `truncated (${bytes.length} of ${needed} bytes)` : null;
+}
+
+// fit-file-parser can spin forever on bytes that are not a FIT file (seen on repeated non-FIT input), and a stuck server cannot
+// answer anything: every file is checked first, whichever path it came from (download, archive, test).
 export async function parseFit(bytes: Buffer): Promise<ParsedFit> {
+  const bad = checkFit(bytes);
+  if (bad !== null) throw new Error(`not a complete FIT file (${bad})`);
   const parser = new FitParser({
     force: true,
     speedUnit: "km/h",

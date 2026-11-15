@@ -512,6 +512,23 @@ test("e2e estimate_route_time: read-only, asks Suunto for the route GPX and refu
   assert.match(week.stderr, /must be a Monday/);
 });
 
+test("e2e: downloaded bytes that are not a FIT file are refused with a clear error, however often, instead of reaching fit-file-parser (which can spin forever on them)", async () => {
+  const BAD = "badf17badf17badf17badf17";
+  await withMcp(async (call) => {
+    // the parser used to hang on the third non-FIT input in one process; each call waits at most 15 s (withMcp's request timeout)
+    for (let i = 0; i < 4; i++) {
+      for (const [tool, args] of [["get_workout_fit", { workoutKey: BAD }], ["get_workout_fit", { workoutKey: BAD, full: true }], ["get_workout_rest_profile", { workoutKey: BAD }]] as const) {
+        const r = await call(tool, args);
+        assert.equal(r.isError, true, `${tool} round ${i}`);
+        assert.match(r.text, /not a complete FIT file \(not a FIT file \(no FIT header\)\)/, tool);
+      }
+    }
+  });
+  const cli = await runCli(["get-workout-fit", BAD]);
+  assert.notEqual(cli.code, 0);
+  assert.match(cli.stderr, /not a complete FIT file/);
+});
+
 test("e2e CLI: a new command without its argument exits non-zero with the usage line", async () => {
   const r = await runCli(["compare-workout"]);
   assert.notEqual(r.code, 0);

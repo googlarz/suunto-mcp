@@ -17,13 +17,25 @@
   "documentation": "https://github.com/googlarz/suunto-mcp#readme",
   "support": "https://github.com/googlarz/suunto-mcp/issues",
   "license": "MIT",
-  "keywords": ["suunto", "fitness", "wearables", "training", "sleep", "recovery"],
+  "keywords": [
+    "suunto",
+    "fitness",
+    "wearables",
+    "training",
+    "sleep",
+    "recovery"
+  ],
+  "privacy_policies": [
+    "https://github.com/googlarz/suunto-mcp#privacy"
+  ],
   "server": {
     "type": "node",
     "entry_point": "dist/mcpb-entry.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/dist/mcpb-entry.js"],
+      "args": [
+        "${__dirname}/dist/mcpb-entry.js"
+      ],
       "env": {
         "SUUNTO_MCPB_DEMO": "${user_config.demo}",
         "SUUNTO_CLIENT_ID": "${user_config.client_id}",
@@ -33,7 +45,176 @@
       }
     }
   },
-  "tools_generated": true,
+  "tools": [
+    {
+      "name": "list_workouts",
+      "description": "Lists your recent Suunto workouts, newest first."
+    },
+    {
+      "name": "get_workout",
+      "description": "Returns the summary of one workout."
+    },
+    {
+      "name": "get_workout_fit",
+      "description": "Downloads one workout's FIT file and returns it decoded."
+    },
+    {
+      "name": "get_workout_laps",
+      "description": "Returns the manual laps of one workout, for example a guided gym session set by set."
+    },
+    {
+      "name": "compare_workout_to_plan",
+      "description": "Compares a guided gym session with its plan and reports the deviations."
+    },
+    {
+      "name": "get_workout_rest_profile",
+      "description": "Heart-rate recovery during each rest of a guided gym session."
+    },
+    {
+      "name": "get_exercise_history",
+      "description": "Load, sets, rest and heart-rate recovery of strength exercises across sessions."
+    },
+    {
+      "name": "log_session",
+      "description": "Saves what you say actually happened in a session (reps, weights, tags) to a local journal."
+    },
+    {
+      "name": "set_plan",
+      "description": "Stores your training plan in a local file; pushes nothing to the watch."
+    },
+    {
+      "name": "get_plan",
+      "description": "Reads your stored training plan: today and the next 7 days."
+    },
+    {
+      "name": "get_catchup",
+      "description": "What is new since you last caught up: workouts, nights, recovery and plan items."
+    },
+    {
+      "name": "get_benchmark",
+      "description": "A repeatable session as a series over time: duration, TSS, load and rest heart rate."
+    },
+    {
+      "name": "get_tag_effects",
+      "description": "Whether the night after a tagged session differs, as an association and never a cause."
+    },
+    {
+      "name": "archive_workouts",
+      "description": "Copies your workouts and their FIT files to local files."
+    },
+    {
+      "name": "get_archive_status",
+      "description": "What the local workout archive holds."
+    },
+    {
+      "name": "get_weekly_report",
+      "description": "A shareable report for one finished week, optionally saved as a local markdown file."
+    },
+    {
+      "name": "estimate_route_time",
+      "description": "Estimates a saved route's time from your own archived pace, with a latest start before sunset."
+    },
+    {
+      "name": "get_daily_snapshot",
+      "description": "One call for how a day and the night before it went: sleep, recovery, activity, workouts."
+    },
+    {
+      "name": "get_baselines",
+      "description": "Your own recent norms for sleep, HRV, recovery and steps, and where a day sits in them."
+    },
+    {
+      "name": "get_training_load",
+      "description": "Fitness, fatigue and form (CTL, ATL, TSB) day by day, computed from workout TSS."
+    },
+    {
+      "name": "forecast_training_load",
+      "description": "Projects fitness, fatigue and form for planned training days."
+    },
+    {
+      "name": "adjust_guide",
+      "description": "Adjusts a strength guide to how recovered you are; returns it and pushes nothing."
+    },
+    {
+      "name": "push_week_plan",
+      "description": "Pushes a week of strength guides to the watch; a dry run by default."
+    },
+    {
+      "name": "get_daily_activity",
+      "description": "Returns the 24/7 activity samples of one day."
+    },
+    {
+      "name": "list_daily_activity",
+      "description": "Lists 24/7 activity samples over a date range."
+    },
+    {
+      "name": "get_sleep",
+      "description": "Returns the sleep of one night."
+    },
+    {
+      "name": "list_sleep",
+      "description": "Lists sleep over a date range."
+    },
+    {
+      "name": "get_recovery",
+      "description": "Returns the recovery (resources) samples of one day."
+    },
+    {
+      "name": "list_recovery",
+      "description": "Lists recovery samples over a date range."
+    },
+    {
+      "name": "get_daily_activity_statistics",
+      "description": "Returns daily steps and energy statistics over a date range."
+    },
+    {
+      "name": "list_routes",
+      "description": "Lists your saved Suunto routes (at most 5 are returned by Suunto)."
+    },
+    {
+      "name": "get_route",
+      "description": "Returns one saved route by id."
+    },
+    {
+      "name": "export_route",
+      "description": "Exports a saved route as a GPX file."
+    },
+    {
+      "name": "get_upload_status",
+      "description": "Checks the processing status of an uploaded workout file."
+    },
+    {
+      "name": "list_guides",
+      "description": "Lists the SuuntoPlus guides on your account."
+    },
+    {
+      "name": "upload_workout",
+      "description": "Uploads a FIT or GPX file as a workout to your Suunto account."
+    },
+    {
+      "name": "upload_route",
+      "description": "Imports a GPX file as a route in your Suunto account."
+    },
+    {
+      "name": "push_workout_guide",
+      "description": "Pushes a workout guide to your watch."
+    },
+    {
+      "name": "push_interval_guide",
+      "description": "Pushes an interval guide to your watch."
+    },
+    {
+      "name": "push_strength_guide",
+      "description": "Pushes a strength guide to your watch."
+    },
+    {
+      "name": "delete_guide",
+      "description": "Deletes a SuuntoPlus guide from your account."
+    },
+    {
+      "name": "generate_daily_digest",
+      "description": "Builds a daily health digest and appends it to a local history file."
+    }
+  ],
   "user_config": {
     "demo": {
       "type": "boolean",
@@ -71,7 +252,11 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "win32", "linux"],
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
     "runtimes": {
       "node": ">=20.0.0"
     }

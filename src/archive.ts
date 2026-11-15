@@ -10,6 +10,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { SuuntoClient } from "./api.js";
 import { workoutDate } from "./api.js";
+import { checkFit } from "./fit.js";
+
+export { checkFit }; // lives in fit.ts (parseFit checks every file with it); re-exported for the archive's callers
 
 // Downloads per call (one FIT each): keeps one call inside Suunto's rate limit, like get_exercise_history's 8 sessions.
 export const MAX_DOWNLOADS = 20;
@@ -46,16 +49,6 @@ export interface ArchiveStore {
   save(key: string, fit: Buffer, record: ArchiveRecord): Promise<void>;
   // The stored FIT file of an archived workout (estimate_route_time reads them); throws for a key that is not archived.
   readFit(key: string): Promise<Buffer>;
-}
-
-// A FIT file: a 12 or 14 byte header whose bytes 8-11 read ".FIT", and at least as long as the header says (header + data
-// + 2 byte CRC): a download cut short fails here. null when it passes. The CRC itself is not checked.
-export function checkFit(bytes: Buffer): string | null {
-  if (bytes.length === 0) return "the download is empty";
-  const headerSize = bytes[0];
-  if (bytes.length < 12 || (headerSize !== 12 && headerSize !== 14) || bytes.toString("latin1", 8, 12) !== ".FIT") return "not a FIT file (no FIT header)";
-  const needed = headerSize + bytes.readUInt32LE(4) + 2;
-  return bytes.length < needed ? `truncated (${bytes.length} of ${needed} bytes)` : null;
 }
 
 // Strict shape of a record read back from the folder; anything else is not ours.

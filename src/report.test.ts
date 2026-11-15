@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { SuuntoClient } from "./api.js";
 import { DemoClient } from "./demo.js";
 import { memoryPlanStore } from "./plan.js";
-import { MIN_WEEK_DAYS, buildWeeklyReport, fileReportStore, memoryReportStore, positionOf, reportsDir, weekMedian, weekRange } from "./report.js";
+import { MIN_WEEK_DAYS, buildWeeklyReport, fileReportStore, mdText, memoryReportStore, positionOf, renderMarkdown, reportsDir, weekMedian, weekRange } from "./report.js";
 
 const NOW = new Date(2026, 10, 13, 20, 0, 0); // Friday 2026-11-13, machine-local
 const WEEK = "2026-11-02"; // the Monday of the last full week before NOW
@@ -263,6 +263,115 @@ test("save: the in-memory store behaves the same and writes nothing to the folde
       else process.env.SUUNTO_REPORTS_DIR = saved;
     }
   });
+});
+
+// ---------- text from the user is data, not markup ----------
+
+test("mdText: pipes, angle brackets, backticks, brackets and leading markers are escaped, whitespace is collapsed", () => {
+  assert.equal(mdText("Intervals | 5x1k"), "Intervals \\| 5x1k");
+  assert.equal(mdText("<img src=x onerror=x>"), "&lt;img src=x onerror=x&gt;");
+  assert.equal(mdText("a\nb\r\n  c\t d"), "a b c d");
+  assert.equal(mdText("# x"), "\\# x");
+  assert.equal(mdText("### x"), "\\### x");
+  assert.equal(mdText("- item"), "\\- item");
+  assert.equal(mdText("* item"), "\\* item");
+  assert.equal(mdText("+ item"), "\\+ item");
+  assert.equal(mdText("1. one"), "1\\. one");
+  assert.equal(mdText("2) two"), "2\\) two");
+  assert.equal(mdText("`code`"), "\\`code\\`");
+  assert.equal(mdText("[a](javascript:x)"), "\\[a\\](javascript:x)");
+  assert.equal(mdText("a \\ b & c"), "a \\\\ b &amp; c");
+  assert.equal(mdText("a # b - c 1. d"), "a # b - c 1. d", "a marker in the middle of a line is harmless");
+  assert.equal(mdText("#nospace"), "#nospace", "a # without a space is not a heading");
+  assert.equal(mdText("  \n  "), "");
+});
+
+test("report: every user-written text (guide, exercise, tag, plan goal and titles) is escaped in the markdown", async () => {
+  const base = await buildWeeklyReport(emptyClient, { week: WEEK }, deps());
+  const evil = "<img src=x onerror=x>";
+  const md = renderMarkdown(
+    {
+      ...base,
+      workouts: { count: 1, totalTimeS: 3000, kcal: 300, tss: 50, noTss: 0, restDays: 6, days: [{ date: "2026-11-03", sessions: [{ startLocal: "08:00", totalTimeS: 3000, tss: 50, guide: "Intervals | 5x1k\n# hacked" }] }] },
+      strength: { sessions: 1, exercises: [{ name: "Row | `x`", sessions: 1, lastDetail: "3x8 [a](b) " + evil }], pending: 0 },
+      plan: { goal: "Sub-50\n# x\n- y", planned: 1, done: 1, missed: 0, adherencePct: 100, items: [{ date: "2026-11-03", title: evil, status: "done" }] },
+      tagEffects: { window: { from: "a", to: "b" }, tags: [{ tag: "a|b", verdict: "differs", taggedNights: 20, untaggedNights: 20, statement: `${evil}: differs | an association` }], insufficientTags: 0, minNightsPerGroup: 15 },
+    } as any,
+    [],
+    false,
+  );
+  assert.doesNotMatch(md, /[<>]/, "no raw angle bracket anywhere");
+  assert.doesNotMatch(md, /^# x|^- y|^# hacked/m, "newlines in a name cannot start a heading or list item");
+  const headings = md.split("\n").filter((l) => /^#/.test(l));
+  assert.deepEqual(headings.slice(1), ["## Summary", "## Workouts", "## Sleep and recovery against your usual", "## Training load", "## Strength", "## Plan", "## Tag effects", "## Data notes"]);
+  const row = md.split("\n").find((l) => l.startsWith("| 2026-11-03"))!;
+  assert.equal(row.split(/(?<!\\)\|/).length, 7, `five cells in: ${row}`);
+  assert.ok(row.includes("Intervals \\| 5x1k # hacked"), row);
+  assert.ok(md.includes("- Row \\| \\`x\\`: 1 session, last 3x8 \\[a\\](b) &lt;img src=x onerror=x&gt;"), md);
+  assert.ok(md.includes('Plan "Sub-50 # x - y"'), md);
+  assert.ok(md.includes("- 2026-11-03 &lt;img src=x onerror=x&gt;: done"), md);
+  assert.ok(md.includes("- &lt;img src=x onerror=x&gt;: differs \\| an association"), md);
+});
+
+// ---------- other findings ----------
+
+const dayOf = (day: string) => ({ startTime: Date.parse(`${day}T08:00:00Z`), timeOffsetInMinutes: 0, totalTime: 3000, energyConsumption: 300, activityId: 3 });
+const clientWith = (over: object) => ({ ...emptyClient, ...over }) as unknown as SuuntoClient;
+
+test("report: a plan that cannot be read is 'unavailable', not 'No plan was set'", async () => {
+  const planStore = { load: async () => { throw new Error("plan.json is damaged"); }, save: async () => undefined };
+  const r = await buildWeeklyReport(emptyClient, { week: WEEK }, deps({ planStore }));
+  assert.ok(r.errors.some((e) => e.section === "plan"));
+  assert.match(r.markdown, /## Plan\n\nUnavailable/);
+  assert.doesNotMatch(r.markdown, /No plan was set/);
+  assert.doesNotMatch(r.markdown, /damaged/, "the error text stays out of the shared markdown");
+});
+
+test("report: the workouts table and the week's training stress come from one source and add up; a differing load-model figure is explained", async () => {
+  const workouts = [
+    { ...dayOf("2026-11-03"), workoutKey: "a".repeat(24), tssList: [{ calculationMethod: "HR", trainingStressScore: 50 }], tss: { trainingStressScore: 30 } },
+    { ...dayOf("2026-11-05"), workoutKey: "b".repeat(24), tssList: [{ calculationMethod: "HR", trainingStressScore: 20.5 }], tss: { trainingStressScore: 10 } },
+    { ...dayOf("2026-11-06"), workoutKey: "c".repeat(24) }, // no TSS at all
+  ];
+  const r = await buildWeeklyReport(clientWith({ listWorkouts: async () => ({ payload: workouts }) }), { week: WEEK }, deps());
+  assert.deepEqual([r.workouts!.count, r.workouts!.tss, r.workouts!.noTss], [3, 70.5, 1]);
+  const rows = r.markdown.split("\n").filter((l) => /^\| 2026-11-0\d /.test(l));
+  assert.equal(rows.length, 3);
+  const tssOf = (l: string) => Number(l.split("|")[4].trim().replace(/[^\d.]/g, "") || 0);
+  assert.equal(rows.reduce((n, l) => n + tssOf(l), 0), 70.5);
+  assert.match(r.markdown, /\| Total \| \| [^|]+ \| 70\.5 \|/);
+  assert.match(r.markdown, /Training stress this week: 70\.5 \(the sum of the workouts above; 1 without TSS counted as 0\)/);
+  assert.match(r.markdown, /load model[^\n]*counted 40/, "the model's own figure (Suunto's other TSS field) is stated when it differs");
+  // the same figure from both: no explanation needed
+  const same = await buildWeeklyReport(clientWith({ listWorkouts: async () => ({ payload: [{ ...workouts[0], tss: { trainingStressScore: 50 } }] }) }), { week: WEEK }, deps());
+  assert.doesNotMatch(same.markdown, /load model[^\n]*counted/);
+  assert.match(same.markdown, /Training stress this week: 50 \(the sum of the workouts above\)/);
+});
+
+test("report: the demo week's table rows add up to the printed total", async () => {
+  const r = await buildWeeklyReport(new DemoClient(NOW), { week: WEEK }, deps());
+  const rows = r.markdown.split("\n").filter((l) => /^\| 2026-11-0\d /.test(l));
+  const total = r.markdown.split("\n").find((l) => l.startsWith("| Total"))!;
+  const sum = rows.reduce((n, l) => n + Number(l.split("|")[4].trim()), 0);
+  assert.ok(rows.length > 0 && Math.abs(sum - Number(total.split("|")[4].trim())) < 0.11, `${sum} against ${total}`);
+});
+
+test("report: steps from partial data say how many days they cover", async () => {
+  const sample = (day: string, v: number) => ({ TimeISO8601: `${day}T12:00:00+00:00`, Value: v });
+  const stats = [{ Name: "stepcount", Aggregation: "sum", Sources: [{ Samples: [sample("2026-11-03", 1000), sample("2026-11-04", 2000), sample("2026-11-05", 3000)] }] }];
+  const r = await buildWeeklyReport(clientWith({ getDailyStats: async () => stats }), { week: WEEK }, deps());
+  assert.equal(r.recovery!.stepsDays, 3);
+  assert.match(r.markdown, /Steps: 6,000 over 3 of 7 days/);
+  assert.doesNotMatch(r.markdown, /Steps: 6,000 in total/);
+  const none = await buildWeeklyReport(emptyClient, { week: WEEK }, deps());
+  assert.match(none.markdown, /Steps: insufficient data/);
+});
+
+test("report: developer-facing load notes stay out of the shared markdown; a plain sentence replaces what matters", async () => {
+  const r = await buildWeeklyReport(new DemoClient(NOW), { week: WEEK }, deps());
+  assert.ok(r.load!.notes.some((n) => /Little history/.test(n)), "the structured result keeps the raw note");
+  assert.doesNotMatch(r.markdown, /seedCtl|seedAtl|Little history|Reached the|-workout limit|searched back/);
+  assert.match(r.markdown, /Fitness \(CTL\) needs about 4 to 6 weeks of history to settle, so it may read low/);
 });
 
 test("reportsDir: defaults to ~/.suunto-mcp/reports", () => {
