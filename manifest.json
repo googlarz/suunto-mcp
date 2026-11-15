@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "suunto-mcp",
   "display_name": "Suunto MCP",
-  "version": "0.25.1",
+  "version": "1.0.0",
   "description": "Your Suunto watch data (workouts, sleep, recovery, training load) for Claude. Works out of the box on synthetic demo data.",
   "long_description": "Connects your Suunto watch data to Claude: workouts, laps, sleep, HRV, recovery, 24/7 activity, training load, weekly reports and route time estimates. With the demo checkbox on (the default) it runs on generated sample data and needs no Suunto account. For your own data you need approved access to Suunto's developer API and a one-time pairing step; see the README on GitHub.",
   "author": {

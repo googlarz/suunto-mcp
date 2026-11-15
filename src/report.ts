@@ -279,11 +279,8 @@ export async function buildWeeklyReport(
 
 // ---------- markdown ----------
 
-const fmtDur = (s: number | null | undefined): string => {
-  if (s === null || s === undefined) return "n/a";
-  const min = Math.round(s / 60);
-  return min >= 60 ? `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min` : `${min} min`;
-};
+const fmtMin = (min: number): string => (min >= 60 ? `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min` : `${min} min`);
+const fmtDur = (s: number | null | undefined): string => (s === null || s === undefined ? "n/a" : fmtMin(Math.round(s / 60)));
 const fmtNum = (n: number | null | undefined, digits = 1): string => (n === null || n === undefined ? "n/a" : n.toLocaleString("en-US", { maximumFractionDigits: digits }));
 const METRIC_LABEL: Record<string, { label: string; fmt: (n: number | null) => string }> = {
   sleepDurationS: { label: "Sleep duration", fmt: (n) => fmtDur(n) },
@@ -314,10 +311,13 @@ export function renderMarkdown(r: any, errors: { section: string }[], demo: bool
   if (demo) out.push(`> ${DEMO_NOTICE} Every number below is generated.`, "");
   const down = [...new Set(errors.map((e) => e.section))];
 
+  // Each row shows whole minutes, so the total is the sum of those rounded rows: a reader adding the column gets the Total.
+  const workoutMinutes = r.workouts === null ? 0 : r.workouts.days.reduce((n: number, d: any) => n + d.sessions.reduce((m: number, w: any) => m + Math.round((w.totalTimeS ?? 0) / 60), 0), 0);
+
   out.push("## Summary", "");
   if (r.workouts === null) out.push("- Workouts: unavailable (the data could not be read).");
   else if (r.workouts.count === 0) out.push("- No workouts this week.");
-  else out.push(`- ${r.workouts.count} workout${r.workouts.count === 1 ? "" : "s"}, ${fmtDur(r.workouts.totalTimeS)} in total, ${fmtNum(r.workouts.kcal, 0)} kcal; ${r.workouts.restDays} day${r.workouts.restDays === 1 ? "" : "s"} without a workout.`);
+  else out.push(`- ${r.workouts.count} workout${r.workouts.count === 1 ? "" : "s"}, ${fmtMin(workoutMinutes)} in total, ${fmtNum(r.workouts.kcal, 0)} kcal; ${r.workouts.restDays} day${r.workouts.restDays === 1 ? "" : "s"} without a workout.`);
   if (r.recovery === null) out.push("- Sleep, recovery and steps: unavailable.");
   else {
     const m = r.recovery.metrics;
@@ -332,7 +332,7 @@ export function renderMarkdown(r: any, errors: { section: string }[], demo: bool
   else {
     out.push("| Date | Start | Duration | TSS | Guide |", "|---|---|---|---|---|");
     for (const d of r.workouts.days) for (const w of d.sessions) out.push(`| ${d.date} | ${w.startLocal ?? "n/a"} | ${fmtDur(w.totalTimeS)} | ${fmtNum(w.tss)} | ${w.guide ? mdText(w.guide) : ""} |`);
-    out.push(`| Total | | ${fmtDur(r.workouts.totalTimeS)} | ${fmtNum(r.workouts.tss)} | |`);
+    out.push(`| Total | | ${fmtMin(workoutMinutes)} | ${fmtNum(r.workouts.tss)} | |`);
   }
 
   out.push("", "## Sleep and recovery against your usual", "");

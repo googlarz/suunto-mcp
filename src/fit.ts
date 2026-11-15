@@ -68,11 +68,14 @@ export async function parseFit(bytes: Buffer): Promise<ParsedFit> {
     elapsedRecordField: true,
     mode: "list",
   });
-  return new Promise((resolve, reject) => {
+  return new Promise<ParsedFit>((resolve, reject) => {
     parser.parse(bytes, (err: Error | null, data: ParsedFit) => {
       if (err) reject(err);
       else resolve(data);
     });
+  }).catch((err) => {
+    // A body that is not FIT records makes the parser fail inside itself ("Cannot read properties of undefined"): say what it means.
+    throw new Error("not a readable FIT file (the data after the header could not be decoded)", { cause: err });
   });
 }
 
