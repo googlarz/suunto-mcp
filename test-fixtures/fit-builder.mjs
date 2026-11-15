@@ -7,6 +7,9 @@
 //   hr         heart_rate (omit for a record without HR)
 //   dev        value of the developer field (uint8), when devField is given
 //   sessionStartUnixS  session.start_time; omit to write no session message
+//   distanceM, altitudeM  (per record) cumulative distance and altitude in metres; when the first record has distanceM every
+//                         record carries both (route-time tests)
+//   sport      session.sport (FIT enum: 1 running, 11 walking, 17 hiking); only with a session message
 const FIT_EPOCH_OFFSET_S = 631065600;
 
 function crc16(bytes) {
@@ -38,7 +41,7 @@ function definition(local, global, fields, devFields = []) {
   return out;
 }
 
-export function buildFit({ records, sessionStartUnixS, devField }) {
+export function buildFit({ records, sessionStartUnixS, devField, sport }) {
   const body = [];
   if (devField) {
     // developer_data_id (207): developer_id (0, byte), application_id (1, 16 bytes), developer_data_index (3, uint8)
@@ -48,17 +51,20 @@ export function buildFit({ records, sessionStartUnixS, devField }) {
     body.push(...definition(2, 206, [[0, 1, 0x02], [1, 1, 0x02], [2, 1, 0x02], [3, 16, 0x07], [8, 16, 0x07]]));
     body.push(0x02, 0, 0, 2, ...str16(devField.name), ...str16(devField.units));
   }
-  const recordFields = [[253, 4, 0x86], [3, 1, 0x02]];
+  const motion = records.length > 0 && records[0].distanceM !== undefined;
+  // record (20): timestamp (253), heart_rate (3), and with motion distance (5, uint32, scale 100 m) and altitude (2, uint16, scale 5, offset 500 m)
+  const recordFields = [[253, 4, 0x86], [3, 1, 0x02], ...(motion ? [[5, 4, 0x86], [2, 2, 0x84]] : [])];
   body.push(...definition(3, 20, recordFields, devField ? [[0, 1, 0]] : []));
   for (const r of records) {
     body.push(0x03, ...u32(r.unixS - FIT_EPOCH_OFFSET_S), r.hr ?? 0xff);
+    if (motion) body.push(...u32(Math.round(r.distanceM * 100)), ...u16(Math.round((r.altitudeM + 500) * 5)));
     if (devField) body.push(r.dev ?? 0xff);
   }
   if (sessionStartUnixS !== undefined) {
     // session (18): timestamp (253), start_time (2)
     const end = records.length ? records[records.length - 1].unixS : sessionStartUnixS;
-    body.push(...definition(4, 18, [[253, 4, 0x86], [2, 4, 0x86]]));
-    body.push(0x04, ...u32(end - FIT_EPOCH_OFFSET_S), ...u32(sessionStartUnixS - FIT_EPOCH_OFFSET_S));
+    body.push(...definition(4, 18, [[253, 4, 0x86], [2, 4, 0x86], ...(sport !== undefined ? [[5, 1, 0x00]] : [])]));
+    body.push(0x04, ...u32(end - FIT_EPOCH_OFFSET_S), ...u32(sessionStartUnixS - FIT_EPOCH_OFFSET_S), ...(sport !== undefined ? [sport] : []));
   }
   const header = [14, 0x20, ...u16(100), ...u32(body.length), 0x2e, 0x46, 0x49, 0x54];
   header.push(...u16(crc16(header)));

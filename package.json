@@ -28,6 +28,7 @@
     "webhook": "node dist/webhook.js",
     "doctor": "node dist/doctor.js",
     "test": "tsc -p tsconfig.test.json && node --import ./test-fixtures/hermetic.mjs --test dist-test/*.test.js",
+    "pack:mcpb": "npm run build && node dist/pack-mcpb.js",
     "prepublishOnly": "npm test && npm run build"
   },
   "files": [

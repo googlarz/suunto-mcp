@@ -13,6 +13,8 @@ import { buildCatchup, fileSeenStore } from "./catchup.js";
 import { buildTagEffects } from "./tag-effects.js";
 import { buildBenchmark } from "./benchmark.js";
 import { archiveStatus, fileArchiveStore } from "./archive.js";
+import { buildWeeklyReport, fileReportStore } from "./report.js";
+import { estimateRouteTime } from "./route-time.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -44,12 +46,14 @@ Analysis commands:
   get-tag-effects      [--days N] [--tag T] [--date YYYY-MM-DD]   (journal tags against the next night's sleep, HRV and recovery; read-only)
   get-benchmark        --guide TITLE | --exercise NAME [--weeks N]   (a repeatable session over time: load, rest HR, duration, TSS; writes only the local cache)
   get-archive-status   (what the local workout archive holds; reads the archive folder only, no credentials)
+  get-weekly-report    [MONDAY YYYY-MM-DD] [--markdown]   (a finished week: workouts, sleep and recovery against your usual, training load, plan, tags; prints JSON or just the markdown; never saves: use the MCP tool with save for that)
   get-catchup          (what is new since the last markSeen: workouts, nights, recovery, plan items; never moves the marker, use the MCP tool with markSeen for that)
 
 Route commands:
   list-routes
   get-route            <routeId>
   export-route         <routeId>   (prints the GPX text)
+  estimate-route-time  <routeId> [--activity walking|running] [--sunset ISO-WITH-OFFSET] [--margin MINUTES]   (the route's time from your own archived pace, else generic Naismith; read-only)
 
 24/7 health commands:
   get-daily-activity   <YYYY-MM-DD>
@@ -243,6 +247,16 @@ export async function runCli(argv: string[]) {
         break;
       }
 
+      case "get-weekly-report": {
+        const usage = "Usage: get-weekly-report [MONDAY YYYY-MM-DD] [--markdown]";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { markdown: { type: "boolean", default: false } } });
+        if (positionals.length > 1) die(usage);
+        const report = await buildWeeklyReport(suunto, { week: positionals[0] }, { planStore: filePlanStore(), reportStore: fileReportStore() });
+        if (values.markdown) process.stdout.write(report.markdown);
+        else out(report);
+        break;
+      }
+
       case "get-catchup": {
         if (rest.length > 0) die("Usage: get-catchup (it takes no options and never moves the marker)");
         out(await buildCatchup(suunto, fileSeenStore(), filePlanStore()));
@@ -264,6 +278,16 @@ export async function runCli(argv: string[]) {
         const id = rest[0] ?? die("Usage: export-route <routeId>");
         const bytes = await suunto.exportRoute(id);
         process.stdout.write(new TextDecoder().decode(bytes) + "\n");
+        break;
+      }
+
+      case "estimate-route-time": {
+        const usage = "Usage: estimate-route-time <routeId> [--activity walking|running] [--sunset 2026-11-15T16:05:00+01:00] [--margin MINUTES]";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { activity: { type: "string" }, sunset: { type: "string" }, margin: { type: "string" } } });
+        const routeId = positionals[0] ?? die(usage);
+        if (positionals.length > 1) die(usage);
+        const marginMinutes = values.margin !== undefined ? Number(values.margin) : undefined;
+        out(await estimateRouteTime(suunto, fileArchiveStore(), { routeId, activity: values.activity as any, sunset: values.sunset, marginMinutes }));
         break;
       }
 

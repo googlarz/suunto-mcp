@@ -6,3 +6,4 @@ dist-test
 .env.local
 tokens.json
 SUUNTO_HISTORY.md
+build

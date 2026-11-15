@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import { buildFit } from "./fit-builder.mjs";
 
 const KEY = "6aba8afee2ab172bb4c5fc8d";
+// A workout whose FIT download is not a FIT file (fit-file-parser can spin forever on such bytes): same summary and laps as KEY.
+const BAD_FIT_KEY = "badf17badf17badf17badf17";
 // The clean-3ex compare fixture, served back as a /v3/workouts response (compare_workout_to_plan e2e tests).
 const CLEAN_KEY = "5e1f7c0de000000000000001";
 const clean = JSON.parse(readFileSync(new URL("./compare/clean-3ex.laps.json", import.meta.url), "utf8"));
@@ -193,7 +195,8 @@ globalThis.fetch = async (input, init = {}) => {
     }));
     return res({ payload: all.slice(offset, offset + limit), metadata: { count: total } });
   }
-  if (path === `/v3/workouts/${KEY}`) {
+  if (path === `/v3/workouts/${BAD_FIT_KEY}/fit`) return new Response("this is not a FIT file at all, just text");
+  if (path === `/v3/workouts/${KEY}` || path === `/v3/workouts/${BAD_FIT_KEY}`) {
     const wanted = (url.searchParams.get("extensions") ?? "").split(",");
     const extensions = [];
     if (wanted.includes("IntensityExtension")) extensions.push({ type: "IntensityExtension", zones: { heartRate: { zone1: { totalTime: 100 }, zone2: { totalTime: 200 }, zone3: { totalTime: 50 }, zone4: { totalTime: 0 }, zone5: { totalTime: 0 } } } });
