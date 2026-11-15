@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 
 // Bump when the derived record changes shape or the algorithm behind it does:
 // an entry written under another number is ignored, so old results are recomputed.
-export const CACHE_SCHEMA = 1;
+export const CACHE_SCHEMA = 2; // 2: WorkoutRecord gained `hr` (0.25.1)
 
 // Read the way index.ts reads it for serverInfo. Every entry also records the version of the server that
 // wrote it and is ignored under any other, so a release that changes the derived record cannot serve stale

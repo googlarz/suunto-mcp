@@ -28,7 +28,7 @@ The FIT's session start is not used as time zero when the lap table has a start,
 
 ## 3. Metrics per rest
 
-Window: `[startOffsetS, startOffsetS + durationS]`. HR samples are the FIT records with a numeric `heart_rate` from 30 to 250 bpm (anything else is a sensor dropout or glitch), sorted by time; of records with the same timestamp the last is kept. Everything below, except `endHr`, reads a 3-sample centred moving average of that series, so a single spike or dip cannot set the peak or a threshold crossing.
+Window: `[startOffsetS, startOffsetS + durationS]`. HR samples are the FIT records with a numeric `heart_rate` from 30 to 230 bpm (anything else is a sensor dropout or glitch), sorted by time; of records with the same timestamp the last is kept. Everything below, except `endHr`, reads a 3-sample centred moving average of that series, so a single spike or dip cannot set the peak or a threshold crossing.
 
 | Field | Definition |
 |---|---|

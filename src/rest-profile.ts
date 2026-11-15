@@ -7,6 +7,7 @@ import { developerInfo, type DeveloperInfo, type ParsedFit } from "./fit.js";
 
 export { developerInfo, type DeveloperInfo };
 import { LAP_COLUMNS, type shapeLaps } from "./laps.js";
+import { assessHr, MAX_PLAUSIBLE_HR, MIN_PLAUSIBLE_HR, toMs, type HrQuality } from "./hr-quality.js";
 
 export interface HrSample {
   tS: number; // seconds since the workout start (see hrSeries)
@@ -47,20 +48,14 @@ export interface RestRecovery {
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-function toMs(v: unknown): number | null {
-  const ms = v instanceof Date ? v.getTime() : typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
-  return Number.isFinite(ms) ? ms : null;
-}
-
-// Samples outside this range are sensor dropouts or garbage (a strap off the skin reads 0, a glitch 255).
-const MIN_HR = 30;
-const MAX_HR = 250;
+// Samples outside hr-quality's plausible range (30-230 bpm, the one both modules use) are sensor dropouts or
+// garbage (a strap off the skin reads 0, a glitch 255).
 
 // Heart rate over time from the FIT records, in seconds since the workout start.
 // Time zero is the lap table's startTime (`lapStartMs`, the clock the lap offsets
 // count from), else the FIT session's start_time, else the first record's
 // timestamp. fit-file-parser returns timestamps as Dates; epoch ms and ISO
-// strings are accepted too. Records without a numeric heart_rate in 30-250 bpm
+// strings are accepted too. Records without a numeric heart_rate in 30-230 bpm
 // are dropped; of several records with the same timestamp the last one is kept.
 // fitStartMs is the FIT's own start (session start_time, else the first record) and
 // sessionStartMs the session's alone, both for comparing with the lap table (the skew).
@@ -79,7 +74,7 @@ export function hrSeries(
   const sorted: HrSample[] = [];
   for (const r of records) {
     const ms = toMs(r?.timestamp);
-    if (ms === null || typeof r?.heart_rate !== "number" || !Number.isFinite(r.heart_rate) || r.heart_rate < MIN_HR || r.heart_rate > MAX_HR) continue;
+    if (ms === null || typeof r?.heart_rate !== "number" || !Number.isFinite(r.heart_rate) || r.heart_rate < MIN_PLAUSIBLE_HR || r.heart_rate > MAX_PLAUSIBLE_HR) continue;
     sorted.push({ tS: (ms - startMs) / 1000, hr: r.heart_rate });
   }
   sorted.sort((a, b) => a.tS - b.tS); // stable: equal timestamps keep file order
@@ -185,8 +180,9 @@ export interface RestProfile {
   workoutKey: string | null;
   status: ReturnType<typeof compareWorkout>["status"];
   restMode: "countdown" | "stopwatch" | null;
-  reliable: boolean;
+  reliable: boolean; // false also when hrQuality.reliable is false
   note: string | null;
+  hrQuality: HrQuality; // the whole session's HR: dropouts, implausible values, flat-lines, jumps (hr-quality.ts)
   rests: RestProfileRest[];
   perExercise: PerExerciseRecovery[];
   developer: DeveloperInfo | null;
@@ -222,8 +218,9 @@ export function buildRestProfile(laps: ReturnType<typeof shapeLaps>, parsed: Par
     startSkewS: sessionStartMs !== null && lapStartTimeMs !== null ? r1((sessionStartMs - lapStartTimeMs) / 1000) : null,
   };
   const developer = developerInfo(parsed);
+  const hrQuality = assessHr(parsed);
   const head = { workoutKey: cmp.workoutKey, status: cmp.status, restMode: cmp.restMode, reliable: cmp.reliable };
-  if (cmp.status !== "ok") return { ...head, note: cmp.note, rests: [], perExercise: [], developer, alignment };
+  if (cmp.status !== "ok") return { ...head, note: cmp.note, hrQuality, rests: [], perExercise: [], developer, alignment };
 
   // Each lap's offset from the workout start: the join key between the lap table and the FIT timeline.
   const I = LAP_COLUMNS.indexOf("i");
@@ -277,7 +274,8 @@ export function buildRestProfile(laps: ReturnType<typeof shapeLaps>, parsed: Par
     skewS !== null && Math.abs(skewS) > SKEW_NOTE_S
       ? `The FIT session start is ${skewS} s from the lap table's startTime: the HR may be shifted against the rest windows by that much${skewUnreliable ? ", so the profile is unreliable" : ""}.`
       : null,
+    hrQuality.reliable === false ? `The heart-rate data is unreliable (${hrQuality.reasons.join("; ")}), so the profile is best effort and get_exercise_history leaves it out of its medians.` : null,
   ].filter((n): n is string => n !== null);
 
-  return { ...head, reliable: head.reliable && !skewUnreliable, note: notes.length ? notes.join(" ") : null, rests, perExercise, developer, alignment };
+  return { ...head, reliable: head.reliable && !skewUnreliable && hrQuality.reliable !== false, note: notes.length ? notes.join(" ") : null, hrQuality, rests, perExercise, developer, alignment };
 }

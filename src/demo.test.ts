@@ -11,6 +11,7 @@ import { DemoClient, markDemo, demoWriteResult, isDemo } from "./demo.js";
 import { localDate } from "./api.js";
 import { addDays } from "./training-load.js";
 import { parseFit, summarizeFit } from "./fit.js";
+import { assessHr } from "./hr-quality.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
 import { SuuntoNotFoundError } from "./errors.js";
 
@@ -104,6 +105,14 @@ test("demo: exactly one of the recent gym sessions deviates from its plan", asyn
   }
   assert.equal(codes.filter((c) => c.length > 0).length, 1);
   assert.ok(codes.find((c) => c.length)!.includes("long-set"));
+});
+
+test("demo: exactly one gym session has a heart-rate dropout; every other workout's HR passes the quality check", async () => {
+  const c = new DemoClient(NOW, 7);
+  const all = (await c.listWorkouts({ limit: 100 })).payload;
+  const verdicts: [number, boolean | null][] = [];
+  for (const w of all) verdicts.push([w.activityId, assessHr(await parseFit(await c.getWorkoutFit(w.workoutKey))).reliable]);
+  assert.deepEqual(verdicts.filter(([, ok]) => ok !== true), [[23, false]]);
 });
 
 test("demo: demoWriteResult names the tool and what it would do", () => {
@@ -414,5 +423,6 @@ test("e2e demo: exercise history works across the demo sessions and caches nothi
     assert.equal(index.pending, 0, "repeated calls converge: demo sessions are kept in memory, never on disk");
     assert.ok(index.sessions > 8);
     assert.ok(index.exercises[0].sessions >= 6);
+    assert.equal(index.notes.filter((n: string) => /unreliable heart-rate/.test(n)).length, 1, "the demo's one session with a sensor dropout is called out");
   });
 });
