@@ -136,6 +136,8 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
     FETCH_LOG: fetchLogPath,
     SUUNTO_CACHE_DIR: join(cwd, "cache"),
     SUUNTO_JOURNAL_PATH: join(cwd, "journal.json"),
+    SUUNTO_PLAN_PATH: join(cwd, "plan.json"),
+    SUUNTO_SEEN_PATH: join(cwd, "seen.json"),
   };
   const child = spawn(process.execPath, ["--import", throwingFetch, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
   const pending = new Map<number, (msg: any) => void>();
@@ -175,8 +177,8 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
       return { text, isError: r.isError === true, json };
     };
     await fn(call, rpc, () => readFile(fetchLogPath, "utf8").catch(() => ""));
-    // demo data must never reach the cache or the journal
-    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => x === "cache" || x === "journal.json")), []);
+    // demo data must never reach the cache, the journal, the plan or the seen marker
+    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => ["cache", "journal.json", "plan.json", "seen.json"].includes(x))), []);
     assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     assert.equal(await readFile(fetchLogPath, "utf8").catch(() => ""), "", "demo mode made a network call");
   } finally {
@@ -331,7 +333,8 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     ];
     const tools: any[] = (await rpc("tools/list")).result.tools;
     const nonRead = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
-    assert.deepEqual(nonRead, writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
+    // set_plan and get_catchup are not read-only either, but in demo mode they work on in-memory state (tested below)
+    assert.deepEqual(nonRead.filter((n) => n !== "set_plan" && n !== "get_catchup"), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
     for (const [name, args] of writes) {
       const r = await call(name, args);
       assert.equal(r.isError, false, `${name}: ${r.text}`);
@@ -341,6 +344,44 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     assert.equal(await fetchLog(), "");
     // still a clean list afterwards: delete_guide did not delete
     assert.ok((await ok(call, "list_guides")).payload.length >= 1);
+  });
+});
+
+test("e2e demo: set_plan / get_plan / get_catchup work in memory and write nothing to disk", async () => {
+  await withDemo(async (call, rpc, fetchLog) => {
+    const tools: any[] = (await rpc("tools/list")).result.tools;
+    const ann = (n: string) => tools.find((t) => t.name === n).annotations;
+    assert.deepEqual(ann("set_plan"), { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
+    assert.equal(ann("get_plan").readOnlyHint, true);
+    assert.deepEqual(ann("get_catchup"), { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
+
+    assert.equal((await ok(call, "get_plan")).plan, null);
+    const d = today();
+    const set = await ok(call, "set_plan", { goal: "demo goal", sessions: [{ date: d, title: "Push A", guide: { title: "Push A", date: d, exercises: [{ name: "Bench", detail: "3x8 70kg", sets: 3, restSec: 90 }] } }] });
+    assert.equal(set.saved, true);
+    assert.equal(set.plan.sessions, 1);
+    const got = await ok(call, "get_plan");
+    assert.equal(got.todaySession.title, "Push A");
+    assert.equal(got.todaySession.guide.exercises[0].name, "Bench");
+    assert.equal(got.next7Days.length, 7);
+
+    // invalid plans are refused with an error, strictly
+    for (const bad of [{ goal: "g", sessions: [{ date: d, title: "x", guide: { title: "x", date: d } }] }, { goal: "g", mood: 1 }, { goal: "g", sessions: [{ date: d, title: "x", guide: { title: "x", date: "2030-01-01", exercises: [{ name: "A", detail: "x", sets: 3, restSec: 60 }] } }] }]) {
+      const r = await call("set_plan", bad);
+      assert.equal(r.isError, true, JSON.stringify(bad));
+    }
+    assert.equal((await ok(call, "get_plan")).plan.goal, "demo goal", "a refused call changes nothing");
+
+    // catch-up on the synthetic data: the marker is in memory, markSeen false repeats the answer, true moves it
+    const first = await ok(call, "get_catchup");
+    assert.ok(first.newWorkouts.length > 0 && first.newNights.length > 0);
+    assert.equal(first.marked, false);
+    assert.deepEqual((await ok(call, "get_catchup")).newWorkouts, first.newWorkouts);
+    assert.equal((await ok(call, "get_catchup", { markSeen: true })).marked, true);
+    const after = await ok(call, "get_catchup");
+    assert.deepEqual([after.newWorkouts.length, after.newNights.length], [0, 0]);
+    assert.equal(after.since.firstCall, false);
+    assert.equal(await fetchLog(), "");
   });
 });
 

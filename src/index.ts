@@ -41,12 +41,22 @@ import { buildTrainingLoad, forecastTrainingLoad } from "./training-load.js";
 import { buildBaselines } from "./baselines.js";
 import { buildExerciseHistory } from "./history.js";
 import { logSession } from "./journal.js";
+import { filePlanStore, getPlan, memoryPlanStore, setPlan } from "./plan.js";
+import { buildCatchup, fileSeenStore, memorySeenStore } from "./catchup.js";
 import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoWriteResult, isDemo, markDemo } from "./demo.js";
 
 const cfg = loadConfig();
 // SUUNTO_DEMO=1: synthetic data, no credentials, no network (see demo.ts).
 const demo = isDemo();
 const suunto = demo ? new DemoClient() : new SuuntoClient(cfg);
+// Local state of set_plan / get_plan / get_catchup: in demo mode it lives in memory and never reaches the disk.
+const planStore = demo ? memoryPlanStore() : filePlanStore();
+const seenStore = demo ? memorySeenStore() : fileSeenStore();
+// Not read-only (they can write local state) but they never change anything at Suunto, so demo mode runs them on the
+// in-memory stores instead of answering with the generic "nothing was written" note.
+const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup"]);
+// These two only touch the local plan file, so they work before any Suunto credentials are set up.
+const NO_CREDENTIALS_TOOLS = new Set(["set_plan", "get_plan"]);
 
 // Read the version from package.json instead of hardcoding it here — a
 // hardcoded string silently drifts from the real published version on
@@ -966,7 +976,73 @@ const strengthSpec: any = (() => {
   const { guideId: _guideId, ...properties } = (toolDefs.find((t) => t.name === "push_strength_guide")!.inputSchema as any).properties;
   return { type: "object", properties, required: ["title", "date", "exercises"] };
 })();
+const dateProp = (description?: string) => ({ type: "string", format: "date", pattern: "^\\d{4}-\\d{2}-\\d{2}$", minLength: 10, maxLength: 10, ...(description ? { description } : {}) });
 const specTools = [
+  {
+    name: "set_plan",
+    description:
+      "Stores the training plan as LOCAL state: a goal, optional start/end dates, phases and planned sessions per date, in ~/.suunto-mcp/plan.json (SUUNTO_PLAN_PATH overrides it). Writes only that file, never contacts Suunto, needs no Suunto credentials and NEVER pushes anything to the watch: to put a planned session on the watch, take its `guide` from get_plan and send it with push_strength_guide / push_week_plan. mode 'replace' (default) is DESTRUCTIVE to the stored plan: the call IS the whole plan (goal required; start, end, phases and sessions left out become empty) and overwrites the stored one, so clients may ask for permission; the result's `previous` is the complete plan it replaced (null when there was none), so nothing is lost and setting `previous` again undoes it. mode 'merge': goal, start, end and phases replace the stored ones when given, sessions are merged by date (a given date replaces that day's session, other dates stay; `replacedDates` lists them); a merge needs at least one field, and a first merge needs a goal. Start and end cannot be cleared in a merge (use replace). A session is { date, title, guide? } where guide is an optional push_strength_guide spec whose `date` must equal the session's. Strict: unknown fields, bad dates, from after to, sessions or phases outside start..end (when both are given), duplicate dates, and more than 20 phases / 200 sessions / 500 characters of text (100 for names and titles) / 8000 characters of guide JSON are refused with an error and nothing is written. A damaged or other-version plan file is refused, never overwritten. Result: { saved, mode, plan: { goal, start, end, phases, sessions } (counts), replacedDates, previous, note }. In demo mode the plan is kept in memory only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", maxLength: 500, description: "The goal of the plan in the user's words, e.g. 'Sub-50 10k in January'. Required unless mode is 'merge' on an existing plan." },
+        start: dateProp("First day of the plan, YYYY-MM-DD."),
+        end: dateProp("Last day of the plan, YYYY-MM-DD."),
+        phases: {
+          type: "array",
+          maxItems: 20,
+          description: "Training phases. In merge mode a given list replaces the stored one.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1, maxLength: 100, description: "e.g. 'Base'." },
+              from: dateProp(),
+              to: dateProp(),
+              focus: { type: "string", maxLength: 500, description: "What the phase is about, e.g. 'aerobic volume, 2 strength sessions'." },
+            },
+            required: ["name", "from", "to"],
+          },
+        },
+        sessions: {
+          type: "array",
+          maxItems: 200,
+          description: "Planned sessions, at most one per date.",
+          items: {
+            type: "object",
+            properties: {
+              date: dateProp(),
+              title: { type: "string", minLength: 1, maxLength: 100, description: "e.g. 'Push A' or 'Easy 8 km'." },
+              guide: { ...strengthSpec, description: "Optional strength guide spec for that day (the arguments of push_strength_guide without guideId). Stored only; its `date` must equal the session's." },
+            },
+            required: ["date", "title"],
+          },
+        },
+        mode: { type: "string", enum: ["replace", "merge"], default: "replace", description: "'replace' (default): the call is the whole plan. 'merge': update the stored plan; sessions are merged by date." },
+      },
+    },
+  },
+  {
+    name: "get_plan",
+    description:
+      "Reads the training plan stored by set_plan (~/.suunto-mcp/plan.json). Local file only: never contacts Suunto, needs no Suunto credentials, writes nothing. Without `date`: { today, plan: { goal, start, end, updatedAt, phases, sessions: [{ date, title, hasGuide }] }, currentPhase (the phase containing today, or null), todaySession (today's session WITH its guide spec, or null), next7Days: [{ date, session: { date, title, hasGuide } | null }] } for the 7 days AFTER today (a null session is a rest day). With `date`: { today, goal, start, end, updatedAt, date, phase, session (that day's session with its guide, or null) }. No plan yet: { today, plan: null, note }. A damaged plan file is an error naming the file. To put a planned session on the watch, pass its `guide` to push_strength_guide (or several to push_week_plan): this tool pushes nothing. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: { ...dateProp("A single day to look up, YYYY-MM-DD. Omit for the whole plan with today and the next 7 days."), examples: ["2026-11-17"] },
+      },
+    },
+  },
+  {
+    name: "get_catchup",
+    description:
+      "What is new since the last time the user caught up: new workouts (date, startLocal, activityId, totalTimeS, tss, guide, workoutKey), new finished nights (bedtimeStart/End, durationS, score, avgHrv, recoveryOnWaking), new recovery samples (count, latest, low, high), the plan items (from set_plan) in the review window as done / missed / pending by DATE (any workout on a planned date counts as done: the sport and the guide are not compared), and daysSinceLastSession. Toward Suunto it only reads: list calls for workouts (pages of 50, at most 4 pages per call), sleep and recovery. The first call looks back 7 days (the list calls add a margin of up to 14 hours for time zones); later calls start at the review window's first day, which is the day every section was last read completely (never more than 14 days back; anything older is reported in notes and was not looked at), and list workouts 2 days further back so a late sync is found. 'New' means after the marker kept in ~/.suunto-mcp/seen.json (SUUNTO_SEEN_PATH overrides it): workouts by key (a workout that syncs late with an earlier start is still new, once), nights by end time, recovery by sample time. Pass markSeen: true only once the user has actually been told. markSeen false (the default) is a PURE READ: nothing is written and the same call repeats the same answer. With markSeen: true each section that was read moves its marker, and `marked` is true; the review window (sleep, recovery and plan items) moves forward only when EVERY section was read (no entry in `errors`, the plan file readable, the whole workout list read), so what a failed section missed is reported next time. If there are more workouts than one call reads, `errors` says so, the call reports what it read, and calling again with markSeen: true continues below where it stopped. Plan items are reviewed from the review window's first day, so an item can show again until the window moves. A night still being recorded and naps are not reported. Output: { today, since: { from, firstCall }, newWorkouts, newNights, recovery, plan (null without a plan, { error } if the plan file is unreadable), lastSessionDate, daysSinceLastSession, markSeen, marked, errors, notes }. An unreadable seen.json is an error and is never overwritten. In demo mode the marker is kept in memory. Annotated not read-only (and idempotent: marking twice leaves the same marker) only because markSeen: true writes that small local marker, so clients may ask for permission before running it; the call itself changes nothing at Suunto.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        markSeen: { type: "boolean", default: false, description: "true: move the marker to what this answer covers (do it only after telling the user). false (default): leave it, so the next call repeats this answer." },
+      },
+    },
+  },
   {
     name: "adjust_guide",
     description:
@@ -1041,8 +1117,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const errors = validateAgainstSchema(tool.inputSchema, a);
     if (errors.length) return text(`Invalid arguments for ${name}: ${errors.join("; ")}`, true);
     // Demo mode writes nothing: every tool that is not read-only just says what it would do.
-    if (demo && !tool.annotations.readOnlyHint) return text(demoWriteResult(name));
-    ensureReady();
+    if (demo && !tool.annotations.readOnlyHint && !LOCAL_STATE_TOOLS.has(name)) return text(demoWriteResult(name));
+    if (!NO_CREDENTIALS_TOOLS.has(name)) ensureReady();
     switch (name) {
       case "list_workouts": {
         const since = a.since ? Date.parse(a.since) : undefined;
@@ -1084,6 +1160,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const adjusted = adjustStrengthGuide(a.guide, { hrv: m.hrv?.latestVsBand, recoveryMorning: m.recoveryMorning?.latestVsBand });
         return text(JSON.stringify({ ...adjusted, ...(baselines.errors.length ? { baselineErrors: baselines.errors } : {}) }));
       }
+      case "set_plan":
+        return text(JSON.stringify(await setPlan(a, planStore)));
+      case "get_plan":
+        return text(JSON.stringify(await getPlan(planStore, { date: a.date })));
+      case "get_catchup":
+        return text(JSON.stringify(await buildCatchup(suunto, seenStore, planStore, { markSeen: a.markSeen === true })));
       case "push_week_plan": {
         const result = await planWeek(a.guides, {
           dryRun: a.dryRun !== false,
