@@ -1,0 +1,63 @@
+{
+  "bin": [
+    "suunto-mcp",
+    "suunto-mcp-auth",
+    "suunto-mcp-doctor",
+    "suunto-mcp-webhook"
+  ],
+  "envVars": [
+    "PORT",
+    "SUUNTO_APP_NAME",
+    "SUUNTO_ARCHIVE_DIR",
+    "SUUNTO_CACHE",
+    "SUUNTO_CACHE_DIR",
+    "SUUNTO_CLIENT_ID",
+    "SUUNTO_CLIENT_SECRET",
+    "SUUNTO_DAILY_PREFIX",
+    "SUUNTO_DEMO",
+    "SUUNTO_DIGEST_AVERAGES_PATH",
+    "SUUNTO_DIGEST_HISTORY_PATH",
+    "SUUNTO_ENABLE_LEGACY_TOOLS",
+    "SUUNTO_HEALTH_EXPORT_STATE_PATH",
+    "SUUNTO_JOURNAL_PATH",
+    "SUUNTO_MCPB_DEMO",
+    "SUUNTO_NO_BROWSER",
+    "SUUNTO_PLAN_PATH",
+    "SUUNTO_REDIRECT_URI",
+    "SUUNTO_REPORTS_DIR",
+    "SUUNTO_ROUTE_IMPORT_GAP_MS",
+    "SUUNTO_ROUTE_VERIFY_DELAY_MS",
+    "SUUNTO_SEEN_PATH",
+    "SUUNTO_SUBSCRIPTION_KEY",
+    "SUUNTO_TOKEN_PATH",
+    "SUUNTO_TOKEN_STORAGE",
+    "SUUNTO_UPLOAD_POLL_MS",
+    "SUUNTO_WEBHOOK_ALLOW_UNSIGNED",
+    "SUUNTO_WEBHOOK_HOST",
+    "SUUNTO_WEBHOOK_LOG",
+    "SUUNTO_WEBHOOK_SECRET",
+    "SUUNTO_WRITE_GAP_MS"
+  ],
+  "prompts": {
+    "suunto-morning": [
+      "date"
+    ],
+    "suunto-weekly": [
+      "endDate"
+    ],
+    "suunto-gym-today": [
+      "date"
+    ],
+    "suunto-gym-review": [
+      "date"
+    ]
+  },
+  "resources": [
+    "suunto://recent/workout",
+    "suunto://this-week/summary",
+    "suunto://today/activity",
+    "suunto://today/recovery",
+    "suunto://today/sleep"
+  ],
+  "resourceTemplates": []
+}

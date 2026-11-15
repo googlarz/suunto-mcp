@@ -3,9 +3,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -211,9 +208,6 @@
           "type": "string"
         },
         "sunset": {
-          "examples": [
-            "2026-11-15T16:05:00+01:00"
-          ],
           "maxLength": 40,
           "minLength": 16,
           "type": "string"
@@ -251,9 +245,6 @@
     "inputSchema": {
       "properties": {
         "asOf": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -338,9 +329,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -367,9 +355,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-11-15"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -420,9 +405,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -444,15 +426,9 @@
     "inputSchema": {
       "properties": {
         "enddate": {
-          "examples": [
-            "2026-04-27T23:59:59"
-          ],
           "type": "string"
         },
         "startdate": {
-          "examples": [
-            "2026-04-01T00:00:00"
-          ],
           "type": "string"
         }
       },
@@ -471,9 +447,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -481,9 +454,6 @@
           "type": "string"
         },
         "to": {
-          "examples": [
-            "2026-04-26"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -505,9 +475,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -536,9 +503,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-11-17"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -557,9 +521,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -599,9 +560,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -623,9 +581,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-11-15"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -654,9 +609,6 @@
     "inputSchema": {
       "properties": {
         "date": {
-          "examples": [
-            "2026-04-20"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -717,9 +669,6 @@
           "type": "boolean"
         },
         "week": {
-          "examples": [
-            "2026-11-02"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -841,9 +790,6 @@
     "inputSchema": {
       "properties": {
         "from": {
-          "examples": [
-            "2026-04-01"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -851,9 +797,6 @@
           "type": "string"
         },
         "to": {
-          "examples": [
-            "2026-04-30"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -886,9 +829,6 @@
     "inputSchema": {
       "properties": {
         "from": {
-          "examples": [
-            "2026-04-01"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -896,9 +836,6 @@
           "type": "string"
         },
         "to": {
-          "examples": [
-            "2026-04-30"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -931,9 +868,6 @@
     "inputSchema": {
       "properties": {
         "from": {
-          "examples": [
-            "2026-04-01"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -941,9 +875,6 @@
           "type": "string"
         },
         "to": {
-          "examples": [
-            "2026-04-30"
-          ],
           "format": "date",
           "maxLength": 10,
           "minLength": 10,
@@ -972,16 +903,10 @@
           "type": "integer"
         },
         "since": {
-          "examples": [
-            "2026-04-01T00:00:00Z"
-          ],
           "format": "date-time",
           "type": "string"
         },
         "until": {
-          "examples": [
-            "2026-04-30T23:59:59Z"
-          ],
           "format": "date-time",
           "type": "string"
         }

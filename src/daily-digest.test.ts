@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, readdir, writeFile, chmod } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, writeFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { SuuntoApiError, SuuntoAuthError, SuuntoEmptyResponseError, SuuntoNotFoundError, SuuntoRateLimitError } from "./errors.js";
@@ -306,6 +306,14 @@ async function withTempDigestPaths(fn: (paths: { averagesPath: string; historyPa
     await rm(dir, { recursive: true });
   }
 }
+
+test("generateDigest: the history file is created owner-only (0600), like the averages sidecar", async () => {
+  await withTempDigestPaths(async (paths) => {
+    await generateDigest({ suunto: fakeSuunto(), ...paths, date: "2026-01-01" });
+    assert.equal((await stat(paths.historyPath)).mode & 0o777, 0o600);
+    assert.equal((await stat(paths.averagesPath)).mode & 0o777, 0o600);
+  });
+});
 
 test("generateDigest: refuses to re-run an already-processed date (would corrupt CTL/ATL)", async () => {
   await withTempDigestPaths(async (paths) => {

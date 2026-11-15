@@ -40,7 +40,7 @@ Tests live alongside source as `*.test.ts` and run via Node's built-in
 
 ## The 1.x contract and its fixtures
 
-[docs/CONTRACT.md](docs/CONTRACT.md) says what stays compatible within 1.x. `src/contract.test.ts` enforces it: it starts the real server in demo mode and compares the tool list (names, input schemas, annotations) and the key shape of every read-only tool's result with `test-fixtures/contract/tools.json` and `outputs.json`. Any difference fails, and the message says whether it is BREAKING (a removed or renamed tool or property, a changed type, a newly required input, changed annotations) or additive.
+[docs/CONTRACT.md](docs/CONTRACT.md) says what stays compatible within 1.x. `src/contract.test.ts` enforces it: it starts the real server in demo mode and compares the tool list (names, input schemas, annotations), the key shape of every read-only tool's result (with the fields demo data never fills listed under `unobserved`) and the names of `bin` commands, environment variables, MCP prompts and resources with `test-fixtures/contract/tools.json`, `outputs.json` and `surface.json`. A new environment variable must also be added to the README's table. Any difference fails, and the message says whether it is BREAKING (a removed or renamed tool or property, a changed type, a newly required input, changed annotations) or additive.
 
 When you add a tool, an optional input or an output key on purpose, regenerate the fixtures and commit them with your change:
 

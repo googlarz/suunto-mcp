@@ -701,7 +701,7 @@ export async function generateDigest(cfg: DigestConfig): Promise<DigestResult> {
 
   const markdown = lines.join("\n");
   await mkdir(dirname(cfg.historyPath), { recursive: true }).catch(() => {});
-  await appendFile(cfg.historyPath, markdown, "utf8");
+  await appendFile(cfg.historyPath, markdown, { encoding: "utf8", mode: 0o600 });
   // Saved LAST: the forward-only guard at the top refuses any date <=
   // lastUpdated, so committing state before the history entry exists would
   // lock in a day whose entry was never written (an unwritable history path
