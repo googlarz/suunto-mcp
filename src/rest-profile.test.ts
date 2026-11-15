@@ -516,3 +516,30 @@ test("buildRestProfile: a workout guide with HR that falls in each rest profiles
   assert.ok(p.rests.every((r) => r.t20S !== null && r.coverage >= 0.98));
   assert.deepEqual(p.perExercise.map((e) => e.name), ["Push-Up", "Dumbbell Curl", "Plank"]);
 });
+
+test("buildRestProfile: hrQuality is reported; a clean session stays reliable and silent", () => {
+  const laps = guided((k, S) => `Next: set ${k}/${S}`, 60);
+  const p = buildRestProfile(laps, parsedFrom(series(0, 245, guidedHr([90, 180])), T0));
+  assert.deepEqual(p.hrQuality, { reliable: true, reasons: [], coverage: 1 });
+  assert.equal(p.reliable, true);
+  assert.equal(p.note, null);
+});
+
+test("buildRestProfile: a session whose HR drops out for most of it is unreliable, says why in the note, and keeps the rest numbers", () => {
+  const laps = guided((k, S) => `Next: set ${k}/${S}`, 60);
+  const hr = guidedHr([90, 180]);
+  // the sensor is lost from 100 s to 230 s, so the second rest has no HR; the first still has its peak
+  const p = buildRestProfile(laps, parsedFrom(series(0, 245, (t) => (t >= 100 && t < 230 ? null : hr(t))), T0));
+  assert.equal(p.hrQuality.reliable, false);
+  assert.ok(p.hrQuality.coverage < 0.8);
+  assert.equal(p.reliable, false);
+  assert.match(p.note!, /heart-rate data is unreliable/);
+  assert.equal(p.rests.length, 2, "rests are kept, not dropped");
+});
+
+test("buildRestProfile: a FIT without heart rate is 'no HR data' (hrQuality.reliable null), not unreliable", () => {
+  const laps = guided((k, S) => `Next: set ${k}/${S}`, 60);
+  const p = buildRestProfile(laps, { records: [{ timestamp: new Date(T0) }, { timestamp: new Date(T0 + 1000) }] } as any);
+  assert.equal(p.hrQuality.reliable, null);
+  assert.equal(p.reliable, true, "missing HR is not an HR-quality verdict; the existing note already says there is none");
+});

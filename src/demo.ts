@@ -130,6 +130,7 @@ export class DemoClient extends SuuntoClient {
   private readonly firstDay: string;
   private readonly cache = new Map<string, any>();
   private workoutList: DemoWorkout[] | undefined;
+  private hrFaultKey: string | undefined; // the gym session whose FIT loses its heart rate for the middle half (see workouts)
 
   // `now` decides which days exist (about 8 weeks ending today) and how much of
   // today has happened; `seed` varies the whole data set.
@@ -314,7 +315,10 @@ export class DemoClient extends SuuntoClient {
       else if (PROGRAMME[dow]) built.push(this.gym(date));
     }
     // the third most recent completed gym session carries the planted deviation
-    const oddKey = built.filter((w) => w.laps && w.startMs + w.durationS * 1000 <= this.clock.getTime()).slice(-3)[0]?.key;
+    const gyms = built.filter((w) => w.laps && w.startMs + w.durationS * 1000 <= this.clock.getTime());
+    const oddKey = gyms.slice(-3)[0]?.key;
+    // the fifth most recent one has a sensor dropout, so the HR data-quality flag is visible in demo mode
+    this.hrFaultKey = gyms.slice(-5)[0]?.key;
     this.workoutList = built
       .filter((w) => w.startMs + w.durationS * 1000 <= this.clock.getTime())
       .map((w) => (w.key === oddKey ? this.gym(this.dateOf(w), true) : w))
@@ -469,8 +473,9 @@ export class DemoClient extends SuuntoClient {
   private fit(w: DemoWorkout): Buffer {
     const t0 = w.startMs / 1000;
     const max = Math.max(...w.hr);
+    const lost = w.key === this.hrFaultKey ? (t: number) => t >= w.hr.length * 0.25 && t < w.hr.length * 0.75 : () => false;
     return buildDemoFit({
-      records: w.hr.map((hr, t) => ({ unixS: t0 + t, hr })),
+      records: w.hr.flatMap((hr, t) => (lost(t) ? [] : [{ unixS: t0 + t, hr }])),
       laps: w.laps?.map((l) => ({ startUnixS: t0 + l.off, durationS: l.dur })),
       startUnixS: t0,
       elapsedS: w.base.totalTime,

@@ -11,6 +11,7 @@ import { STRENGTH_CUT_MIN, WORKOUT_CAP, compareWorkout, norm } from "./compare.j
 import { parseFit, type ParsedFit } from "./fit.js";
 import { loadJournal, validEntries, type JournalEntry } from "./journal.js";
 import { LAP_EXTENSIONS, shapeLaps } from "./laps.js";
+import type { HrQuality } from "./hr-quality.js";
 import { buildRestProfile } from "./rest-profile.js";
 import { isValidCalendarDate } from "./schema-validate.js";
 import { addDays } from "./training-load.js";
@@ -23,6 +24,8 @@ export const MAX_FETCH = 8;
 // merely starts another ('Squat' / 'Squat Jump'), and is never folded into a longer one.
 export const MIN_CUT_NAME = 12;
 const WORKOUT_LIMIT = 400;
+// Sessions named in one HR-quality note: the rest are counted, so the note stays short over 26 weeks.
+const MAX_HR_NOTE_SESSIONS = 5;
 const ERROR_MAX = 200;
 
 export interface RestAfterSet1 {
@@ -49,6 +52,7 @@ export interface WorkoutRecord {
   workoutKey: string;
   date: string;
   exercises: ExerciseRecord[];
+  hr: HrQuality | null; // the session's HR quality (hr-quality.ts); null when no FIT was read
 }
 
 // The first "<number>kg" in a detail text: "100kg 3x5" -> 100, "2x20kg 3x8/leg" -> 20, "62,5kg" -> 62.5.
@@ -90,7 +94,7 @@ export function deriveRecord(laps: ReturnType<typeof shapeLaps>, parsed: ParsedF
       reliable: profile ? profile.reliable : cmp.reliable,
     };
   });
-  return { workoutKey: laps.workoutKey ?? "", date, exercises };
+  return { workoutKey: laps.workoutKey ?? "", date, exercises, hr: profile?.hrQuality ?? null };
 }
 
 // A stored name matches a query when both are the same after normalisation (case, accents and
@@ -274,6 +278,16 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
   } else if (pending > 0) {
     notes.push(`${pending} older session(s) are not read yet (at most ${MAX_FETCH} uncached ones are fetched per call): call again until pending is 0.`);
   }
+  const hrList = (rs: WorkoutRecord[], why: (r: WorkoutRecord) => string): string => {
+    const shown = rs.slice(0, MAX_HR_NOTE_SESSIONS).map((r) => `${r.date} (${why(r)})`).join("; ");
+    return rs.length > MAX_HR_NOTE_SESSIONS ? `${shown}; and ${rs.length - MAX_HR_NOTE_SESSIONS} more` : shown;
+  };
+  const hrBad = ordered.filter((r) => r.hr?.reliable === false);
+  if (hrBad.length > 0) {
+    notes.push(`${hrBad.length} session(s) have unreliable heart-rate data and are marked reliable false; their rest numbers are still listed but left out of restEndHrMedian: ${hrList(hrBad, (r) => r.hr!.reasons.join(", "))}.`);
+  }
+  const hrNone = ordered.filter((r) => r.hr?.reliable === null);
+  if (hrNone.length > 0) notes.push(`${hrNone.length} session(s) have no heart rate data in the FIT file, so they have no rest recovery: ${hrList(hrNone, () => "no HR")}.`);
   if (listed.length >= WORKOUT_LIMIT) notes.push(`Reached the ${WORKOUT_LIMIT}-workout limit; older sessions in the range may be missing.`);
   if (journalIgnored > 0) notes.push(`${journalIgnored} journal ${journalIgnored === 1 ? "entry" : "entries"} ignored: not a valid log_session entry (fix or delete ${journalIgnored === 1 ? "it" : "them"} in the journal file).`);
   if (journalError) notes.push(`The journal could not be read (${journalError}); loads are from the labels only.`);

@@ -51,6 +51,7 @@ interface W {
   subst?: Subst;
   fails?: boolean;
   noLaps?: boolean;
+  dropHr?: boolean; // the FIT's HR is lost for the middle of the session
 }
 
 function fakeClient(workouts: W[]) {
@@ -76,7 +77,9 @@ function fakeClient(workouts: W[]) {
   };
   const parse = async (bytes: Buffer) => {
     const w = find(bytes.toString());
-    return parsedFor(w.fixture ?? CLEAN, w.startMs);
+    const parsed = parsedFor(w.fixture ?? CLEAN, w.startMs);
+    if (w.dropHr) parsed.records = parsed.records!.filter((_, i) => i < 100 || i > parsed.records!.length * 0.7);
+    return parsed;
   };
   return { client: client as any, calls, parse };
 }
@@ -172,6 +175,18 @@ test("deriveRecord: an unreliable session flags every exercise; deviation codes 
   assert.ok(e2.exercises.length > 0 && e2.exercises.every((e) => e.reliable === false), "ended without 'Session complete': best effort");
 });
 
+test("deriveRecord: the session's HR quality is stored on the record; null without a FIT", () => {
+  const laps = shapeLaps(lapsResponse(CLEAN, keyOf(1), CLEAN.startTime));
+  const good = deriveRecord(laps, parsedFor(CLEAN, CLEAN.startTime), "2026-10-01");
+  assert.equal(good.hr?.reliable, true, good.hr?.reasons.join("; "));
+  const parsed = parsedFor(CLEAN, CLEAN.startTime);
+  parsed.records = parsed.records!.filter((_, i, all) => i < 100 || i > all.length * 0.7);
+  const bad = deriveRecord(laps, parsed, "2026-10-01");
+  assert.equal(bad.hr?.reliable, false);
+  assert.ok(bad.exercises.every((e) => e.reliable === false), "unreliable HR makes every exercise unreliable");
+  assert.equal(deriveRecord(laps, null, "2026-10-01").hr, null);
+});
+
 // ---------- the call ----------
 
 test("history index: exercises by number of sessions, with the last date and detail; the second call is served from the cache", async () => {
@@ -243,6 +258,44 @@ test("history by name: an unreliable session is listed and flagged but does not 
     assert.ok(out.sessions.rows[1][c("restEndHr")] < 70, "the unreliable session's own value is still shown");
     assert.equal(out.summary.sessions, 2);
     assert.equal(out.summary.restEndHrMedian, Math.round(out.sessions.rows[0][c("restEndHr")]), "only the reliable session counts");
+  });
+});
+
+test("history: a session with unreliable HR is flagged, excluded from restEndHrMedian, named in a note with its reason, and the verdict survives the cache", async () => {
+  await withCacheDir(async () => {
+    const { client, parse } = fakeClient([
+      { key: keyOf(1), startMs: at(14) },
+      { key: keyOf(2), startMs: at(7), dropHr: true },
+    ]);
+    for (const pass of [1, 2]) {
+      const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 4, date: TODAY }, deps(parse));
+      const c = (n: string) => out.sessions.cols.indexOf(n);
+      assert.deepEqual(out.sessions.rows.map((r: any[]) => r[c("reliable")]), [true, false], `pass ${pass}`);
+      assert.equal(out.summary.restEndHrMedian, Math.round(out.sessions.rows[0][c("restEndHr")]), "only the reliable session counts");
+      const note = out.notes.find((n: string) => /unreliable heart-rate/i.test(n));
+      assert.ok(note, "a note says so");
+      assert.match(note, /only \d+% of the session/);
+      assert.match(note, new RegExp(out.sessions.rows[1][c("date")]));
+      assert.doesNotMatch(note, new RegExp(out.sessions.rows[0][c("date")]));
+    }
+  });
+});
+
+test("history: sessions with no HR at all are noted as 'no heart rate data', not as unreliable", async () => {
+  await withCacheDir(async () => {
+    const { client } = fakeClient([{ key: keyOf(1), startMs: at(7) }]);
+    const parse = async () => ({ sessions: [], records: [] }) as ParsedFit;
+    const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 4, date: TODAY }, deps(parse));
+    assert.ok(out.notes.some((n: string) => /no heart rate data/i.test(n)));
+    assert.ok(!out.notes.some((n: string) => /unreliable heart-rate/i.test(n)));
+  });
+});
+
+test("history: a clean history adds no HR-quality note", async () => {
+  await withCacheDir(async () => {
+    const { client, parse } = fakeClient([{ key: keyOf(1), startMs: at(7) }]);
+    const out: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 4, date: TODAY }, deps(parse));
+    assert.ok(!out.notes.some((n: string) => /heart-rate|heart rate/i.test(n)), out.notes.join("\n"));
   });
 });
 
