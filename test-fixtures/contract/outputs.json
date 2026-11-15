@@ -1,6 +1,9 @@
 {
   "about": "Key shape of what each tool returns in demo mode (frozen clock, fixed seed): keys and value type names, never values. A list is the union of its items' shapes. `unobserved` lists the places where demo data is always null or empty, so the shape inside them is NOT checked. Regenerate with UPDATE_CONTRACT=1 npm test.",
   "unobserved": {
+    "analyze_experiment": [
+      "exploratoryReason: always null"
+    ],
     "compare_workout_to_plan": [
       "afterComplete: always an empty list",
       "checks: always an empty list",
@@ -14,6 +17,20 @@
       "checks: always an empty list",
       "note: always null",
       "unattributed: always an empty list"
+    ],
+    "draft_session_log": [
+      "hrQuality.reasons: always an empty list",
+      "mapping.note: always null",
+      "review[].issues: always an empty list",
+      "review[].whyNotFilled: always an empty list",
+      "sessionIssues: always an empty list"
+    ],
+    "draft_session_log#date": [
+      "hrQuality.reasons: always an empty list",
+      "mapping.note: always null",
+      "review[].issues: always an empty list",
+      "review[].whyNotFilled: always an empty list",
+      "sessionIssues: always an empty list"
     ],
     "estimate_route_time": [
       "latestStart: always null"
@@ -67,6 +84,32 @@
     "get_exercise_history#one-exercise": [
       "errors: always an empty list",
       "sessions.rows[][]: always an empty list"
+    ],
+    "get_experiment": [
+      "experiments[].stopped: always null",
+      "experiments[].today.arm: always null",
+      "experiments[].today.followed: always null",
+      "experiments[].today.instruction: always null",
+      "note: always null",
+      "selected: always null"
+    ],
+    "get_experiment#one": [
+      "experiments[].stopped: always null",
+      "experiments[].today.arm: always null",
+      "experiments[].today.followed: always null",
+      "experiments[].today.instruction: always null",
+      "note: always null"
+    ],
+    "get_prediction_stats": [
+      "byKind[].basis.draftConfirmed.hitRate: always null",
+      "byKind[].basis.other.hitRate: always null",
+      "byKind[].brier: always null",
+      "byKind[].brierBaseRate: always null",
+      "byKind[].calibration: always null",
+      "byKind[].hitRate: always null",
+      "byKind[].meanProbability: always null",
+      "byRule[].basis.draftConfirmed.hitRate: always null",
+      "overall.basis.draftConfirmed.hitRate: always null"
     ],
     "get_tag_effects": [
       "errors: always an empty list"
@@ -145,6 +188,88 @@
       "signals": {
         "hrv": "string",
         "recoveryMorning": "string"
+      }
+    },
+    "analyze_experiment": {
+      "adherence": {
+        "followed": "number",
+        "logged": "number",
+        "notFollowed": "number",
+        "notLogged": "number",
+        "trialDays": "number"
+      },
+      "demo": "boolean",
+      "exploratory": "boolean",
+      "exploratoryReason": "null",
+      "hypothesis": "string",
+      "id": "string",
+      "intentionToTreat": {
+        "controlMedian": "number",
+        "effectInStandardErrors": "number",
+        "interventionMedian": "number",
+        "meanDiff": "number",
+        "medianDiff": "number",
+        "missingNights": {
+          "control": "number",
+          "intervention": "number"
+        },
+        "nControl": "number",
+        "nIntervention": "number",
+        "noiseThreshold": "number",
+        "pValue": "number",
+        "test": {
+          "informativePairs": "number",
+          "method": "string",
+          "permutations": "number"
+        },
+        "verdict": "string"
+      },
+      "metric": "string",
+      "name": "string",
+      "notControlled": [
+        "string"
+      ],
+      "notes": [
+        "string"
+      ],
+      "pValueBasis": "string",
+      "perProtocol": {
+        "controlMedian": "number",
+        "effectInStandardErrors": "number",
+        "interventionMedian": "number",
+        "meanDiff": "number",
+        "medianDiff": "number",
+        "missingNights": {
+          "control": "number",
+          "intervention": "number"
+        },
+        "nControl": "number",
+        "nIntervention": "number",
+        "noiseThreshold": "number",
+        "note": "string",
+        "pValue": "number",
+        "test": {
+          "informativePairs": "number",
+          "method": "string",
+          "permutations": "number"
+        },
+        "verdict": "string"
+      },
+      "randomized": "string",
+      "statement": "string",
+      "status": "string",
+      "thresholds": {
+        "alpha": "number",
+        "minNightsPerArm": "number",
+        "noiseRule": "string",
+        "test": "string"
+      },
+      "today": "string",
+      "verdict": "string",
+      "window": {
+        "from": "string",
+        "plannedEnd": "string",
+        "through": "string"
       }
     },
     "compare_workout_to_plan": {
@@ -274,6 +399,126 @@
       "restMode": "string",
       "status": "string",
       "unattributed": [],
+      "workoutKey": "string"
+    },
+    "draft_session_log": {
+      "assumed": "boolean",
+      "confirm": [
+        "string"
+      ],
+      "date": "string",
+      "demo": "boolean",
+      "draft": {
+        "exercises": [
+          {
+            "name": "string",
+            "sets": [
+              {
+                "kg": "number",
+                "reps": "number"
+              }
+            ]
+          }
+        ],
+        "source": "string",
+        "workoutKey": "string"
+      },
+      "hrQuality": {
+        "coverage": "number",
+        "reasons": [],
+        "reliable": "boolean"
+      },
+      "mapping": {
+        "complete": "boolean",
+        "format": "string",
+        "note": "null",
+        "reliable": "boolean"
+      },
+      "notes": [
+        "string"
+      ],
+      "review": [
+        {
+          "assumed": "boolean",
+          "detail": "string",
+          "issues": [],
+          "mustConfirm": [
+            "string"
+          ],
+          "n": "number",
+          "name": "string",
+          "planned": {
+            "kg": "number",
+            "reps": "number",
+            "sets": "number"
+          },
+          "proposedSets": "number",
+          "recordedSetLaps": "number",
+          "whyNotFilled": []
+        }
+      ],
+      "sessionIssues": [],
+      "status": "string",
+      "workoutKey": "string"
+    },
+    "draft_session_log#date": {
+      "assumed": "boolean",
+      "confirm": [
+        "string"
+      ],
+      "date": "string",
+      "demo": "boolean",
+      "draft": {
+        "exercises": [
+          {
+            "name": "string",
+            "sets": [
+              {
+                "kg": "number",
+                "reps": "number"
+              }
+            ]
+          }
+        ],
+        "source": "string",
+        "workoutKey": "string"
+      },
+      "hrQuality": {
+        "coverage": "number",
+        "reasons": [],
+        "reliable": "boolean"
+      },
+      "mapping": {
+        "complete": "boolean",
+        "format": "string",
+        "note": "null",
+        "reliable": "boolean"
+      },
+      "notes": [
+        "string"
+      ],
+      "review": [
+        {
+          "assumed": "boolean",
+          "detail": "string",
+          "issues": [],
+          "mustConfirm": [
+            "string"
+          ],
+          "n": "number",
+          "name": "string",
+          "planned": {
+            "kg": "number",
+            "reps": "number",
+            "sets": "number"
+          },
+          "proposedSets": "number",
+          "recordedSetLaps": "number",
+          "whyNotFilled": []
+        }
+      ],
+      "sessionIssues": [],
+      "status": "string",
       "workoutKey": "string"
     },
     "estimate_route_time": {
@@ -1185,6 +1430,150 @@
       },
       "to": "string"
     },
+    "get_experiment": {
+      "demo": "boolean",
+      "experiments": [
+        {
+          "adherence": {
+            "byArm": {
+              "control": {
+                "elapsed": "number",
+                "followed": "number",
+                "logged": "number",
+                "notFollowed": "number",
+                "notLogged": "number"
+              },
+              "intervention": {
+                "elapsed": "number",
+                "followed": "number",
+                "logged": "number",
+                "notFollowed": "number",
+                "notLogged": "number"
+              }
+            },
+            "elapsed": "number",
+            "followed": "number",
+            "logged": "number",
+            "notFollowed": "number",
+            "notLogged": "number"
+          },
+          "control": "string",
+          "endDate": "string",
+          "id": "string",
+          "intervention": "string",
+          "metric": "string",
+          "name": "string",
+          "progress": {
+            "days": "number",
+            "daysElapsed": "number",
+            "planned": {
+              "control": "number",
+              "intervention": "number"
+            }
+          },
+          "startDate": "string",
+          "status": "string",
+          "stopped": "null",
+          "today": {
+            "arm": "null",
+            "date": "string",
+            "followed": "null",
+            "instruction": "null",
+            "note": "string"
+          }
+        }
+      ],
+      "note": "null",
+      "selected": "null",
+      "today": "string"
+    },
+    "get_experiment#one": {
+      "demo": "boolean",
+      "experiments": [
+        {
+          "adherence": {
+            "byArm": {
+              "control": {
+                "elapsed": "number",
+                "followed": "number",
+                "logged": "number",
+                "notFollowed": "number",
+                "notLogged": "number"
+              },
+              "intervention": {
+                "elapsed": "number",
+                "followed": "number",
+                "logged": "number",
+                "notFollowed": "number",
+                "notLogged": "number"
+              }
+            },
+            "elapsed": "number",
+            "followed": "number",
+            "logged": "number",
+            "notFollowed": "number",
+            "notLogged": "number"
+          },
+          "control": "string",
+          "endDate": "string",
+          "id": "string",
+          "intervention": "string",
+          "metric": "string",
+          "name": "string",
+          "progress": {
+            "days": "number",
+            "daysElapsed": "number",
+            "planned": {
+              "control": "number",
+              "intervention": "number"
+            }
+          },
+          "startDate": "string",
+          "status": "string",
+          "stopped": "null",
+          "today": {
+            "arm": "null",
+            "date": "string",
+            "followed": "null",
+            "instruction": "null",
+            "note": "string"
+          }
+        }
+      ],
+      "note": "null",
+      "selected": {
+        "analysisPlan": [
+          "string"
+        ],
+        "control": "string",
+        "createdAt": "string",
+        "days": "number",
+        "endDate": "string",
+        "hypothesis": "string",
+        "id": "string",
+        "intervention": "string",
+        "log": [
+          {
+            "date": "string",
+            "followed": "boolean",
+            "loggedAt": "string"
+          }
+        ],
+        "metric": "string",
+        "name": "string",
+        "schedule": [
+          {
+            "arm": "string",
+            "block": "number",
+            "date": "string"
+          }
+        ],
+        "seed": "number",
+        "startDate": "string",
+        "washout": "number"
+      },
+      "today": "string"
+    },
     "get_plan": {
       "currentPhase": {
         "focus": "string",
@@ -1302,6 +1691,147 @@
       "start": "string",
       "today": "string",
       "updatedAt": "string"
+    },
+    "get_prediction_stats": {
+      "byKind": [
+        {
+          "basis": {
+            "draftConfirmed": {
+              "hitRate": "null",
+              "hits": "number",
+              "n": "number"
+            },
+            "other": {
+              "hitRate": "null",
+              "hits": "number",
+              "n": "number"
+            }
+          },
+          "brier": "null",
+          "brierBaseRate": "null",
+          "calibration": "null",
+          "hitRate": "null",
+          "hits": "number",
+          "kind": "string",
+          "logged": "number",
+          "meanProbability": "null",
+          "misses": "number",
+          "n": "number",
+          "statement": "string",
+          "unresolvable": "number",
+          "unscored": "number",
+          "verdict": "string",
+          "voided": "number"
+        }
+      ],
+      "byRule": [
+        {
+          "basis": {
+            "draftConfirmed": {
+              "hitRate": "null",
+              "hits": "number",
+              "n": "number"
+            },
+            "other": {
+              "hitRate": "null|number",
+              "hits": "number",
+              "n": "number"
+            }
+          },
+          "brier": "null|number",
+          "brierBaseRate": "null|number",
+          "calibration": {
+            "$oneOf": [
+              "null",
+              {
+                "$oneOf": [
+                  "null",
+                  [
+                    {
+                      "from": "number",
+                      "hitRate": "null|number",
+                      "meanProbability": "null|number",
+                      "n": "number",
+                      "to": "number"
+                    }
+                  ]
+                ]
+              }
+            ]
+          },
+          "hitRate": "null|number",
+          "hits": "number",
+          "logged": "number",
+          "meanProbability": "null|number",
+          "misses": "number",
+          "n": "number",
+          "rule": "string",
+          "statement": "string",
+          "unresolvable": "number",
+          "unscored": "number",
+          "verdict": "string",
+          "voided": "number"
+        }
+      ],
+      "demo": "boolean",
+      "dueUnscored": "number",
+      "notes": [
+        "string"
+      ],
+      "overall": {
+        "basis": {
+          "draftConfirmed": {
+            "hitRate": "null",
+            "hits": "number",
+            "n": "number"
+          },
+          "other": {
+            "hitRate": "number",
+            "hits": "number",
+            "n": "number"
+          }
+        },
+        "brier": "number",
+        "brierBaseRate": "number",
+        "calibration": [
+          {
+            "from": "number",
+            "hitRate": "null|number",
+            "meanProbability": "null|number",
+            "n": "number",
+            "to": "number"
+          }
+        ],
+        "hitRate": "number",
+        "hits": "number",
+        "logged": "number",
+        "meanProbability": "number",
+        "misses": "number",
+        "n": "number",
+        "statement": "string",
+        "unresolvable": "number",
+        "unscored": "number",
+        "verdict": "string",
+        "voided": "number"
+      },
+      "recent": [
+        {
+          "date": "string",
+          "detail": "string",
+          "due": "string",
+          "id": "string",
+          "kind": "string",
+          "probability": "number",
+          "rule": "string",
+          "status": "string"
+        }
+      ],
+      "thresholds": {
+        "buckets": "number",
+        "minBucketN": "number",
+        "minScored": "number"
+      },
+      "today": "string"
     },
     "get_recovery": {
       "data": [

@@ -13,7 +13,7 @@ What you can rely on from suunto-mcp 1.0 onward, and what you cannot. It covers 
 
   | File | Rule |
   |---|---|
-  | `journal.json`, `plan.json`, `seen.json`, archive records (`archive/<key>.json`) | Carry `"version": 1`. A file of a version this server does not know, or a damaged one, is refused with a message naming the file, and is left untouched. If a later 1.x changes a format, it reads the old version (any migration is announced in the CHANGELOG); it never discards what it cannot read. |
+  | `journal.json`, `plan.json`, `seen.json`, `predictions.json`, `experiments.json`, archive records (`archive/<key>.json`) | Carry `"version": 1`. A file of a version this server does not know, or a damaged one, is refused with a message naming the file, and is left untouched. If a later 1.x changes a format, it reads the old version (any migration is announced in the CHANGELOG); it never discards what it cannot read. |
   | `tokens.json` | Written by the pairing step, read and rewritten when a token is refreshed. It has no version number. Pair again if a release ever says so. |
   | `health-export-state.json` (`sync-to-health-skill`'s watermark) | Unversioned: one `lastDate`. An unreadable one stops the sync instead of being treated as a first run. |
   | `cache/` | Derived data, rebuilt on demand. An entry written by another server version or schema is ignored and rebuilt, so the first call after an upgrade may be slower. |

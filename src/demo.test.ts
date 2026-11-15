@@ -335,8 +335,10 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     ];
     const tools: any[] = (await rpc("tools/list")).result.tools;
     const nonRead = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
-    // set_plan, get_catchup, archive_workouts and get_weekly_report are not read-only either, but in demo mode they work on in-memory state (tested below)
-    assert.deepEqual(nonRead.filter((n) => !["set_plan", "get_catchup", "archive_workouts", "get_weekly_report"].includes(n)), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
+    // set_plan, get_catchup, archive_workouts and get_weekly_report are not read-only either, but in demo mode they work on in-memory state (tested below);
+    // so do the prediction ledger and experiment writers (tested in demo-state.test.ts and state-tools.test.ts)
+    const inMemory = ["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment"];
+    assert.deepEqual(nonRead.filter((n) => !inMemory.includes(n)), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
     for (const [name, args] of writes) {
       const r = await call(name, args);
       assert.equal(r.isError, false, `${name}: ${r.text}`);

@@ -24,6 +24,7 @@ export interface JournalEntry {
   feeling?: string;
   tags?: string[];
   exercises?: JournalExercise[];
+  source?: "draft"; // set when the user confirmed a draft_session_log: the reps and weights began as the guide's plan
 }
 
 const WORKOUT_KEY = /^[0-9a-f]{24}$/i;
@@ -85,7 +86,7 @@ function onlyKeys(o: Record<string, unknown>, allowed: string[], path: string): 
 // Strict shape check of one entry (log_session's arguments, or an entry read back from the file).
 function parseEntry(args: unknown, loggedAt: string): JournalEntry {
   if (!isObject(args)) throw new Error("arguments must be an object");
-  onlyKeys(args, ["workoutKey", "note", "feeling", "tags", "exercises"], "");
+  onlyKeys(args, ["workoutKey", "note", "feeling", "tags", "exercises", "source"], "");
   const key = args.workoutKey;
   if (typeof key !== "string" || !WORKOUT_KEY.test(key)) throw new Error("workoutKey must be the 24-character hex key from list_workouts");
   let exercises: JournalExercise[] | undefined;
@@ -114,6 +115,7 @@ function parseEntry(args: unknown, loggedAt: string): JournalEntry {
       return defined({ name: text(e.name, `${p}.name`, true)!, sets, note: text(e.note, `${p}.note`) });
     });
   }
+  if (args.source !== undefined && args.source !== "draft") throw new Error('source must be "draft" when given');
   return defined({
     workoutKey: key.toLowerCase(),
     loggedAt,
@@ -121,6 +123,7 @@ function parseEntry(args: unknown, loggedAt: string): JournalEntry {
     feeling: text(args.feeling, "feeling"),
     tags: tagList(args.tags),
     exercises,
+    source: args.source as "draft" | undefined,
   });
 }
 
@@ -151,9 +154,13 @@ export function validEntries(raw: Record<string, unknown>): { entries: Record<st
   return { entries, ignored };
 }
 
+// `sources` keeps the draft mark of an entry (source: "draft") apart from the entry itself: a 1.0 server refuses an entry with a field
+// it does not know (and then skips the whole entry), but it ignores a top-level key it does not know, so it still reads every entry.
+// A 1.0 server that writes the journal back drops `sources`: the entries stay, the marks are lost.
 interface JournalFile {
   version: 1;
-  entries: Record<string, JournalEntry>;
+  entries: Record<string, Omit<JournalEntry, "source">>;
+  sources?: Record<string, "draft">;
 }
 
 // All entries by workoutKey. A missing file is an empty journal; an unreadable one throws
@@ -175,7 +182,11 @@ export async function loadJournal(path = journalPath()): Promise<Record<string, 
   if (!isObject(file) || !isObject(file.entries)) throw new Error(`${path} is not a suunto-mcp journal; fix or delete it`);
   // rewriting another version's file as version 1 would drop what this server cannot read
   if (file.version !== 1) throw new Error(`${path} is journal version ${JSON.stringify(file.version) ?? "unknown"}, but this server reads and writes version 1 only; it is left untouched`);
-  return file.entries as Record<string, JournalEntry>;
+  const entries = { ...file.entries } as Record<string, JournalEntry>;
+  if (isObject(file.sources)) {
+    for (const [key, mark] of Object.entries(file.sources)) if (mark === "draft" && isObject(entries[key])) entries[key] = { ...entries[key], source: "draft" };
+  }
+  return entries;
 }
 
 // Adds `entry` to the file and returns how many entries it now holds. The file is read again right here
@@ -184,7 +195,18 @@ export async function loadJournal(path = journalPath()): Promise<Record<string, 
 async function saveJournal(path: string, entry: JournalEntry): Promise<number> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const entries = { ...(await loadJournal(path)), [entry.workoutKey]: entry };
-  const file: JournalFile = { version: 1, entries };
+  const sources: Record<string, "draft"> = {};
+  const stored: JournalFile["entries"] = {};
+  for (const [key, e] of Object.entries(entries)) {
+    if (!isObject(e)) {
+      stored[key] = e; // not an entry this server could have written: kept exactly as found
+      continue;
+    }
+    const { source, ...rest } = e;
+    stored[key] = rest;
+    if (source === "draft") sources[key] = "draft";
+  }
+  const file: JournalFile = { version: 1, entries: stored, ...(Object.keys(sources).length ? { sources } : {}) };
   const tmp = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
     await writeFile(tmp, JSON.stringify(file, null, 2), { encoding: "utf8", mode: 0o600 });

@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "suunto-mcp",
   "display_name": "Suunto MCP",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Your Suunto watch data (workouts, sleep, recovery, training load) for Claude. Works out of the box on synthetic demo data.",
   "long_description": "Connects your Suunto watch data to Claude: workouts, laps, sleep, HRV, recovery, 24/7 activity, training load, weekly reports and route time estimates. With the demo checkbox on (the default) it runs on generated sample data and needs no Suunto account. For your own data you need approved access to Suunto's developer API and a one-time pairing step; see the README on GitHub.",
   "author": {
@@ -97,6 +97,46 @@
     {
       "name": "get_tag_effects",
       "description": "Whether the night after a tagged session differs, as an association and never a cause."
+    },
+    {
+      "name": "log_prediction",
+      "description": "Writes down a prediction with a probability before the fact, in a local ledger it can never be edited in."
+    },
+    {
+      "name": "void_prediction",
+      "description": "Voids a prediction with a reason before its due date; it is kept, never deleted."
+    },
+    {
+      "name": "score_predictions",
+      "description": "Scores due predictions as hit, miss or unresolvable from your watch data, never guessing."
+    },
+    {
+      "name": "get_prediction_stats",
+      "description": "Hit rate, Brier score and calibration of your predictions, only once there are enough scored."
+    },
+    {
+      "name": "start_experiment",
+      "description": "Starts a randomized self-experiment: hypothesis and schedule are fixed before the first day."
+    },
+    {
+      "name": "get_experiment",
+      "description": "Today's assignment, progress and adherence of your experiments."
+    },
+    {
+      "name": "log_experiment_day",
+      "description": "Records whether you actually followed that day's assignment."
+    },
+    {
+      "name": "analyze_experiment",
+      "description": "Compares the nights after intervention and control days with a permutation test, honestly."
+    },
+    {
+      "name": "stop_experiment",
+      "description": "Stops an experiment with a reason; nothing is deleted."
+    },
+    {
+      "name": "draft_session_log",
+      "description": "Drafts a session log from the watch data for you to confirm; never logs anything itself."
     },
     {
       "name": "archive_workouts",

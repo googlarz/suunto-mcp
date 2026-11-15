@@ -63,6 +63,9 @@ test("stdio: reports the package.json version, not a hardcoded one", async () =>
   });
 });
 
+// tools that touch local files only and never read Suunto
+const LOCAL_ONLY = ["log_session", "set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment"];
+
 test("stdio: every tool has a title and annotations consistent with what it does", async () => {
   await withServer(async (call) => {
     const { tools } = (await call("tools/list")).result;
@@ -71,12 +74,12 @@ test("stdio: every tool has a title and annotations consistent with what it does
       assert.ok(t.title && t.title.length > 3, `${t.name}: missing title`);
       assert.ok(t.annotations, `${t.name}: missing annotations`);
       assert.equal(typeof t.annotations.readOnlyHint, "boolean", `${t.name}: readOnlyHint must be explicit`);
-      assert.equal(t.annotations.openWorldHint, !["log_session", "set_plan", "get_plan", "get_archive_status"].includes(t.name), `${t.name}: talks to Suunto's cloud (log_session, set_plan, get_plan and get_archive_status alone are local files)`);
+      assert.equal(t.annotations.openWorldHint, !LOCAL_ONLY.includes(t.name), `${t.name}: talks to Suunto's cloud (${LOCAL_ONLY.join(", ")} alone are local files)`);
 
       // get_catchup and get_weekly_report read by name but are not read-only: markSeen: true and save: true write a local file
       const catchup = t.name === "get_catchup" || t.name === "get_weekly_report";
-      const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate)_/.test(t.name) && !catchup;
-      const writes = /^(push|delete|upload|generate|log|set|archive)_/.test(t.name) || catchup;
+      const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate|analyze|draft)_/.test(t.name) && !catchup;
+      const writes = /^(push|delete|upload|generate|log|set|archive|void|score|start|stop)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
       if (/^(push_.*_guide|delete_guide|generate_daily_digest|log_session)$/.test(t.name)) {
@@ -91,6 +94,21 @@ test("stdio: every tool has a title and annotations consistent with what it does
       // archive_workouts writes only new local files and reads Suunto: not destructive, not idempotent (each call archives more), open-world
       if (t.name === "archive_workouts") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
       if (t.name === "get_archive_status") assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
+      // 1.1: the prediction ledger and the experiments only add to their files (nothing replaced), but a void and a stop cannot be undone (destructive); a new prediction or experiment is a new entry (not idempotent); a void, a stop and a day log
+      // repeated leave the same state (idempotent); score_predictions scores the next batch each call (not idempotent) and reads Suunto
+      const NEW: Record<string, object> = {
+        log_prediction: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+        void_prediction: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+        score_predictions: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        get_prediction_stats: { readOnlyHint: true, openWorldHint: false },
+        start_experiment: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+        get_experiment: { readOnlyHint: true, openWorldHint: false },
+        log_experiment_day: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        analyze_experiment: { readOnlyHint: true, openWorldHint: true },
+        stop_experiment: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+        draft_session_log: { readOnlyHint: true, openWorldHint: true },
+      };
+      if (t.name in NEW) assert.deepEqual(t.annotations, NEW[t.name], t.name);
     }
   });
 });

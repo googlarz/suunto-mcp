@@ -15,6 +15,9 @@ import { buildBenchmark } from "./benchmark.js";
 import { archiveStatus, fileArchiveStore } from "./archive.js";
 import { buildWeeklyReport, fileReportStore } from "./report.js";
 import { estimateRouteTime } from "./route-time.js";
+import { filePredictionStore, predictionStats } from "./predictions.js";
+import { analyzeExperiment, fileExperimentStore, getExperiment } from "./experiments.js";
+import { buildDraft } from "./draft.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -47,6 +50,10 @@ Analysis commands:
   get-benchmark        --guide TITLE | --exercise NAME [--weeks N]   (a repeatable session over time: load, rest HR, duration, TSS; writes only the local cache)
   get-archive-status   (what the local workout archive holds; reads the archive folder only, no credentials)
   get-weekly-report    [MONDAY YYYY-MM-DD] [--markdown]   (a finished week: workouts, sleep and recovery against your usual, training load, plan, tags; prints JSON or just the markdown; never saves: use the MCP tool with save for that)
+  get-prediction-stats (how good the logged predictions were: hit rate, Brier score, calibration, per kind and rule; reads the local ledger only, no credentials; log, void and score with the MCP tools)
+  get-experiment       [ID]   (self-experiments: status, today's assignment, adherence; with an id the full schedule and log; reads the local file only, no credentials)
+  analyze-experiment   [ID] [--early]   (permutation test, intention to treat and per protocol; --early is exploratory; read-only)
+  draft-session-log    <workoutKey> | --date YYYY-MM-DD   (a proposed log_session payload from the watch data, every rep and weight assumed; prints it, never logs it)
   get-catchup          (what is new since the last markSeen: workouts, nights, recovery, plan items; never moves the marker, use the MCP tool with markSeen for that)
 
 Route commands:
@@ -116,6 +123,26 @@ export async function runCli(argv: string[]) {
     if (rest.length > 0) die("Usage: get-archive-status (it takes no options)");
     try {
       out(await archiveStatus(fileArchiveStore()));
+    } catch (err: any) {
+      die(err.message ?? String(err));
+    }
+    return;
+  }
+
+  // these two only read their local files, so they need no Suunto credentials either
+  if (cmd === "get-prediction-stats") {
+    if (rest.length > 0) die("Usage: get-prediction-stats (it takes no options)");
+    try {
+      out(predictionStats(await filePredictionStore().load()));
+    } catch (err: any) {
+      die(err.message ?? String(err));
+    }
+    return;
+  }
+  if (cmd === "get-experiment") {
+    if (rest.length > 1) die("Usage: get-experiment [ID]");
+    try {
+      out(await getExperiment(fileExperimentStore(), { id: rest[0] }));
     } catch (err: any) {
       die(err.message ?? String(err));
     }
@@ -254,6 +281,22 @@ export async function runCli(argv: string[]) {
         const report = await buildWeeklyReport(suunto, { week: positionals[0] }, { planStore: filePlanStore(), reportStore: fileReportStore() });
         if (values.markdown) process.stdout.write(report.markdown);
         else out(report);
+        break;
+      }
+
+      case "analyze-experiment": {
+        const usage = "Usage: analyze-experiment [ID] [--early]";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { early: { type: "boolean", default: false } } });
+        if (positionals.length > 1) die(usage);
+        out(await analyzeExperiment(suunto, fileExperimentStore(), { id: positionals[0], early: values.early }));
+        break;
+      }
+
+      case "draft-session-log": {
+        const usage = "Usage: draft-session-log <workoutKey> | --date YYYY-MM-DD";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { date: { type: "string" } } });
+        if (positionals.length > 1 || (positionals.length === 1) === (values.date !== undefined)) die(usage);
+        out(await buildDraft(suunto, { workoutKey: positionals[0], date: values.date }));
         break;
       }
 

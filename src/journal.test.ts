@@ -224,3 +224,59 @@ test("journal: validEntries keeps what log_session could have written and counts
   assert.deepEqual(entries[KEY], good);
   assert.equal(ignored, 5);
 });
+
+test("journal: an optional source 'draft' (set when the user confirmed a draft_session_log) is kept on the entry; any other source is refused", async () => {
+  assert.deepEqual(parseLogInput({ workoutKey: KEY, note: "ok", source: "draft" }, NOW), { workoutKey: KEY, loggedAt: NOW.toISOString(), note: "ok", source: "draft" });
+  assert.equal("source" in parseLogInput({ workoutKey: KEY, note: "ok" }, NOW), false, "without it the entry is exactly what 1.0 stored");
+  for (const source of ["manual", "", "DRAFT", 1, null, ["draft"]]) assert.throws(() => parseLogInput({ workoutKey: KEY, note: "ok", source }, NOW), /source must be "draft"/);
+  // a source alone is not something to log
+  assert.throws(() => parseLogInput({ workoutKey: KEY, source: "draft" }, NOW), /nothing to log/);
+  await withDir(async (path) => {
+    await logSession({ workoutKey: KEY, exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }] }], source: "draft" }, path, NOW);
+    const stored = (await loadJournal(path))[KEY];
+    assert.equal(stored.source, "draft");
+    assert.equal(validEntries({ [KEY]: stored }).entries[KEY].source, "draft", "an entry with a source is a valid entry when read back");
+    // a tags-only call keeps what was logged, the source included
+    await logSession({ workoutKey: KEY, tags: ["heavy"] }, path, NOW);
+    assert.deepEqual([(await loadJournal(path))[KEY].source, (await loadJournal(path))[KEY].tags], ["draft", ["heavy"]]);
+    // logging again without the source replaces the entry, which then has none
+    await logSession({ workoutKey: KEY, note: "corrected" }, path, NOW);
+    assert.equal((await loadJournal(path))[KEY].source, undefined);
+  });
+});
+
+test("journal: the draft mark is stored apart from the entry, so a 1.0 server still reads every entry in full", async () => {
+  await withDir(async (path) => {
+    await logSession({ workoutKey: KEY, exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }] }], tags: ["heavy"], source: "draft" }, path, NOW);
+    const raw = JSON.parse(await readFile(path, "utf8"));
+    // 1.0's reader refuses an entry with a field it does not know: these are exactly the fields it knows
+    const known = ["workoutKey", "loggedAt", "note", "feeling", "tags", "exercises"];
+    assert.deepEqual(Object.keys(raw.entries[KEY]).filter((k) => !known.includes(k)), [], "no new field inside the entry");
+    assert.deepEqual(raw.sources, { [KEY]: "draft" });
+    assert.equal(raw.version, 1);
+    // read back by this server, the entry carries its source
+    assert.equal((await loadJournal(path))[KEY].source, "draft");
+    // another entry, and the first one replaced without a source: the mark goes with it
+    await logSession({ workoutKey: "5e1f7c0de000000000000002", note: "manual" }, path, NOW);
+    assert.deepEqual(JSON.parse(await readFile(path, "utf8")).sources, { [KEY]: "draft" });
+    await logSession({ workoutKey: KEY, note: "corrected by hand" }, path, NOW);
+    assert.equal("sources" in JSON.parse(await readFile(path, "utf8")), false, "no draft entry left: no map");
+    // what a 1.0 server writes back has no map: the entries stay, the mark is lost (documented)
+    await logSession({ workoutKey: KEY, note: "again", source: "draft" }, path, NOW);
+    const oneZero = JSON.parse(await readFile(path, "utf8"));
+    await writeFile(path, JSON.stringify({ version: 1, entries: oneZero.entries }));
+    const after = await loadJournal(path);
+    assert.deepEqual([after[KEY].note, after[KEY].source], ["again", undefined]);
+  });
+});
+
+test("journal: a sources map that names an entry that is not there, or a mark that is not 'draft', is ignored", async () => {
+  await withDir(async (path) => {
+    await logSession({ workoutKey: KEY, note: "x" }, path, NOW);
+    const raw = JSON.parse(await readFile(path, "utf8"));
+    await writeFile(path, JSON.stringify({ ...raw, sources: { [KEY]: "other", "5e1f7c0de0000000000000ff": "draft" } }));
+    const j = await loadJournal(path);
+    assert.deepEqual(Object.keys(j), [KEY]);
+    assert.equal(j[KEY].source, undefined);
+  });
+});

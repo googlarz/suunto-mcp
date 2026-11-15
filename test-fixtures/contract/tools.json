@@ -105,6 +105,26 @@
       "readOnlyHint": true
     }
   },
+  "analyze_experiment": {
+    "inputSchema": {
+      "properties": {
+        "early": {
+          "default": false,
+          "type": "boolean"
+        },
+        "id": {
+          "maxLength": 20,
+          "minLength": 2,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true
+    }
+  },
   "archive_workouts": {
     "inputSchema": {
       "properties": {
@@ -184,6 +204,55 @@
       "idempotentHint": true,
       "openWorldHint": true,
       "readOnlyHint": false
+    }
+  },
+  "draft_session_log": {
+    "inputSchema": {
+      "properties": {
+        "date": {
+          "format": "date",
+          "maxLength": 10,
+          "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "plan": {
+          "items": {
+            "properties": {
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "restSec": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "sets": {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "workoutKey": {
+          "maxLength": 24,
+          "minLength": 24,
+          "pattern": "^[0-9a-fA-F]{24}$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true
     }
   },
   "estimate_route_time": {
@@ -499,6 +568,22 @@
       "readOnlyHint": true
     }
   },
+  "get_experiment": {
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "maxLength": 20,
+          "minLength": 2,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true
+    }
+  },
   "get_plan": {
     "inputSchema": {
       "properties": {
@@ -510,6 +595,16 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true
+    }
+  },
+  "get_prediction_stats": {
+    "inputSchema": {
+      "properties": {},
       "type": "object"
     },
     "annotations": {
@@ -918,6 +1013,114 @@
       "readOnlyHint": true
     }
   },
+  "log_experiment_day": {
+    "inputSchema": {
+      "properties": {
+        "date": {
+          "format": "date",
+          "maxLength": 10,
+          "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "followed": {
+          "type": "boolean"
+        },
+        "id": {
+          "maxLength": 20,
+          "minLength": 2,
+          "type": "string"
+        },
+        "note": {
+          "maxLength": 500,
+          "type": "string"
+        }
+      },
+      "required": [
+        "followed"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    }
+  },
+  "log_prediction": {
+    "inputSchema": {
+      "properties": {
+        "date": {
+          "format": "date",
+          "maxLength": 10,
+          "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "exercise": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kg": {
+          "maximum": 1000,
+          "minimum": 0,
+          "type": "number"
+        },
+        "kind": {
+          "enum": [
+            "reps_hit",
+            "hrv_in_band",
+            "recovery_morning_at_least",
+            "session_done"
+          ],
+          "type": "string"
+        },
+        "note": {
+          "maxLength": 500,
+          "type": "string"
+        },
+        "probability": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "reps": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "rule": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sets": {
+          "maximum": 20,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "threshold": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "date",
+        "kind",
+        "probability"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    }
+  },
   "log_session": {
     "inputSchema": {
       "additionalProperties": false,
@@ -975,6 +1178,12 @@
         },
         "note": {
           "maxLength": 500,
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "draft"
+          ],
           "type": "string"
         },
         "tags": {
@@ -1342,6 +1551,23 @@
       "readOnlyHint": false
     }
   },
+  "score_predictions": {
+    "inputSchema": {
+      "properties": {
+        "rescoreUnresolvable": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    }
+  },
   "set_plan": {
     "inputSchema": {
       "properties": {
@@ -1528,6 +1754,111 @@
       "readOnlyHint": false
     }
   },
+  "start_experiment": {
+    "inputSchema": {
+      "properties": {
+        "control": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        "days": {
+          "maximum": 60,
+          "minimum": 14,
+          "type": "integer"
+        },
+        "eligible": {
+          "items": {
+            "enum": [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat",
+              "sun"
+            ],
+            "type": "string"
+          },
+          "maxItems": 7,
+          "type": "array"
+        },
+        "intervention": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        "metric": {
+          "enum": [
+            "sleepDurationS",
+            "sleepScore",
+            "hrv",
+            "recoveryMorning"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        "startDate": {
+          "format": "date",
+          "maxLength": 10,
+          "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "washout": {
+          "default": 0,
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "intervention",
+        "control",
+        "metric",
+        "days"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    }
+  },
+  "stop_experiment": {
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "maxLength": 20,
+          "minLength": 2,
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    }
+  },
   "upload_route": {
     "inputSchema": {
       "properties": {
@@ -1593,6 +1924,33 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": true,
+      "readOnlyHint": false
+    }
+  },
+  "void_prediction": {
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "maxLength": 20,
+          "minLength": 2,
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false,
       "readOnlyHint": false
     }
   }
