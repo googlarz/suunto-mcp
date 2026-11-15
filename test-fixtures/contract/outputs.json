@@ -1,0 +1,1556 @@
+{
+  "adjust_guide": {
+    "adjusted": "boolean",
+    "changes": [
+      {
+        "exercise": "string",
+        "from": {
+          "detail": "string",
+          "sets": "number"
+        },
+        "to": {
+          "detail": "string",
+          "sets": "number"
+        }
+      }
+    ],
+    "demo": "boolean",
+    "guide": {
+      "date": "string",
+      "exercises": [
+        {
+          "detail": "string",
+          "name": "string",
+          "restSec": "number",
+          "sets": "number"
+        }
+      ],
+      "title": "string"
+    },
+    "level": "string",
+    "reasons": [
+      "string"
+    ],
+    "signals": {
+      "hrv": "string",
+      "recoveryMorning": "string"
+    }
+  },
+  "compare_workout_to_plan": {
+    "afterComplete": [],
+    "baselineHr": "number",
+    "checks": [],
+    "cols": {
+      "lap": [
+        "string"
+      ],
+      "prep": [
+        "string"
+      ],
+      "rest": [
+        "string"
+      ],
+      "set": [
+        "string"
+      ]
+    },
+    "complete": "boolean",
+    "demo": "boolean",
+    "deviations": [],
+    "exercises": [
+      {
+        "detail": "string",
+        "n": "number",
+        "name": "string",
+        "plan": "null",
+        "planned": {
+          "restS": "number",
+          "sets": "number"
+        },
+        "prep": [
+          "number"
+        ],
+        "rests": [
+          [
+            "number"
+          ]
+        ],
+        "sets": [
+          [
+            "number"
+          ]
+        ]
+      }
+    ],
+    "format": "string",
+    "guide": {
+      "id": "string",
+      "name": "string"
+    },
+    "lapCount": "number",
+    "note": "null",
+    "reliable": "boolean",
+    "restMode": "string",
+    "status": "string",
+    "unattributed": [],
+    "workoutKey": "string"
+  },
+  "estimate_route_time": {
+    "activity": "string",
+    "assumptions": [
+      "string"
+    ],
+    "basis": "string",
+    "demo": "boolean",
+    "estimate": {
+      "byKind": {
+        "ascent": {
+          "distanceM": "number",
+          "timeS": "number"
+        },
+        "descent": {
+          "distanceM": "number",
+          "timeS": "number"
+        },
+        "flat": {
+          "distanceM": "number",
+          "timeS": "number"
+        }
+      },
+      "outsideRangeM": "number",
+      "splits": [
+        {
+          "ascentM": "number",
+          "descentM": "number",
+          "distanceM": "number",
+          "kind": "string",
+          "outsideRangeM": "number",
+          "startM": "number",
+          "timeS": "number"
+        }
+      ],
+      "totalTime": "string",
+      "totalTimeS": "number"
+    },
+    "latestStart": "null",
+    "model": {
+      "ascentM": "number",
+      "descentM": "number",
+      "distanceM": "number",
+      "reason": "string",
+      "skipped": {
+        "noMotionData": "number",
+        "otherSport": "number",
+        "unreadable": "number"
+      },
+      "status": "string",
+      "workoutsConsidered": "number",
+      "workoutsUsed": "number"
+    },
+    "notes": [
+      "string"
+    ],
+    "route": {
+      "ascentM": "number",
+      "descentM": "number",
+      "distanceM": "number",
+      "hasElevation": "boolean",
+      "name": "string",
+      "points": "number"
+    }
+  },
+  "export_route": {
+    "data": "string",
+    "demo": "boolean"
+  },
+  "forecast_training_load": {
+    "asOf": "string",
+    "demo": "boolean",
+    "notes": [
+      "string"
+    ],
+    "series": [
+      {
+        "atl": "number",
+        "ctl": "number",
+        "date": "string",
+        "tsb": "number",
+        "tss": "number"
+      }
+    ],
+    "start": {
+      "atl": "number",
+      "ctl": "number",
+      "tsb": "number"
+    }
+  },
+  "get_archive_status": {
+    "archived": "number",
+    "demo": "boolean",
+    "dir": "null",
+    "fitBytes": "number",
+    "incomplete": [],
+    "newest": "null",
+    "notes": [
+      "string"
+    ],
+    "oldest": "null",
+    "otherFiles": "number",
+    "problems": []
+  },
+  "get_baselines": {
+    "date": "string",
+    "days": "number",
+    "demo": "boolean",
+    "errors": [],
+    "from": "string",
+    "metrics": {
+      "hrv": {
+        "last7Median": "number",
+        "latest": "number",
+        "latestVsBand": "string",
+        "median": "number",
+        "n": "number",
+        "p25": "number",
+        "p75": "number"
+      },
+      "recoveryLow": {
+        "last7Median": "number",
+        "latest": "null",
+        "latestVsBand": "null",
+        "median": "number",
+        "n": "number",
+        "p25": "number",
+        "p75": "number"
+      },
+      "recoveryMorning": {
+        "last7Median": "number",
+        "latest": "number",
+        "latestVsBand": "string",
+        "median": "number",
+        "n": "number",
+        "p25": "number",
+        "p75": "number"
+      },
+      "sleepDurationS": {
+        "last7Median": "number",
+        "latest": "number",
+        "latestVsBand": "string",
+        "median": "number",
+        "n": "number",
+        "p25": "number",
+        "p75": "number"
+      },
+      "sleepScore": {
+        "last7Median": "number",
+        "latest": "number",
+        "latestVsBand": "string",
+        "median": "number",
+        "n": "number",
+        "p25": "number",
+        "p75": "number"
+      },
+      "steps": {
+        "last7Median": "number",
+        "latest": "null",
+        "latestVsBand": "null",
+        "median": "number",
+        "n": "number",
+        "p25": "number",
+        "p75": "number"
+      }
+    },
+    "notes": [
+      "string"
+    ],
+    "to": "string"
+  },
+  "get_benchmark": {
+    "demo": "boolean",
+    "errors": [],
+    "from": "string",
+    "mode": "string",
+    "name": "string",
+    "notes": [
+      "string"
+    ],
+    "occurrences": "number",
+    "pending": "number",
+    "series": {
+      "durationS": {
+        "best": "number",
+        "better": "string",
+        "change": "number",
+        "first": "number",
+        "last": "number",
+        "n": "number",
+        "trend": "string"
+      },
+      "exercises": [
+        {
+          "kg": {
+            "best": "number",
+            "better": "string",
+            "change": "number",
+            "first": "number",
+            "last": "number",
+            "n": "number",
+            "trend": "string"
+          },
+          "name": "string",
+          "reps": {
+            "best": "number",
+            "better": "string",
+            "change": "number",
+            "first": "number",
+            "last": "number",
+            "n": "number",
+            "trend": "string"
+          },
+          "restEndHr": {
+            "best": "number",
+            "better": "string",
+            "change": "number",
+            "first": "number",
+            "last": "number",
+            "n": "number",
+            "trend": "string"
+          }
+        }
+      ],
+      "restEndHrMedian": {
+        "best": "number",
+        "better": "string",
+        "change": "number",
+        "first": "number",
+        "last": "number",
+        "n": "number",
+        "trend": "string"
+      },
+      "tss": {
+        "best": "null",
+        "better": "null",
+        "change": "number",
+        "first": "number",
+        "last": "number",
+        "n": "number",
+        "trend": "string"
+      }
+    },
+    "sessions": [
+      {
+        "date": "string",
+        "durationS": "number",
+        "exercises": [
+          {
+            "detail": "string",
+            "kg": "number",
+            "loadSource": "string",
+            "name": "string",
+            "parts": "number",
+            "plannedSets": "number",
+            "reliable": "boolean",
+            "reps": "number",
+            "restEndHr": "number",
+            "setsDone": "number"
+          }
+        ],
+        "guide": "string",
+        "restEndHrMedian": "number",
+        "tss": "number",
+        "workoutKey": "string"
+      }
+    ],
+    "to": "string"
+  },
+  "get_benchmark#exercise": {
+    "demo": "boolean",
+    "errors": [],
+    "from": "string",
+    "mode": "string",
+    "name": "string",
+    "notes": [
+      "string"
+    ],
+    "occurrences": "number",
+    "pending": "number",
+    "series": {
+      "durationS": {
+        "best": "number",
+        "better": "string",
+        "change": "number",
+        "first": "number",
+        "last": "number",
+        "n": "number",
+        "trend": "string"
+      },
+      "exercises": [
+        {
+          "kg": {
+            "best": "number",
+            "better": "string",
+            "change": "number",
+            "first": "number",
+            "last": "number",
+            "n": "number",
+            "trend": "string"
+          },
+          "name": "string",
+          "reps": {
+            "best": "number",
+            "better": "string",
+            "change": "number",
+            "first": "number",
+            "last": "number",
+            "n": "number",
+            "trend": "string"
+          },
+          "restEndHr": {
+            "best": "number",
+            "better": "string",
+            "change": "number",
+            "first": "number",
+            "last": "number",
+            "n": "number",
+            "trend": "string"
+          }
+        }
+      ],
+      "restEndHrMedian": {
+        "best": "number",
+        "better": "string",
+        "change": "number",
+        "first": "number",
+        "last": "number",
+        "n": "number",
+        "trend": "string"
+      },
+      "tss": {
+        "best": "null",
+        "better": "null",
+        "change": "number",
+        "first": "number",
+        "last": "number",
+        "n": "number",
+        "trend": "string"
+      }
+    },
+    "sessions": [
+      {
+        "date": "string",
+        "durationS": "number",
+        "exercises": [
+          {
+            "detail": "string",
+            "kg": "number",
+            "loadSource": "string",
+            "name": "string",
+            "parts": "number",
+            "plannedSets": "number",
+            "reliable": "boolean",
+            "reps": "number",
+            "restEndHr": "number",
+            "setsDone": "number"
+          }
+        ],
+        "guide": "string",
+        "restEndHrMedian": "number",
+        "tss": "number",
+        "workoutKey": "string"
+      }
+    ],
+    "to": "string"
+  },
+  "get_catchup": {
+    "daysSinceLastSession": "number",
+    "demo": "boolean",
+    "errors": [],
+    "lastSessionDate": "string",
+    "markSeen": "boolean",
+    "marked": "boolean",
+    "newNights": [
+      {
+        "avgHrv": "number",
+        "bedtimeEnd": "string",
+        "bedtimeStart": "string",
+        "durationS": "number",
+        "recoveryOnWaking": {
+          "at": "string",
+          "balance": "number"
+        },
+        "score": "number"
+      }
+    ],
+    "newWorkouts": [
+      {
+        "activityId": "number",
+        "date": "string",
+        "guide": "null|string",
+        "hasLaps": "boolean",
+        "hrAvg": "number",
+        "hrMax": "number",
+        "kcal": "number",
+        "startLocal": "string",
+        "totalTimeS": "number",
+        "tss": "number",
+        "workoutKey": "string"
+      }
+    ],
+    "notes": [
+      "string"
+    ],
+    "plan": "null",
+    "recovery": {
+      "high": {
+        "at": "string",
+        "balance": "number"
+      },
+      "latest": {
+        "at": "string",
+        "balance": "number"
+      },
+      "low": {
+        "at": "string",
+        "balance": "number"
+      },
+      "newSamples": "number"
+    },
+    "since": {
+      "firstCall": "boolean",
+      "from": "string"
+    },
+    "today": "string"
+  },
+  "get_daily_activity": {
+    "data": [
+      {
+        "entryData": {
+          "EnergyConsumption": "number",
+          "HR": "number",
+          "StepCount": "number"
+        },
+        "timestamp": "string"
+      }
+    ],
+    "demo": "boolean"
+  },
+  "get_daily_activity_statistics": {
+    "data": [
+      {
+        "Aggregation": "string",
+        "Name": "string",
+        "Sources": [
+          {
+            "Samples": [
+              {
+                "TimeISO8601": "string",
+                "Value": "number"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "demo": "boolean"
+  },
+  "get_daily_snapshot": {
+    "activity": {
+      "energyKcal": "number",
+      "steps": "number"
+    },
+    "date": "string",
+    "demo": "boolean",
+    "errors": [],
+    "recovery": {
+      "atBedtime": {
+        "at": "string",
+        "balance": "number"
+      },
+      "first": "number",
+      "high": {
+        "at": "string",
+        "balance": "number"
+      },
+      "last": "number",
+      "low": {
+        "at": "string",
+        "balance": "number"
+      },
+      "morning": {
+        "at": "string",
+        "balance": "number"
+      },
+      "samples": "number",
+      "stressStateSamples": {
+        "1": "number",
+        "2": "number"
+      }
+    },
+    "sleep": {
+      "main": {
+        "avgHrv": "number",
+        "bedtimeEnd": "string",
+        "bedtimeStart": "string",
+        "deepS": "number",
+        "durationS": "number",
+        "hrAvg": "number",
+        "hrMin": "number",
+        "isNap": "boolean",
+        "latencyS": "number",
+        "lightS": "number",
+        "remS": "number",
+        "score": "number",
+        "sleepId": "number",
+        "spo2Max": "number",
+        "wakeBeforeOffBedS": "number",
+        "wasoS": "number"
+      },
+      "naps": [],
+      "nightSleepS": "number",
+      "otherNights": []
+    },
+    "sleepNightOf": "string",
+    "workouts": []
+  },
+  "get_exercise_history": {
+    "demo": "boolean",
+    "errors": [],
+    "exercises": [
+      {
+        "lastDate": "string",
+        "lastDetail": "string",
+        "name": "string",
+        "sessions": "number"
+      }
+    ],
+    "from": "string",
+    "notes": [
+      "string"
+    ],
+    "pending": "number",
+    "sessions": "number",
+    "to": "string"
+  },
+  "get_exercise_history#one-exercise": {
+    "demo": "boolean",
+    "errors": [],
+    "from": "string",
+    "name": "string",
+    "notes": [
+      "string"
+    ],
+    "pending": "number",
+    "sessions": {
+      "cols": [
+        "string"
+      ],
+      "rows": [
+        [
+          {
+            "$oneOf": [
+              {
+                "$oneOf": [
+                  {
+                    "$oneOf": [
+                      {
+                        "$oneOf": [
+                          {
+                            "$oneOf": [
+                              "number|string",
+                              {
+                                "$oneOf": [
+                                  "boolean",
+                                  {
+                                    "$oneOf": [
+                                      "null",
+                                      {
+                                        "$oneOf": [
+                                          {
+                                            "$oneOf": [
+                                              {
+                                                "$oneOf": [
+                                                  {
+                                                    "$oneOf": [
+                                                      "number|string",
+                                                      {
+                                                        "$oneOf": [
+                                                          "boolean",
+                                                          {
+                                                            "$oneOf": [
+                                                              "null",
+                                                              {
+                                                                "$oneOf": [
+                                                                  {
+                                                                    "$oneOf": [
+                                                                      {
+                                                                        "$oneOf": [
+                                                                          {
+                                                                            "$oneOf": [
+                                                                              "number|string",
+                                                                              {
+                                                                                "$oneOf": [
+                                                                                  "boolean",
+                                                                                  {
+                                                                                    "$oneOf": [
+                                                                                      "null",
+                                                                                      {
+                                                                                        "$oneOf": [
+                                                                                          {
+                                                                                            "$oneOf": [
+                                                                                              {
+                                                                                                "$oneOf": [
+                                                                                                  {
+                                                                                                    "$oneOf": [
+                                                                                                      "number|string",
+                                                                                                      {
+                                                                                                        "$oneOf": [
+                                                                                                          "boolean",
+                                                                                                          {
+                                                                                                            "$oneOf": [
+                                                                                                              "null",
+                                                                                                              {
+                                                                                                                "$oneOf": [
+                                                                                                                  {
+                                                                                                                    "$oneOf": [
+                                                                                                                      {
+                                                                                                                        "$oneOf": [
+                                                                                                                          {
+                                                                                                                            "$oneOf": [
+                                                                                                                              "number|string",
+                                                                                                                              {
+                                                                                                                                "$oneOf": [
+                                                                                                                                  "boolean",
+                                                                                                                                  {
+                                                                                                                                    "$oneOf": [
+                                                                                                                                      "null",
+                                                                                                                                      {
+                                                                                                                                        "$oneOf": [
+                                                                                                                                          {
+                                                                                                                                            "$oneOf": [
+                                                                                                                                              {
+                                                                                                                                                "$oneOf": [
+                                                                                                                                                  {
+                                                                                                                                                    "$oneOf": [
+                                                                                                                                                      "number|string",
+                                                                                                                                                      {
+                                                                                                                                                        "$oneOf": [
+                                                                                                                                                          "boolean",
+                                                                                                                                                          {
+                                                                                                                                                            "$oneOf": [
+                                                                                                                                                              "null",
+                                                                                                                                                              {
+                                                                                                                                                                "$oneOf": [
+                                                                                                                                                                  {
+                                                                                                                                                                    "$oneOf": [
+                                                                                                                                                                      {
+                                                                                                                                                                        "$oneOf": [
+                                                                                                                                                                          {
+                                                                                                                                                                            "$oneOf": [
+                                                                                                                                                                              "number|string",
+                                                                                                                                                                              {
+                                                                                                                                                                                "$oneOf": [
+                                                                                                                                                                                  "boolean",
+                                                                                                                                                                                  {
+                                                                                                                                                                                    "$oneOf": [
+                                                                                                                                                                                      "null",
+                                                                                                                                                                                      {
+                                                                                                                                                                                        "$oneOf": [
+                                                                                                                                                                                          "null",
+                                                                                                                                                                                          {
+                                                                                                                                                                                            "$oneOf": [
+                                                                                                                                                                                              "boolean",
+                                                                                                                                                                                              {
+                                                                                                                                                                                                "$oneOf": [
+                                                                                                                                                                                                  "number|string",
+                                                                                                                                                                                                  []
+                                                                                                                                                                                                ]
+                                                                                                                                                                                              }
+                                                                                                                                                                                            ]
+                                                                                                                                                                                          }
+                                                                                                                                                                                        ]
+                                                                                                                                                                                      }
+                                                                                                                                                                                    ]
+                                                                                                                                                                                  }
+                                                                                                                                                                                ]
+                                                                                                                                                                              }
+                                                                                                                                                                            ]
+                                                                                                                                                                          },
+                                                                                                                                                                          []
+                                                                                                                                                                        ]
+                                                                                                                                                                      }
+                                                                                                                                                                    ]
+                                                                                                                                                                  }
+                                                                                                                                                                ]
+                                                                                                                                                              }
+                                                                                                                                                            ]
+                                                                                                                                                          }
+                                                                                                                                                        ]
+                                                                                                                                                      }
+                                                                                                                                                    ]
+                                                                                                                                                  },
+                                                                                                                                                  []
+                                                                                                                                                ]
+                                                                                                                                              }
+                                                                                                                                            ]
+                                                                                                                                          }
+                                                                                                                                        ]
+                                                                                                                                      }
+                                                                                                                                    ]
+                                                                                                                                  }
+                                                                                                                                ]
+                                                                                                                              }
+                                                                                                                            ]
+                                                                                                                          },
+                                                                                                                          []
+                                                                                                                        ]
+                                                                                                                      }
+                                                                                                                    ]
+                                                                                                                  }
+                                                                                                                ]
+                                                                                                              }
+                                                                                                            ]
+                                                                                                          }
+                                                                                                        ]
+                                                                                                      }
+                                                                                                    ]
+                                                                                                  },
+                                                                                                  []
+                                                                                                ]
+                                                                                              }
+                                                                                            ]
+                                                                                          }
+                                                                                        ]
+                                                                                      }
+                                                                                    ]
+                                                                                  }
+                                                                                ]
+                                                                              }
+                                                                            ]
+                                                                          },
+                                                                          []
+                                                                        ]
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  },
+                                                  []
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          [
+                            "string"
+                          ]
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "suggestion": {
+      "last": "string",
+      "reason": "string",
+      "target": "string"
+    },
+    "summary": {
+      "firstLoadKg": "number",
+      "lastLoadKg": "number",
+      "restEndHrMedian": "number",
+      "sessions": "number"
+    },
+    "to": "string"
+  },
+  "get_plan": {
+    "demo": "boolean",
+    "note": "string",
+    "plan": "null",
+    "today": "string"
+  },
+  "get_recovery": {
+    "data": [
+      {
+        "entryData": {
+          "Balance": "number",
+          "StressState": "number"
+        },
+        "timestamp": "string"
+      }
+    ],
+    "demo": "boolean"
+  },
+  "get_route": {
+    "activityIds": [
+      "number"
+    ],
+    "averageSpeed": "number",
+    "centerPoint": {
+      "altitude": "number",
+      "latitude": "number",
+      "longitude": "number"
+    },
+    "created": "number",
+    "demo": "boolean",
+    "description": "string",
+    "endPoint": {
+      "altitude": "number",
+      "latitude": "number",
+      "longitude": "number"
+    },
+    "id": "string",
+    "modified": "number",
+    "startPoint": {
+      "altitude": "number",
+      "latitude": "number",
+      "longitude": "number"
+    },
+    "totalDistance": "number",
+    "turnWaypointsEnabled": "boolean",
+    "visibility": "string",
+    "watchEnabled": "boolean"
+  },
+  "get_sleep": {
+    "data": [
+      {
+        "entryData": {
+          "AvgHRV": "number",
+          "BedtimeEnd": "string",
+          "BedtimeStart": "string",
+          "DeepSleepDuration": "number",
+          "Duration": "number",
+          "HRAvg": "number",
+          "HRMin": "number",
+          "IsNap": "boolean",
+          "LightSleepDuration": "number",
+          "MaxSpo2": "number",
+          "REMSleepDuration": "number",
+          "SleepId": "number",
+          "SleepOnsetLatencyDuration": "number",
+          "SleepQualityScore": "number",
+          "WakeAfterSleepOnsetDuration": "number",
+          "WakeBeforeOffBedDuration": "number"
+        },
+        "timestamp": "string"
+      }
+    ],
+    "demo": "boolean"
+  },
+  "get_tag_effects": {
+    "date": "string",
+    "demo": "boolean",
+    "errors": [],
+    "from": "string",
+    "journal": {
+      "entries": "number",
+      "ignored": "number"
+    },
+    "nights": "number",
+    "notes": [
+      "string"
+    ],
+    "sessionDays": "number",
+    "tags": [
+      {
+        "metrics": {
+          "hrv": {
+            "controlIqr": "number",
+            "controlMedian": "number",
+            "meanDiff": "number",
+            "medianDiff": "number",
+            "nControl": "number",
+            "nTagged": "number",
+            "noiseThreshold": "number",
+            "taggedMedian": "number",
+            "verdict": "string"
+          },
+          "recoveryMorning": {
+            "controlIqr": "number",
+            "controlMedian": "number",
+            "meanDiff": "number",
+            "medianDiff": "number",
+            "nControl": "number",
+            "nTagged": "number",
+            "noiseThreshold": "number",
+            "taggedMedian": "number",
+            "verdict": "string"
+          },
+          "sleepDurationS": {
+            "controlIqr": "number",
+            "controlMedian": "number",
+            "meanDiff": "number",
+            "medianDiff": "number",
+            "nControl": "number",
+            "nTagged": "number",
+            "noiseThreshold": "number",
+            "taggedMedian": "number",
+            "verdict": "string"
+          },
+          "sleepScore": {
+            "controlIqr": "number",
+            "controlMedian": "number",
+            "meanDiff": "number",
+            "medianDiff": "number",
+            "nControl": "number",
+            "nTagged": "number",
+            "noiseThreshold": "number",
+            "taggedMedian": "number",
+            "verdict": "string"
+          }
+        },
+        "statement": "string",
+        "tag": "string",
+        "taggedNights": "number",
+        "taggedSessions": "number",
+        "untaggedNights": "number",
+        "verdict": "string"
+      }
+    ],
+    "thresholds": {
+      "compared": "string",
+      "k": "number",
+      "metricsTested": "number",
+      "minTaggedNights": "number",
+      "minUntaggedNights": "number",
+      "rule": "string"
+    },
+    "to": "string"
+  },
+  "get_training_load": {
+    "current": {
+      "atl": "number",
+      "ctl": "number",
+      "rampRate7d": "number",
+      "tsb": "number"
+    },
+    "demo": "boolean",
+    "from": "string",
+    "notes": [
+      "string"
+    ],
+    "series": [
+      {
+        "atl": "number",
+        "ctl": "number",
+        "date": "string",
+        "tsb": "number",
+        "tss": "number"
+      }
+    ],
+    "to": "string",
+    "weeks": [
+      {
+        "durationS": "number",
+        "tss": "number",
+        "weekStart": "string",
+        "workouts": "number"
+      }
+    ]
+  },
+  "get_weekly_report": {
+    "demo": "boolean",
+    "errors": [],
+    "load": {
+      "asOf": "string",
+      "atl": "number",
+      "ctl": "number",
+      "flags": {
+        "limitReached": "boolean",
+        "littleHistory": "boolean"
+      },
+      "notes": [
+        "string"
+      ],
+      "previousWeekTss": "number",
+      "rampRate7d": "number",
+      "tsb": "number",
+      "weekTss": "number"
+    },
+    "markdown": "string",
+    "notes": [
+      "string"
+    ],
+    "plan": "null",
+    "recovery": {
+      "baselineFrom": "string",
+      "baselineTo": "string",
+      "metrics": {
+        "hrv": {
+          "baseline": {
+            "median": "number",
+            "n": "number",
+            "p25": "number",
+            "p75": "number"
+          },
+          "median": "number",
+          "n": "number",
+          "unavailable": "boolean",
+          "vsBaseline": "string"
+        },
+        "recoveryMorning": {
+          "baseline": {
+            "median": "number",
+            "n": "number",
+            "p25": "number",
+            "p75": "number"
+          },
+          "median": "number",
+          "n": "number",
+          "unavailable": "boolean",
+          "vsBaseline": "string"
+        },
+        "sleepDurationS": {
+          "baseline": {
+            "median": "number",
+            "n": "number",
+            "p25": "number",
+            "p75": "number"
+          },
+          "median": "number",
+          "n": "number",
+          "unavailable": "boolean",
+          "vsBaseline": "string"
+        },
+        "sleepScore": {
+          "baseline": {
+            "median": "number",
+            "n": "number",
+            "p25": "number",
+            "p75": "number"
+          },
+          "median": "number",
+          "n": "number",
+          "unavailable": "boolean",
+          "vsBaseline": "string"
+        },
+        "steps": {
+          "baseline": {
+            "median": "number",
+            "n": "number",
+            "p25": "number",
+            "p75": "number"
+          },
+          "median": "number",
+          "n": "number",
+          "unavailable": "boolean",
+          "vsBaseline": "string"
+        }
+      },
+      "stepsDays": "number",
+      "stepsTotal": "number"
+    },
+    "saved": "null",
+    "strength": {
+      "exercises": [
+        {
+          "lastDetail": "string",
+          "name": "string",
+          "sessions": "number"
+        }
+      ],
+      "pending": "number",
+      "sessions": "number"
+    },
+    "tagEffects": {
+      "insufficientTags": "number",
+      "minNightsPerGroup": "number",
+      "tags": [],
+      "window": {
+        "from": "string",
+        "to": "string"
+      }
+    },
+    "week": {
+      "from": "string",
+      "to": "string"
+    },
+    "workouts": {
+      "count": "number",
+      "days": [
+        {
+          "date": "string",
+          "sessions": [
+            {
+              "guide": "null|string",
+              "startLocal": "string",
+              "totalTimeS": "number",
+              "tss": "number"
+            }
+          ]
+        }
+      ],
+      "kcal": "number",
+      "noTss": "number",
+      "restDays": "number",
+      "totalTimeS": "number",
+      "tss": "number"
+    }
+  },
+  "get_workout": {
+    "demo": "boolean",
+    "error": "null",
+    "metadata": {},
+    "payload": {
+      "activityId": "number",
+      "energyConsumption": "number",
+      "extensionTypes": [
+        "string"
+      ],
+      "hrdata": {
+        "avg": "number",
+        "max": "number",
+        "workoutAvgHR": "number",
+        "workoutMaxHR": "number"
+      },
+      "recoveryTime": "number",
+      "startTime": "number",
+      "stopTime": "number",
+      "timeOffsetInMinutes": "number",
+      "totalAscent": "number",
+      "totalDescent": "number",
+      "totalDistance": "number",
+      "totalTime": "number",
+      "tss": {
+        "calculationMethod": "string",
+        "trainingStressScore": "number"
+      },
+      "tssList": [
+        {
+          "calculationMethod": "string",
+          "trainingStressScore": "number"
+        }
+      ],
+      "workoutKey": "string"
+    }
+  },
+  "get_workout_fit": {
+    "avg_heart_rate": "number",
+    "demo": "boolean",
+    "developer": "null",
+    "laps": "number",
+    "max_heart_rate": "number",
+    "records_sample": {
+      "count": "number",
+      "first": {
+        "elapsed_time": "number",
+        "heart_rate": "number",
+        "timer_time": "number",
+        "timestamp": "string"
+      },
+      "last": {
+        "elapsed_time": "number",
+        "heart_rate": "number",
+        "timer_time": "number",
+        "timestamp": "string"
+      },
+      "middle": {
+        "elapsed_time": "number",
+        "heart_rate": "number",
+        "timer_time": "number",
+        "timestamp": "string"
+      }
+    },
+    "sport": "string",
+    "start_time": "string",
+    "sub_sport": "string",
+    "total_calories": "number",
+    "total_distance_km": "number",
+    "total_elapsed_time_s": "number",
+    "total_timer_time_s": "number"
+  },
+  "get_workout_laps": {
+    "activityId": "number",
+    "checks": [],
+    "demo": "boolean",
+    "feeling": "null",
+    "guide": {
+      "id": "string",
+      "name": "string"
+    },
+    "hrZoneTimeS": [
+      "number"
+    ],
+    "lapCount": "number",
+    "laps": {
+      "cols": [
+        "string"
+      ],
+      "rows": [
+        [
+          "number|string"
+        ]
+      ]
+    },
+    "peakEpoc": "number",
+    "pte": "number",
+    "recoveryTime": "number",
+    "startTime": "number",
+    "totalTimeS": "number",
+    "tss": [
+      {
+        "method": "string",
+        "value": "number"
+      }
+    ],
+    "workoutKey": "string"
+  },
+  "get_workout_rest_profile": {
+    "alignment": {
+      "fitStartMs": "number",
+      "lapStartTimeMs": "number",
+      "startSkewS": "number",
+      "workoutStartSource": "string"
+    },
+    "demo": "boolean",
+    "developer": "null",
+    "hrQuality": {
+      "coverage": "number",
+      "reasons": [],
+      "reliable": "boolean"
+    },
+    "note": "null",
+    "perExercise": [
+      {
+        "medianEndHr": "number",
+        "medianRecoveryBpmPerMin": "number",
+        "medianT20S": "number",
+        "n": "number",
+        "name": "string"
+      }
+    ],
+    "reliable": "boolean",
+    "restMode": "string",
+    "rests": [
+      {
+        "actualDurationS": "number",
+        "coverage": "number",
+        "dropTotal": "number",
+        "endHr": "number",
+        "exercise": "string",
+        "exerciseN": "number",
+        "note": "null",
+        "peakAtS": "number",
+        "peakHr": "number",
+        "plannedRestS": "number",
+        "recoveryBpmPerMin": "number",
+        "sampleCount": "number",
+        "set": "number",
+        "t10S": "number",
+        "t20S": "number",
+        "t30S": "null|number"
+      }
+    ],
+    "status": "string",
+    "workoutKey": "string"
+  },
+  "list_daily_activity": {
+    "data": [
+      {
+        "entryData": {
+          "EnergyConsumption": "number",
+          "HR": "number",
+          "StepCount": "number"
+        },
+        "timestamp": "string"
+      }
+    ],
+    "demo": "boolean"
+  },
+  "list_guides": {
+    "demo": "boolean",
+    "error": "null",
+    "metadata": {
+      "ts": "string"
+    },
+    "payload": [
+      {
+        "activities": "null",
+        "backgroundUrl": "null",
+        "catalogueId": "null",
+        "description": "string",
+        "extended": "null",
+        "externalId": "null",
+        "fileModificationTime": "number",
+        "iconUrl": "null",
+        "id": "string",
+        "localDate": "string",
+        "modificationTime": "number",
+        "name": "string",
+        "owner": "string",
+        "ownerId": "null",
+        "pinned": "boolean",
+        "richText": "null",
+        "shortDescription": "string",
+        "type": "string",
+        "url": "null",
+        "usage": "string",
+        "username": "string"
+      }
+    ]
+  },
+  "list_recovery": {
+    "data": [
+      {
+        "entryData": {
+          "Balance": "number",
+          "StressState": "number"
+        },
+        "timestamp": "string"
+      }
+    ],
+    "demo": "boolean"
+  },
+  "list_routes": {
+    "data": [
+      {
+        "activityIds": [
+          "number"
+        ],
+        "averageSpeed": "number",
+        "centerPoint": {
+          "altitude": "number",
+          "latitude": "number",
+          "longitude": "number"
+        },
+        "created": "number",
+        "description": "string",
+        "endPoint": {
+          "altitude": "number",
+          "latitude": "number",
+          "longitude": "number"
+        },
+        "id": "string",
+        "modified": "number",
+        "startPoint": {
+          "altitude": "number",
+          "latitude": "number",
+          "longitude": "number"
+        },
+        "totalDistance": "number",
+        "turnWaypointsEnabled": "boolean",
+        "visibility": "string",
+        "watchEnabled": "boolean"
+      }
+    ],
+    "demo": "boolean"
+  },
+  "list_sleep": {
+    "data": [
+      {
+        "entryData": {
+          "AvgHRV": "number",
+          "BedtimeEnd": "string",
+          "BedtimeStart": "string",
+          "DeepSleepDuration": "number",
+          "Duration": "number",
+          "HRAvg": "number",
+          "HRMin": "number",
+          "IsNap": "boolean",
+          "LightSleepDuration": "number",
+          "MaxSpo2": "number",
+          "REMSleepDuration": "number",
+          "SleepId": "number",
+          "SleepOnsetLatencyDuration": "number",
+          "SleepQualityScore": "number",
+          "WakeAfterSleepOnsetDuration": "number",
+          "WakeBeforeOffBedDuration": "number"
+        },
+        "timestamp": "string"
+      }
+    ],
+    "demo": "boolean"
+  },
+  "list_workouts": {
+    "demo": "boolean",
+    "metadata": {
+      "count": "number"
+    },
+    "payload": [
+      {
+        "activityId": "number",
+        "energyConsumption": "number",
+        "extensionTypes": [
+          "string"
+        ],
+        "extensions": [
+          {
+            "apps": [
+              {
+                "authorId": "string",
+                "id": "string",
+                "name": "string"
+              }
+            ],
+            "feeling": "null",
+            "peakEpoc": "number",
+            "pte": "number",
+            "recoveryTime": "number",
+            "type": "string",
+            "zones": {
+              "heartRate": {
+                "zone1": {
+                  "totalTime": "number"
+                },
+                "zone2": {
+                  "totalTime": "number"
+                },
+                "zone3": {
+                  "totalTime": "number"
+                },
+                "zone4": {
+                  "totalTime": "number"
+                },
+                "zone5": {
+                  "totalTime": "number"
+                }
+              }
+            }
+          }
+        ],
+        "hrdata": {
+          "avg": "number",
+          "max": "number",
+          "workoutAvgHR": "number",
+          "workoutMaxHR": "number"
+        },
+        "recoveryTime": "number",
+        "startTime": "number",
+        "stopTime": "number",
+        "timeOffsetInMinutes": "number",
+        "totalAscent": "number",
+        "totalDescent": "number",
+        "totalDistance": "number",
+        "totalTime": "number",
+        "tss": {
+          "calculationMethod": "string",
+          "trainingStressScore": "number"
+        },
+        "tssList": [
+          {
+            "calculationMethod": "string",
+            "trainingStressScore": "number"
+          }
+        ],
+        "workoutKey": "string"
+      }
+    ]
+  }
+}

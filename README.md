@@ -524,12 +524,29 @@ Use your email address to sign in to apizone. Your username will appear once you
 
 ---
 
+## Known limits / not yet verified on real devices
+
+None of the following has been checked against a real watch or real Suunto files; the tests use synthetic data. Treat each as open until you have seen it work on your own. What stays stable from release to release, and what does not, is in [docs/CONTRACT.md](docs/CONTRACT.md).
+
+- **Guides on the watch.** How the `TODAY` popup (the `last` / `target` hint of `push_strength_guide`) and the newer step titles and popups (`3/6 - 2/3`, `SET 2/3`, `LAST SET`) render on a real watch has not been checked on a device.
+- **Guides dated in the future.** `push_week_plan` pushes guides up to 14 dates ahead. Whether the watch shows each one on its day, and when it appears after the phone's sync, has not been verified.
+- **Location-triggered guides.** Not implemented. Guides are pushed by date only.
+- **Units of `recoveryTime`, `pte` and `peakEpoc`.** Suunto does not document them, so `get_workout_laps` passes them through under their own names with no unit claimed.
+- **FIT checks.** The integrity check looks at the FIT header and the length only; the CRC is not checked. The heart-rate quality thresholds (coverage, dropout gaps, plausible range 30-230 bpm, stuck-sensor and jump rules) were set lenient on purpose and have not been validated on real Suunto files. The timebase alignment in `get_workout_rest_profile` and whether Suunto's FIT export carries the SuuntoPlus developer fields are likewise unverified.
+- **`get_tag_effects`.** Its false-alarm rates (roughly 9% of tags at 15 nights per group with no real difference, more when nights are correlated) come from a simulation, not from real nights. It reports an association, never a cause.
+- **`estimate_route_time`.** The model (flat pace plus extra time per metre climbed and descended, fitted to your archived workouts) has not been checked against real finished times; its in-sample error is a fit to the past, not a forecast. Without enough archived workouts it falls back to a generic rule that is not your pace.
+- **Daily calories.** The energy in `get_daily_activity_statistics` looks like active energy, not total; not verified against the watch.
+- **The `.mcpb` bundle.** Not opened in a real host, not signed, no automatic updates (see [One-click install](#one-click-install-mcpb-bundle)).
+- **Deleting a route.** Whether Suunto's API accepts a DELETE on a route is unconfirmed, and no tool offers it: remove routes in the Suunto app.
+
+---
+
 ## Upgrading
 
 - **npx:** `npx -y suunto-mcp` fetches the newest version on a fresh start; if you pinned a version in `args`, change it. Restart Claude afterwards.
 - **Cloned folder:** `git pull`, `npm install`, `npm run build`, then restart Claude.
 
-See [CHANGELOG.md](CHANGELOG.md) for what changed.
+See [CHANGELOG.md](CHANGELOG.md) for what changed. From 1.0 on, [docs/CONTRACT.md](docs/CONTRACT.md) says what stays compatible within 1.x (tool names, input schemas, documented output fields, local file formats) and what does not.
 
 ## Environment variables
 
