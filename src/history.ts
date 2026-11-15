@@ -203,7 +203,9 @@ function canonical(distinct: Map<string, { name: string; cut: boolean }>): { res
 const failedKeys = new Set<string>();
 export const clearFailedSessions = (): void => failedKeys.clear();
 
-export async function buildExerciseHistory(client: Client, opts: { name?: string; weeks?: number; date?: string }, deps: HistoryDeps = {}) {
+// What get_exercise_history and get_benchmark share: the guided sessions of the range, each reduced once (cache first,
+// at most MAX_FETCH uncached ones read per call, newest first), the journal, and the notes about what is still unread.
+export async function collectRecords(client: Client, opts: { weeks?: number; date?: string }, deps: HistoryDeps = {}) {
   const weeks = opts.weeks ?? DEFAULT_WEEKS;
   if (!Number.isInteger(weeks) || weeks < 1 || weeks > MAX_WEEKS) throw new Error(`weeks must be a whole number from 1 to ${MAX_WEEKS}, got ${weeks}.`);
   const to = opts.date ?? localDate();
@@ -215,7 +217,7 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
   const bounds = dayFetchBounds(from, to);
   const listed = rowsOf(await client.listWorkouts({ since: bounds.from, until: bounds.to, limit: WORKOUT_LIMIT }));
   const items = listed
-    .map((w) => ({ key: String(w?.workoutKey ?? "").toLowerCase(), date: workoutDate(w), startMs: typeof w?.startTime === "number" ? w.startTime : null, hasLaps: Array.isArray(w?.extensionTypes) && w.extensionTypes.includes("MANUALLAP") }))
+    .map((w) => ({ row: w, key: String(w?.workoutKey ?? "").toLowerCase(), date: workoutDate(w), startMs: typeof w?.startTime === "number" ? w.startTime : null, hasLaps: Array.isArray(w?.extensionTypes) && w.extensionTypes.includes("MANUALLAP") }))
     .filter((w) => w.hasLaps && /^[0-9a-f]{24}$/.test(w.key) && w.date >= from && w.date <= to)
     .sort((a, b) => (b.startMs ?? 0) - (a.startMs ?? 0));
 
@@ -264,9 +266,7 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
 
   const ordered = items.map((w) => records.get(w.key)).filter((r): r is WorkoutRecord => r !== undefined).sort((a, b) => a.date.localeCompare(b.date) || a.workoutKey.localeCompare(b.workoutKey));
 
-  const notes = [
-    "Weights and reps come from the guide's text, i.e. what was PLANNED, unless a journal entry (log_session) says otherwise (loadSource 'journal'); the watch does not record them. Sessions with reliable false are included but their mapping or rest profile is best effort.",
-  ];
+  const notes: string[] = [];
   if (pending > 0 && !cacheEnabled() && process.env.SUUNTO_DEMO !== "1") {
     notes.push(`${pending} older session(s) are not read: the cache is off (SUUNTO_CACHE=off), so each call reads only the ${MAX_FETCH} newest sessions and calling again will not reach the older ones.`);
   } else if (pending > 0 && (unwritable > 0 || errors.length > 0)) {
@@ -278,6 +278,28 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
   } else if (pending > 0) {
     notes.push(`${pending} older session(s) are not read yet (at most ${MAX_FETCH} uncached ones are fetched per call): call again until pending is 0.`);
   }
+  if (listed.length >= WORKOUT_LIMIT) notes.push(`Reached the ${WORKOUT_LIMIT}-workout limit; older sessions in the range may be missing.`);
+  if (journalIgnored > 0) notes.push(`${journalIgnored} journal ${journalIgnored === 1 ? "entry" : "entries"} ignored: not a valid log_session entry (fix or delete ${journalIgnored === 1 ? "it" : "them"} in the journal file).`);
+  if (journalError) notes.push(`The journal could not be read (${journalError}); loads are from the labels only.`);
+  return { from, to, items, ordered, journal, pending, errors, notes };
+}
+
+const WEIGHTS_NOTE =
+  "Weights and reps come from the guide's text, i.e. what was PLANNED, unless a journal entry (log_session) says otherwise (loadSource 'journal'); the watch does not record them. Sessions with reliable false are included but their mapping or rest profile is best effort.";
+
+// The load of one exercise in one session: the top journal set's weight when log_session logged weights for it, else
+// the label's (null when neither has one; never guessed).
+export function loadOf(e: ExerciseRecord, entry: JournalEntry | undefined): { kg: number | null; source: "journal" | "label" } {
+  const jKgs = (entry?.exercises?.find((x) => nameMatches(x.name, e))?.sets ?? []).map((s) => s.kg).filter((k): k is number => typeof k === "number");
+  return jKgs.length ? { kg: Math.max(...jKgs), source: "journal" } : { kg: e.load?.kg ?? null, source: "label" };
+}
+
+export async function buildExerciseHistory(client: Client, opts: { name?: string; weeks?: number; date?: string }, deps: HistoryDeps = {}) {
+  const { from, to, ordered, journal, pending, errors, notes: shared } = await collectRecords(client, opts, deps);
+  const notes = [WEIGHTS_NOTE, ...shared];
+
+  const head = { from, to };
+
   const hrList = (rs: WorkoutRecord[], why: (r: WorkoutRecord) => string): string => {
     const shown = rs.slice(0, MAX_HR_NOTE_SESSIONS).map((r) => `${r.date} (${why(r)})`).join("; ");
     return rs.length > MAX_HR_NOTE_SESSIONS ? `${shown}; and ${rs.length - MAX_HR_NOTE_SESSIONS} more` : shown;
@@ -295,11 +317,6 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
     if (none.length > 0) out.push(`${none.length} session(s) have no heart rate data in the FIT file, so they have no rest recovery: ${hrList(none, () => "no HR")}.`);
     return out;
   };
-  if (listed.length >= WORKOUT_LIMIT) notes.push(`Reached the ${WORKOUT_LIMIT}-workout limit; older sessions in the range may be missing.`);
-  if (journalIgnored > 0) notes.push(`${journalIgnored} journal ${journalIgnored === 1 ? "entry" : "entries"} ignored: not a valid log_session entry (fix or delete ${journalIgnored === 1 ? "it" : "them"} in the journal file).`);
-  if (journalError) notes.push(`The journal could not be read (${journalError}); loads are from the labels only.`);
-
-  const head = { from, to };
   const distinct = new Map<string, { name: string; cut: boolean }>();
   for (const r of ordered) {
     for (const e of r.exercises) {
@@ -342,8 +359,7 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
     for (const e of r.exercises) {
       if (!nameMatches(opts.name, e)) continue;
       const jEx = entry?.exercises?.find((x) => nameMatches(x.name, e));
-      const jKgs = (jEx?.sets ?? []).map((s) => s.kg).filter((k): k is number => typeof k === "number");
-      const kg = jKgs.length ? Math.max(...jKgs) : e.load?.kg ?? null;
+      const { kg, source } = loadOf(e, entry);
       const jr = entry ? Object.fromEntries(Object.entries({ note: entry.note, feeling: entry.feeling, sets: jEx?.sets, exerciseNote: jEx?.note }).filter(([, v]) => v !== undefined)) : null;
       const rest = e.restAfterSet1;
       if (kg !== null) {
@@ -352,7 +368,7 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
       }
       if (e.reliable && rest) endHrs.push(rest.endHr);
       rows.push([
-        r.date, r.workoutKey, e.detail, kg, jKgs.length ? "journal" : "label", e.setsDone, e.plannedSets, e.restS,
+        r.date, r.workoutKey, e.detail, kg, source, e.setsDone, e.plannedSets, e.restS,
         rest?.endHr ?? null, rest?.dropTotal ?? null, rest?.t20S ?? null, rest?.coverage ?? null, e.deviations, e.reliable,
         jr && Object.keys(jr).length ? jr : null,
       ]);

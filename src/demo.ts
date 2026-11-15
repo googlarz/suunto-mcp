@@ -13,6 +13,7 @@ import { loadConfig } from "./config.js";
 import { SuuntoEmptyResponseError, SuuntoNotFoundError } from "./errors.js";
 import { addDays } from "./training-load.js";
 import { buildDemoFit } from "./demo-fit.js";
+import type { JournalEntry } from "./journal.js";
 
 export const isDemo = (env: NodeJS.ProcessEnv = process.env): boolean => env.SUUNTO_DEMO === "1";
 
@@ -486,6 +487,17 @@ export class DemoClient extends SuuntoClient {
       maxHr: max,
       distanceM: w.distanceM,
     });
+  }
+
+  // The journal of demo mode (the real file is never read there): every gym session tagged "strength" and every Saturday
+  // run "long-run", so get_tag_effects has something to show on the synthetic nights.
+  async demoJournal(): Promise<Record<string, JournalEntry>> {
+    const journal: Record<string, JournalEntry> = {};
+    for (const w of this.workouts()) {
+      const tag = w.laps ? "strength" : weekday(this.dateOf(w)) === 6 ? "long-run" : null;
+      if (tag) journal[w.key] = { workoutKey: w.key, loggedAt: new Date(w.startMs).toISOString(), tags: [tag] };
+    }
+    return journal;
   }
 
   // ---------- routes, guides ----------
