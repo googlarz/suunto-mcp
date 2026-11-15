@@ -8,6 +8,8 @@ import { buildTrainingLoad, forecastTrainingLoad } from "./training-load.js";
 import { compareWorkout } from "./compare.js";
 import { buildRestProfile } from "./rest-profile.js";
 import { buildExerciseHistory } from "./history.js";
+import { filePlanStore, getPlan } from "./plan.js";
+import { buildCatchup, fileSeenStore } from "./catchup.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -35,6 +37,8 @@ Analysis commands:
   compare-workout      <workoutKey>   (laps only, no plan comparison)
   get-workout-rest-profile <workoutKey>
   get-exercise-history [name] [--weeks N]   (load, sets, rest recovery per session; writes only the local cache)
+  get-plan             [YYYY-MM-DD]   (the plan from set_plan: today and the next 7 days, or one day; reads the local plan file only)
+  get-catchup          (what is new since the last markSeen: workouts, nights, recovery, plan items; never moves the marker, use the MCP tool with markSeen for that)
 
 Route commands:
   list-routes
@@ -189,6 +193,19 @@ export async function runCli(argv: string[]) {
         const weeks = values.weeks !== undefined ? Number(values.weeks) : undefined;
         if (weeks !== undefined && !Number.isInteger(weeks)) die(`--weeks must be a whole number, got "${values.weeks}"`);
         out(await buildExerciseHistory(suunto, { name: positionals[0], weeks }));
+        break;
+      }
+
+      case "get-plan": {
+        const date = rest[0];
+        if (rest.length > 1) die("Usage: get-plan [YYYY-MM-DD]");
+        out(await getPlan(filePlanStore(), { date }));
+        break;
+      }
+
+      case "get-catchup": {
+        if (rest.length > 0) die("Usage: get-catchup (it takes no options and never moves the marker)");
+        out(await buildCatchup(suunto, fileSeenStore(), filePlanStore()));
         break;
       }
 

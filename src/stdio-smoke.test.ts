@@ -70,15 +70,18 @@ test("stdio: every tool has a title and annotations consistent with what it does
       assert.ok(t.title && t.title.length > 3, `${t.name}: missing title`);
       assert.ok(t.annotations, `${t.name}: missing annotations`);
       assert.equal(typeof t.annotations.readOnlyHint, "boolean", `${t.name}: readOnlyHint must be explicit`);
-      assert.equal(t.annotations.openWorldHint, t.name !== "log_session", `${t.name}: talks to Suunto's cloud (log_session alone is a local file)`);
+      assert.equal(t.annotations.openWorldHint, !["log_session", "set_plan", "get_plan"].includes(t.name), `${t.name}: talks to Suunto's cloud (log_session, set_plan and get_plan alone are local files)`);
 
-      const readsOnly = /^(get|list|export|compare|forecast|adjust)_/.test(t.name);
-      const writes = /^(push|delete|upload|generate|log)_/.test(t.name);
+      // get_catchup reads by name but is not read-only: markSeen: true writes its local marker
+      const catchup = t.name === "get_catchup";
+      const readsOnly = /^(get|list|export|compare|forecast|adjust)_/.test(t.name) && !catchup;
+      const writes = /^(push|delete|upload|generate|log|set)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
       if (/^(push_.*_guide|delete_guide|generate_daily_digest|log_session)$/.test(t.name)) {
         assert.equal(t.annotations.destructiveHint, true, `${t.name}: overwrites or deletes, must be flagged destructive`);
       }
+      if (t.name === "set_plan" || catchup) assert.equal(t.annotations.destructiveHint, false, `${t.name}: changes only a small local file, not destructive`);
     }
   });
 });
