@@ -7,11 +7,14 @@ import type { ParsedFit } from "./fit.js";
 export interface HrQuality {
   reliable: boolean | null; // null: the FIT has no heart rate at all (distinct from false: it has some, and it is not trustworthy)
   reasons: string[]; // one sentence per rule that fired; empty when reliable
-  coverage: number; // 0-1: share of the session's seconds with a plausible HR sample
+  coverage: number; // 0-1: share of the session not lost to dropouts (gaps over DROPOUT_GAP_S without a plausible HR sample)
 }
 
 // Below this a fifth of the session is missing: dropouts that long hide whole sets and rests.
 export const MIN_COVERAGE = 0.8;
+// Samples further apart than this are a dropout, whatever the sampling rate (watches record every 1-5 s;
+// optical HR reads are lost for more than 10 s only when the sensor lost the skin).
+export const DROPOUT_GAP_S = 10;
 // Outside 30-230 bpm is a strap off the skin (0) or a sensor glitch (255), not a heart.
 export const MIN_PLAUSIBLE_HR = 30;
 export const MAX_PLAUSIBLE_HR = 230;
@@ -37,8 +40,11 @@ export function toMs(v: unknown): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-// The session's length is its timer time (pauses excluded) when the FIT has it, else the span of the records.
-// Coverage counts the distinct seconds of that with a plausible sample, so records sparser than 1 Hz read as dropouts.
+// The recording runs from its first to its last record (a record without HR still counts as the recording).
+// Missing time is every stretch of it between two plausible samples (or to the window's ends) longer than
+// DROPOUT_GAP_S, so the sampling rate does not matter: 1, 2 or 5 s between samples is no dropout. The session's
+// length is its timer time (pauses excluded) when the FIT has it, else the window: a recording that stopped before
+// the timer did counts the difference as missing, and a pause (timer shorter than the window) is not held against it.
 export function assessHr(parsed: ParsedFit): HrQuality {
   const stamped = (parsed.records ?? []).map((r) => ({ ms: toMs(r?.timestamp), hr: r?.heart_rate })).filter((r): r is { ms: number; hr: unknown } => r.ms !== null);
   const byTime = new Map<number, number>(); // one sample per timestamp, the last wins (as hrSeries)
@@ -47,14 +53,25 @@ export function assessHr(parsed: ParsedFit): HrQuality {
 
   const all = [...byTime].map(([ms, hr]) => ({ t: ms / 1000, hr })).sort((a, b) => a.t - b.t);
   const ok = all.filter((s) => s.hr >= MIN_PLAUSIBLE_HR && s.hr <= MAX_PLAUSIBLE_HR);
+  const first = stamped.reduce((m, r) => Math.min(m, r.ms), Infinity) / 1000;
+  const last = stamped.reduce((m, r) => Math.max(m, r.ms), -Infinity) / 1000;
+  const span = last - first;
   const timer = parsed.sessions?.[0]?.total_timer_time;
-  const span = (Math.max(...stamped.map((r) => r.ms)) - Math.min(...stamped.map((r) => r.ms))) / 1000;
-  const durationS = Math.max(1, typeof timer === "number" && Number.isFinite(timer) && timer > 0 ? timer : span);
-  const t0 = all[0].t;
-  const coverage = r2(Math.min(1, new Set(ok.map((s) => Math.floor(s.t - t0))).size / durationS));
+  const hasTimer = typeof timer === "number" && Number.isFinite(timer) && timer > 0;
+  const durationS = Math.max(1, hasTimer ? timer : span);
+  let missing = 0;
+  let prev = first;
+  for (const s of ok) {
+    if (s.t - prev > DROPOUT_GAP_S) missing += s.t - prev;
+    prev = s.t;
+  }
+  if (last - prev > DROPOUT_GAP_S) missing += last - prev;
+  if (hasTimer) missing += timer - span;
+  const present = ok.length === 0 ? 0 : (durationS - Math.min(durationS, Math.max(0, missing))) / durationS;
+  const coverage = r2(present);
 
   const reasons: string[] = [];
-  if (coverage < MIN_COVERAGE) reasons.push(`heart rate is present for only ${pct(coverage)} of the session (at least ${pct(MIN_COVERAGE)} expected): sensor dropouts`);
+  if (present < MIN_COVERAGE) reasons.push(`heart rate is present for only ${pct(present)} of the session (at least ${pct(MIN_COVERAGE)} expected): sensor dropouts`);
 
   const bad = all.length - ok.length;
   if (bad / all.length > MAX_IMPLAUSIBLE_SHARE) reasons.push(`${bad} of ${all.length} samples (${pct(bad / all.length)}) are implausible (outside ${MIN_PLAUSIBLE_HR}-${MAX_PLAUSIBLE_HR} bpm)`);

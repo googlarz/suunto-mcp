@@ -281,6 +281,45 @@ test("history: a session with unreliable HR is flagged, excluded from restEndHrM
   });
 });
 
+test("history by name: only sessions that have a matching exercise are named in the HR note; the index names every session in the range and never mentions restEndHrMedian", async () => {
+  await withCacheDir(async () => {
+    // both sessions lose their HR; the second one has no 'Back Squat' (it is a 'Front Squat' there)
+    const { client, parse } = fakeClient([
+      { key: keyOf(1), startMs: at(14), dropHr: true },
+      { key: keyOf(2), startMs: at(7), dropHr: true, subst: [["Back Squat", "Front Squat"]] },
+    ]);
+    const named: any = await buildExerciseHistory(client, { name: "Back Squat", weeks: 4, date: TODAY }, deps(parse));
+    const noteNamed = named.notes.find((n: string) => /unreliable heart-rate/i.test(n));
+    assert.match(noteNamed, /^1 session\(s\)/);
+    assert.match(noteNamed, /2026-10-18/);
+    assert.doesNotMatch(noteNamed, /2026-10-25/, "that session has no matching row");
+    assert.match(noteNamed, /restEndHrMedian/, "the named view does return the median");
+
+    const index: any = await buildExerciseHistory(client, { weeks: 4, date: TODAY }, deps(parse));
+    const noteIndex = index.notes.find((n: string) => /unreliable heart-rate/i.test(n));
+    assert.match(noteIndex, /^2 session\(s\)/);
+    assert.match(noteIndex, /2026-10-18/);
+    assert.match(noteIndex, /2026-10-25/);
+    assert.doesNotMatch(noteIndex, /restEndHrMedian/, "the index view does not return it");
+    assert.ok(!("summary" in index));
+  });
+});
+
+test("history by name: a session with no matching exercise and no HR is not named in the no-HR note either", async () => {
+  await withCacheDir(async () => {
+    const { client } = fakeClient([
+      { key: keyOf(1), startMs: at(14) },
+      { key: keyOf(2), startMs: at(7), subst: [["Back Squat", "Front Squat"]] },
+    ]);
+    const parse = async () => ({ sessions: [], records: [] }) as ParsedFit;
+    const out: any = await buildExerciseHistory(client, { name: "Front Squat", weeks: 4, date: TODAY }, deps(parse));
+    const note = out.notes.find((n: string) => /no heart rate data/i.test(n));
+    assert.match(note, /^1 session\(s\)/);
+    assert.match(note, /2026-10-25/);
+    assert.doesNotMatch(note, /2026-10-18/);
+  });
+});
+
 test("history: sessions with no HR at all are noted as 'no heart rate data', not as unreliable", async () => {
   await withCacheDir(async () => {
     const { client } = fakeClient([{ key: keyOf(1), startMs: at(7) }]);

@@ -5,6 +5,7 @@ import { buildRestProfile, developerInfo, hrSeries, restRecovery, type HrSample 
 import { compareWorkout } from "./compare.js";
 import { LAP_COLUMNS, lapChecks, lapKind, type shapeLaps } from "./laps.js";
 import { parseFit } from "./fit.js";
+import { MAX_PLAUSIBLE_HR, MIN_PLAUSIBLE_HR } from "./hr-quality.js";
 
 type Laps = ReturnType<typeof shapeLaps>;
 
@@ -459,9 +460,12 @@ test("restRecovery: one spike of 175 in a flat 140 does not become the peak, a d
   assert.ok(r.recoveryBpmPerMin! < 15, `rate ${r.recoveryBpmPerMin}`);
 });
 
-test("hrSeries: samples outside 30-250 bpm are dropped", () => {
-  const parsed = { sessions: [{ start_time: T0 }], records: [rec(1, 0, true), rec(2, 29, true), rec(3, 30, true), rec(4, 250, true), rec(5, 251, true), rec(6, 255, true)] };
-  assert.deepEqual(hrSeries(parsed as any).samples, [{ tS: 3, hr: 30 }, { tS: 4, hr: 250 }]);
+test("hrSeries: samples outside the shared plausible range (hr-quality's MIN/MAX_PLAUSIBLE_HR, 30-230) are dropped", () => {
+  const lo = MIN_PLAUSIBLE_HR;
+  const hi = MAX_PLAUSIBLE_HR;
+  const parsed = { sessions: [{ start_time: T0 }], records: [rec(1, 0, true), rec(2, lo - 1, true), rec(3, lo, true), rec(4, hi, true), rec(5, hi + 1, true), rec(6, 250, true), rec(7, 255, true)] };
+  assert.deepEqual(hrSeries(parsed as any).samples, [{ tS: 3, hr: lo }, { tS: 4, hr: hi }]);
+  assert.deepEqual([lo, hi], [30, 230], "the one range both modules use");
 });
 
 test("hrSeries: records sharing a timestamp collapse to the last one", () => {

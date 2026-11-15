@@ -282,12 +282,19 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
     const shown = rs.slice(0, MAX_HR_NOTE_SESSIONS).map((r) => `${r.date} (${why(r)})`).join("; ");
     return rs.length > MAX_HR_NOTE_SESSIONS ? `${shown}; and ${rs.length - MAX_HR_NOTE_SESSIONS} more` : shown;
   };
-  const hrBad = ordered.filter((r) => r.hr?.reliable === false);
-  if (hrBad.length > 0) {
-    notes.push(`${hrBad.length} session(s) have unreliable heart-rate data and are marked reliable false; their rest numbers are still listed but left out of restEndHrMedian: ${hrList(hrBad, (r) => r.hr!.reasons.join(", "))}.`);
-  }
-  const hrNone = ordered.filter((r) => r.hr?.reliable === null);
-  if (hrNone.length > 0) notes.push(`${hrNone.length} session(s) have no heart rate data in the FIT file, so they have no rest recovery: ${hrList(hrNone, () => "no HR")}.`);
+  // Names the sessions of `rs` (the ones this answer is about) whose HR is unreliable or missing. The index
+  // view returns neither reliable flags nor the median, so its wording does not promise them.
+  const hrNotes = (rs: WorkoutRecord[], named: boolean): string[] => {
+    const bad = rs.filter((r) => r.hr?.reliable === false);
+    const none = rs.filter((r) => r.hr?.reliable === null);
+    const out: string[] = [];
+    if (bad.length > 0) {
+      const effect = named ? "are marked reliable false; their rest numbers are still listed but left out of restEndHrMedian" : "are listed here; with a name they are marked reliable false";
+      out.push(`${bad.length} session(s) have unreliable heart-rate data and ${effect}: ${hrList(bad, (r) => r.hr!.reasons.join(", "))}.`);
+    }
+    if (none.length > 0) out.push(`${none.length} session(s) have no heart rate data in the FIT file, so they have no rest recovery: ${hrList(none, () => "no HR")}.`);
+    return out;
+  };
   if (listed.length >= WORKOUT_LIMIT) notes.push(`Reached the ${WORKOUT_LIMIT}-workout limit; older sessions in the range may be missing.`);
   if (journalIgnored > 0) notes.push(`${journalIgnored} journal ${journalIgnored === 1 ? "entry" : "entries"} ignored: not a valid log_session entry (fix or delete ${journalIgnored === 1 ? "it" : "them"} in the journal file).`);
   if (journalError) notes.push(`The journal could not be read (${journalError}); loads are from the labels only.`);
@@ -319,9 +326,11 @@ export async function buildExerciseHistory(client: Client, opts: { name?: string
     const exercises = [...groups.values()]
       .map((g) => ({ name: g.name, sessions: g.sessions.size, lastDate: g.lastDate, lastDetail: g.lastDetail }))
       .sort((a, b) => b.sessions - a.sessions || b.lastDate.localeCompare(a.lastDate) || a.name.localeCompare(b.name));
+    notes.push(...hrNotes(ordered, false));
     return { ...head, sessions: ordered.length, exercises, pending, errors, notes };
   }
 
+  notes.push(...hrNotes(ordered.filter((r) => r.exercises.some((e) => nameMatches(opts.name!, e))), true));
   notes.push("name matches a stored exercise name when both are equal after normalisation (case, accents and punctuation ignored), or when the stored name may have been cut by the guide's 40-character limit and the name starts with it.");
   notes.push(`sessions.cols = [${COLS.join(", ")}]; each row is an array in that order. kg is the top set's weight; restEndHr, restDropTotal, restT20S and restCoverage describe the rest after set 1 (null when missing).`);
   const rows: unknown[][] = [];
