@@ -1,8 +1,9 @@
-// get_catchup: what is new since the last time the user looked. A small local marker (the newest workout start,
-// sleep end and recovery sample seen, and the day plan items were reviewed through) says where "new" begins.
-// Toward Suunto it only reads (three list calls, bounded by a look-back window). The marker moves only when the
-// caller passes markSeen: true, so an answer that never reached the user loses nothing. In demo mode the marker
-// lives in memory.
+// get_catchup: what is new since the last time the user looked. A small local marker says where "new" begins: the
+// workout keys already seen (a bounded list, so a workout that syncs late with an earlier start is still new), the end
+// of the latest night and the newest recovery sample seen, and the day the review window starts at. Toward Suunto it
+// only reads (list calls bounded by a look-back window). The marker moves only when the caller passes markSeen: true,
+// so a call without it changes nothing and an answer that never reached the user can be asked for again. In demo mode
+// the marker lives in memory.
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
@@ -13,12 +14,17 @@ import { planSessionOn, type PlanStore } from "./plan.js";
 import { isValidCalendarDate } from "./schema-validate.js";
 import { nearestSample, previousDate, summarizeRecovery, summarizeSleep, summarizeWorkouts } from "./snapshot.js";
 
+export interface SeenWorkout {
+  key: string;
+  startMs: number;
+}
 export interface SeenState {
-  workoutStartMs: number | null; // start of the newest workout seen
-  workoutDate: string | null; // its local date
+  workouts: SeenWorkout[]; // workouts already reported, newest first, only those still inside the look-back window
+  workoutDate: string | null; // local date of the newest workout seen
+  cursorMs: number | null; // a call that could not read the whole workout list stopped here; the next one continues below it
   sleepEndMs: number | null; // end of the latest finished night seen
   recoveryAtMs: number | null; // the newest recovery sample seen
-  seenThrough: string | null; // plan items are reviewed from this local day on
+  seenThrough: string | null; // sleep, recovery and plan items are reviewed from this local day on; moves only when every section was read
   updatedAt: string;
 }
 export interface SeenStore {
@@ -28,13 +34,17 @@ export interface SeenStore {
 
 export const FIRST_LOOKBACK_DAYS = 7;
 export const MAX_LOOKBACK_DAYS = 14;
-export const WORKOUT_LIMIT = 50;
+export const LATE_SYNC_DAYS = 2; // with a marker, workouts are listed this much further back so a late sync is not missed
+export const WORKOUT_LIMIT = 50; // workouts per list page (51 are asked for, to tell "exactly 50" from "more")
+export const MAX_WORKOUT_PAGES = 4; // list pages per call
+export const MAX_SEEN_KEYS = 400;
+const KEEP_KEYS_MS = (MAX_LOOKBACK_DAYS + LATE_SYNC_DAYS + 2) * 86_400_000;
 
 export const seenPath = (): string => process.env.SUUNTO_SEEN_PATH ?? join(homedir(), ".suunto-mcp", "seen.json");
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
-const FIELDS = ["workoutStartMs", "workoutDate", "sleepEndMs", "recoveryAtMs", "seenThrough", "updatedAt"];
+const FIELDS = ["workouts", "workoutDate", "cursorMs", "sleepEndMs", "recoveryAtMs", "seenThrough", "updatedAt"];
 
 function parseSeen(raw: Record<string, unknown>): SeenState {
   const extra = Object.keys(raw).find((k) => k !== "version" && !FIELDS.includes(k));
@@ -51,12 +61,21 @@ function parseSeen(raw: Record<string, unknown>): SeenState {
     if (typeof v !== "string" || !isValidCalendarDate(v)) throw new Error(`${k} must be a calendar date or null`);
     return v;
   };
-  return { workoutStartMs: ms("workoutStartMs"), workoutDate: day("workoutDate"), sleepEndMs: ms("sleepEndMs"), recoveryAtMs: ms("recoveryAtMs"), seenThrough: day("seenThrough"), updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "" };
+  const list = raw.workouts ?? [];
+  if (!Array.isArray(list)) throw new Error("workouts must be an array");
+  if (list.length > MAX_SEEN_KEYS) throw new Error(`workouts can have at most ${MAX_SEEN_KEYS} items`);
+  const workouts = list.map((w, i) => {
+    if (!isObject(w) || Object.keys(w).some((k) => k !== "key" && k !== "startMs") || typeof w.key !== "string" || w.key === "" || w.key.length > 64 || typeof w.startMs !== "number" || !Number.isFinite(w.startMs)) {
+      throw new Error(`workouts[${i}] must be { key, startMs }`);
+    }
+    return { key: w.key, startMs: w.startMs };
+  });
+  return { workouts, workoutDate: day("workoutDate"), cursorMs: ms("cursorMs"), sleepEndMs: ms("sleepEndMs"), recoveryAtMs: ms("recoveryAtMs"), seenThrough: day("seenThrough"), updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "" };
 }
 
 export function memorySeenStore(): SeenStore {
   let held: SeenState | null = null;
-  return { load: async () => (held ? { ...held } : null), save: async (s) => void (held = { ...s }) };
+  return { load: async () => (held ? structuredClone(held) : null), save: async (s) => void (held = structuredClone(s)) };
 }
 
 // A missing file is "nothing seen yet"; a damaged or other-version one throws and is never overwritten.
@@ -107,6 +126,27 @@ const maxOf = (...v: (number | null | undefined)[]): number | null => {
 const dayNumber = (d: string) => Math.round(Date.parse(`${d}T00:00:00Z`) / 86_400_000);
 const shiftDay = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
+// The workouts since `since`, newest first, in pages of WORKOUT_LIMIT (one more is asked for each time: a 51st row means
+// "more", so a list of exactly 50 is complete). At most MAX_WORKOUT_PAGES pages per call; past that the result is
+// incomplete and `cursor` is where it stopped. A cursor from an earlier call makes this one read the newest page (for
+// late arrivals) and then continue below the cursor, so repeated calls get through a list of any length.
+// Pages are cut at the oldest start already read (minus 1 ms): two workouts starting in the same millisecond at a page
+// edge is not something one watch produces.
+async function fetchWorkouts(client: SuuntoClient, since: number, cursorMs: number | null) {
+  const rows = new Map<string, any>();
+  let until: number | undefined;
+  for (let page = 1; ; page++) {
+    const res = rowsOf(await client.listWorkouts({ since, ...(until !== undefined ? { until } : {}), limit: WORKOUT_LIMIT + 1 }))
+      .filter((w) => typeof w?.workoutKey === "string" && typeof w?.startTime === "number")
+      .sort((a, b) => b.startTime - a.startTime);
+    for (const w of res.slice(0, WORKOUT_LIMIT)) rows.set(w.workoutKey, w);
+    if (res.length <= WORKOUT_LIMIT) return { rows: [...rows.values()], complete: true, cursor: null as number | null };
+    const oldest = res[WORKOUT_LIMIT - 1].startTime;
+    if (page >= MAX_WORKOUT_PAGES) return { rows: [...rows.values()], complete: false, cursor: oldest };
+    until = (page === 1 && cursorMs !== null && cursorMs < oldest ? cursorMs : oldest) - 1;
+  }
+}
+
 // Marking is read-merge-write inside a queue, so two calls that mark at once keep the newer of each field.
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -124,8 +164,8 @@ export async function buildCatchup(
   const wanted = marker?.seenThrough ?? shiftDay(today, -FIRST_LOOKBACK_DAYS);
   const from = wanted < floor ? floor : wanted;
   const notes: string[] = [];
-  if (wanted < floor) notes.push(`The last markSeen was ${wanted}; only the last ${MAX_LOOKBACK_DAYS} days are checked, so anything older was not looked at.`);
-  if (!marker) notes.push(`No marker yet: looking back ${FIRST_LOOKBACK_DAYS} days.`);
+  if (wanted < floor) notes.push(`The review window started ${wanted}; only the last ${MAX_LOOKBACK_DAYS} days are checked, so anything older was not looked at.`);
+  if (!marker) notes.push(`No marker yet: looking back ${FIRST_LOOKBACK_DAYS} days (the list calls add a margin of up to 14 hours for time zones).`);
 
   const errors: { section: string; error: string }[] = [];
   const section = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
@@ -136,22 +176,25 @@ export async function buildCatchup(
       return null;
     }
   };
+  const workoutFrom = marker ? shiftDay(from, -LATE_SYNC_DAYS) : from;
   const [workoutRes, sleepRes, recoveryRes] = await Promise.all([
-    section("workouts", () => client.listWorkouts({ since: dayFetchBounds(from, today).from, limit: WORKOUT_LIMIT })),
+    section("workouts", () => fetchWorkouts(client, dayFetchBounds(workoutFrom, today).from, marker?.cursorMs ?? null)),
     section("sleep", () => client.listSleep(previousDate(from), today)),
     section("recovery", () => client.listRecovery(from, today)),
   ]);
 
-  // ---- workouts ----
-  const workouts = workoutRes === null ? null : rowsOf(workoutRes).filter((w) => typeof w?.startTime === "number" && w.startTime <= nowMs);
-  const workoutsComplete = workoutRes !== null && rowsOf(workoutRes).length < WORKOUT_LIMIT;
-  if (workoutRes !== null && !workoutsComplete) {
-    errors.push({ section: "workouts", error: `Reached the ${WORKOUT_LIMIT}-workout limit; older workouts in the window may be missing, so the workout marker and the plan review are not advanced.` });
+  // ---- workouts: new = a key not seen before, whatever its start time ----
+  const workouts = workoutRes === null ? null : workoutRes.rows.filter((w) => w.startTime <= nowMs);
+  const workoutsComplete = workoutRes?.complete === true;
+  if (workoutRes !== null && !workoutRes.complete) {
+    errors.push({ section: "workouts", error: `More workouts than one call reads (${workoutRes.rows.length} read, ${MAX_WORKOUT_PAGES} pages of ${WORKOUT_LIMIT}); call again (with markSeen: true to continue below where this one stopped). The review window stays open until the whole list has been read.` });
   }
-  const fresh = (workouts ?? []).filter((w) => marker?.workoutStartMs == null || w.startTime > marker.workoutStartMs).sort((a, b) => a.startTime - b.startTime);
+  const seenKeys = new Set((marker?.workouts ?? []).map((w) => w.key));
+  const fresh = (workouts ?? []).filter((w) => !seenKeys.has(w.workoutKey)).sort((a, b) => a.startTime - b.startTime);
   const newWorkouts = [...new Set(fresh.map(workoutDate))].flatMap((d) => summarizeWorkouts({ payload: fresh }, d).map((w) => ({ date: d, ...w })));
   const lastWorkout = (workouts ?? []).reduce<any>((best, w) => (best === null || w.startTime > best.startTime ? w : best), null);
-  const lastDate = lastWorkout ? workoutDate(lastWorkout) : marker?.workoutDate ?? null;
+  const windowLast = lastWorkout ? workoutDate(lastWorkout) : null;
+  const lastDate = [windowLast, marker?.workoutDate ?? null].filter((d): d is string => d !== null && d !== "").sort().pop() ?? null;
 
   // ---- nights ----
   const allRecovery = rowsOf(recoveryRes);
@@ -195,22 +238,27 @@ export async function buildCatchup(
 
   // ---- plan: by date, not by sport ----
   let plan: unknown = null;
+  let planOk = true;
   if (workouts !== null && workoutsComplete) {
     try {
       const stored = await plans.load();
       if (stored) {
         const trained = new Map<string, string>();
-        for (const w of workouts) trained.set(workoutDate(w), trained.get(workoutDate(w)) ?? (w.workoutKey ?? ""));
+        for (const w of workouts) trained.set(workoutDate(w), trained.get(workoutDate(w)) ?? w.workoutKey);
         const items = stored.plan.sessions
           .filter((s) => s.date >= from && s.date <= today)
           .map((s) => ({ date: s.date, title: s.title, status: trained.has(s.date) ? ("done" as const) : s.date < today ? ("missed" as const) : ("pending" as const), ...(trained.has(s.date) ? { workoutKey: trained.get(s.date) } : {}) }));
         plan = { from, items, done: items.filter((i) => i.status === "done").length, missed: items.filter((i) => i.status === "missed").length, pending: items.filter((i) => i.status === "pending").length, todaySession: planSessionOn(stored.plan, today)?.title ?? null };
       }
     } catch (err: any) {
+      planOk = false;
       plan = { error: err?.message ?? String(err) };
+      errors.push({ section: "plan", error: err?.message ?? String(err) });
     }
   } else if (workouts === null) {
     notes.push("Plan items were not checked: the workouts could not be read.");
+  } else {
+    notes.push("Plan items were not checked: the workout list was not read completely.");
   }
 
   const result = {
@@ -229,25 +277,29 @@ export async function buildCatchup(
   };
 
   if (opts.markSeen === true) {
+    const allRead = workoutsComplete && sleepRes !== null && recoveryRes !== null && planOk;
     const marking = async () => {
-      const current = (await seen.load()) ?? { workoutStartMs: null, workoutDate: null, sleepEndMs: null, recoveryAtMs: null, seenThrough: null, updatedAt: "" };
+      const current: SeenState = (await seen.load()) ?? { workouts: [], workoutDate: null, cursorMs: null, sleepEndMs: null, recoveryAtMs: null, seenThrough: null, updatedAt: "" };
       const next: SeenState = { ...current, updatedAt: now.toISOString() };
-      if (workouts !== null && workoutsComplete) {
-        if (lastWorkout && (current.workoutStartMs == null || lastWorkout.startTime > current.workoutStartMs)) {
-          next.workoutStartMs = lastWorkout.startTime;
-          next.workoutDate = workoutDate(lastWorkout);
-        }
-        if (next.seenThrough == null || today > next.seenThrough) next.seenThrough = today;
+      if (workoutRes !== null && workouts !== null) {
+        const known = new Map(current.workouts.map((w) => [w.key, w.startMs]));
+        for (const w of workouts) known.set(w.workoutKey, w.startTime);
+        next.workouts = [...known].map(([key, startMs]) => ({ key, startMs })).filter((w) => w.startMs >= nowMs - KEEP_KEYS_MS).sort((a, b) => b.startMs - a.startMs).slice(0, MAX_SEEN_KEYS);
+        next.workoutDate = [current.workoutDate, windowLast].filter((d): d is string => d !== null && d !== "").sort().pop() ?? null;
+        next.cursorMs = workoutRes.complete ? null : workoutRes.cursor;
       }
       if (nights !== null) next.sleepEndMs = maxOf(current.sleepEndMs, ...nights.map((n) => n.endMs));
       if (recoveryRes !== null) next.recoveryAtMs = maxOf(current.recoveryAtMs, ...stamped.map((x) => x.t));
+      // the review window (sleep, recovery, plan items) closes only when every section was read, so a section
+      // that failed on one day is still looked at on the next
+      if (allRead && (next.seenThrough == null || today > next.seenThrough)) next.seenThrough = today;
       await seen.save(next);
     };
     const done = queue.then(marking);
     queue = done.catch(() => undefined);
     await done;
     result.marked = true;
-    if (errors.length) notes.push("markSeen moved the markers of the sections that were read; a section listed in errors keeps its old marker and shows up again next time.");
+    if (!allRead) notes.push("markSeen moved the markers of the sections that were read; the review window (sleep, recovery, plan items) stays open until every section has been read, so what a failed section missed shows up next time.");
   }
   return result;
 }

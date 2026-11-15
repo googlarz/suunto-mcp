@@ -105,6 +105,11 @@ function checkPlan(plan: Plan): Plan {
   for (const s of plan.sessions) {
     if ((plan.start && s.date < plan.start) || (plan.end && s.date > plan.end)) throw new Error(`session ${s.date} lies outside the plan's start..end`);
   }
+  if (plan.start && plan.end) {
+    plan.phases.forEach((p, i) => {
+      if (p.from < plan.start! || p.to > plan.end!) throw new Error(`phases[${i}] (${p.from}..${p.to}) lies outside the plan's start..end`);
+    });
+  }
   if (plan.sessions.length > MAX_SESSIONS) throw new Error(`a plan can have at most ${MAX_SESSIONS} sessions`);
   plan.sessions.sort((a, b) => a.date.localeCompare(b.date));
   return plan;
@@ -236,7 +241,7 @@ export function setPlan(args: unknown, store: PlanStore, deps: SetPlanDeps = {})
     }
     checkPlan(next);
     await store.save({ updatedAt: (deps.now ?? new Date()).toISOString(), plan: next });
-    return { saved: true, mode, plan: summary(next), replacedDates: replacedDates.sort(), previous: previous ? summary(previous.plan) : null, note: "Local state only: nothing was sent to the watch. Push sessions with push_week_plan or push_strength_guide." };
+    return { saved: true, mode, plan: summary(next), replacedDates: replacedDates.sort(), previous: previous ? previous.plan : null, note: "Local state only: nothing was sent to the watch. Push sessions with push_week_plan or push_strength_guide." };
   };
   const result = queue.then(run);
   queue = result.catch(() => undefined);

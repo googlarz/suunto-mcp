@@ -33,11 +33,11 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_exercise_history: { title: "Get exercise history across sessions", annotations: READ },
   // Writes only the local journal file; the same key again REPLACES that entry (hence destructive); never contacts Suunto, hence not openWorld.
   log_session: { title: "Log what actually happened in a session", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
-  // Local plan file only, never Suunto. Not destructive (nothing at Suunto; the plan is one small local file); the same call twice leaves the same plan.
-  set_plan: { title: "Set the training plan (local file, pushes nothing)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  // Local plan file only, never Suunto. Destructive: mode "replace" (the default) overwrites the whole stored plan (the result returns the previous one). The same call twice leaves the same plan.
+  set_plan: { title: "Set the training plan (local file, pushes nothing)", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
   get_plan: { title: "Get the training plan (today and the next 7 days)", annotations: { readOnlyHint: true, openWorldHint: false } },
-  // Reads Suunto; with markSeen: true it also writes the local marker file, so it is not read-only (and not idempotent: the next call has less that is new).
-  get_catchup: { title: "Catch up: what is new since last time", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+  // Reads Suunto. Without markSeen it is a pure read; with markSeen: true it writes the local marker (the same state again if repeated), so it is not read-only.
+  get_catchup: { title: "Catch up: what is new since last time", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },

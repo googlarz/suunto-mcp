@@ -351,9 +351,9 @@ test("e2e demo: set_plan / get_plan / get_catchup work in memory and write nothi
   await withDemo(async (call, rpc, fetchLog) => {
     const tools: any[] = (await rpc("tools/list")).result.tools;
     const ann = (n: string) => tools.find((t) => t.name === n).annotations;
-    assert.deepEqual(ann("set_plan"), { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+    assert.deepEqual(ann("set_plan"), { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
     assert.equal(ann("get_plan").readOnlyHint, true);
-    assert.equal(ann("get_catchup").readOnlyHint, false);
+    assert.deepEqual(ann("get_catchup"), { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
 
     assert.equal((await ok(call, "get_plan")).plan, null);
     const d = today();

@@ -90,6 +90,17 @@ export async function runCli(argv: string[]) {
     process.exit(0);
   }
 
+  // only reads the local plan file, so it needs no Suunto credentials
+  if (cmd === "get-plan") {
+    if (rest.length > 1) die("Usage: get-plan [YYYY-MM-DD]");
+    try {
+      out(await getPlan(filePlanStore(), { date: rest[0] }));
+    } catch (err: any) {
+      die(err.message ?? String(err));
+    }
+    return;
+  }
+
   const cfg = loadConfig();
   assertCredentials(cfg);
   const suunto = new SuuntoClient(cfg);
@@ -193,13 +204,6 @@ export async function runCli(argv: string[]) {
         const weeks = values.weeks !== undefined ? Number(values.weeks) : undefined;
         if (weeks !== undefined && !Number.isInteger(weeks)) die(`--weeks must be a whole number, got "${values.weeks}"`);
         out(await buildExerciseHistory(suunto, { name: positionals[0], weeks }));
-        break;
-      }
-
-      case "get-plan": {
-        const date = rest[0];
-        if (rest.length > 1) die("Usage: get-plan [YYYY-MM-DD]");
-        out(await getPlan(filePlanStore(), { date }));
         break;
       }
 

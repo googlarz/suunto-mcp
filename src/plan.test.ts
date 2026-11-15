@@ -50,6 +50,8 @@ test("plan: strict validation rejects bad input and writes nothing", async () =>
     [{ goal: "g", sessions: [s("2026-11-16", { notes: "x" })] }, /sessions\[0\]\.notes is not a known field/],
     [{ goal: "g", sessions: Array.from({ length: MAX_SESSIONS + 1 }, (_, i) => s(new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10))) }, /at most 200/],
     [{ ...base, sessions: [s("2026-10-31")] }, /outside the plan's start\.\.end/],
+    [{ ...base, phases: [{ name: "a", from: "2026-10-30", to: "2026-11-05" }] }, /phases\[0\] .*outside the plan's start\.\.end/],
+    [{ ...base, phases: [{ name: "a", from: "2027-01-30", to: "2027-02-05" }] }, /phases\[0\] .*outside the plan's start\.\.end/],
     [{ goal: "g", sessions: [s("2026-11-16", { guide: "bench" })] }, /guide must be an object/],
     [{ goal: "g", sessions: [s("2026-11-16", { guide: { ...guide("2026-11-17") } })] }, /guide\.date .* must equal the session date/],
     [{ goal: "g", sessions: [s("2026-11-16", { guide: { pad: "x".repeat(MAX_GUIDE_CHARS) } })] }, /guide must be at most/],
@@ -74,7 +76,7 @@ test("plan: replace swaps the whole plan and reports the previous one; merge kee
   await setPlan({ mode: "merge", goal: "new", phases: [] }, store);
   assert.deepEqual([(await store.load())!.plan.goal, (await store.load())!.plan.phases.length, (await store.load())!.plan.sessions.length], ["new", 0, 3]);
   const replaced = await setPlan({ goal: "fresh" }, store);
-  assert.deepEqual(replaced.previous, { goal: "new", start: null, end: null, phases: 0, sessions: 3 });
+  assert.deepEqual(replaced.previous, { goal: "new", phases: [], sessions: [{ date: "2026-11-16", title: "A" }, { date: "2026-11-17", title: "B2" }, { date: "2026-11-18", title: "C" }] }, "the whole previous plan comes back, so a replace loses nothing");
   assert.equal((await store.load())!.plan.sessions.length, 0);
 });
 

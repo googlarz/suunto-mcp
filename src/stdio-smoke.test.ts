@@ -16,11 +16,12 @@ import { fileURLToPath } from "node:url";
 const serverPath = fileURLToPath(new URL("./index.js", import.meta.url));
 const pkgPath = fileURLToPath(new URL("../package.json", import.meta.url));
 
-async function withServer(fn: (call: (method: string, params?: unknown) => Promise<any>) => Promise<void>) {
+async function withServer(fn: (call: (method: string, params?: unknown) => Promise<any>) => Promise<void>, extraEnv: Record<string, string> = {}) {
   const cwd = await mkdtemp(join(tmpdir(), "suunto-smoke-"));
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([k]) => !k.startsWith("SUUNTO_") && k !== "PORT"),
   );
+  Object.assign(env, extraEnv);
   const child = spawn(process.execPath, [serverPath], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
   const pending = new Map<number, (msg: any) => void>();
   const noise: string[] = [];
@@ -81,7 +82,9 @@ test("stdio: every tool has a title and annotations consistent with what it does
       if (/^(push_.*_guide|delete_guide|generate_daily_digest|log_session)$/.test(t.name)) {
         assert.equal(t.annotations.destructiveHint, true, `${t.name}: overwrites or deletes, must be flagged destructive`);
       }
-      if (t.name === "set_plan" || catchup) assert.equal(t.annotations.destructiveHint, false, `${t.name}: changes only a small local file, not destructive`);
+      // a replace wipes the stored plan; get_catchup only writes a small marker and is the same call twice
+      if (t.name === "set_plan") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
+      if (catchup) assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
     }
   });
 });
@@ -100,4 +103,44 @@ test("stdio: invalid arguments are rejected before any credential or API work", 
     assert.equal(res.isError, true);
     assert.match(res.content[0].text, /Invalid arguments for list_workouts/);
   });
+});
+
+test("stdio: set_plan and get_plan work with no Suunto credentials (they only touch a local file)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-plan-smoke-"));
+  const planFile = join(dir, "plan.json");
+  try {
+    await withServer(async (call) => {
+      const set = (await call("tools/call", { name: "set_plan", arguments: { goal: "no creds" } })).result;
+      assert.notEqual(set.isError, true, set.content[0].text);
+      const got = (await call("tools/call", { name: "get_plan", arguments: {} })).result;
+      assert.notEqual(got.isError, true, got.content[0].text);
+      assert.equal(JSON.parse(got.content[0].text).plan.goal, "no creds");
+      // a tool that reads Suunto still needs them
+      const snap = (await call("tools/call", { name: "get_catchup", arguments: {} })).result;
+      assert.equal(snap.isError, true);
+      assert.match(snap.content[0].text, /SUUNTO_CLIENT_ID|credentials/i);
+    }, { SUUNTO_PLAN_PATH: planFile });
+    assert.equal(JSON.parse(await readFile(planFile, "utf8")).plan.goal, "no creds");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: get-plan works with no Suunto credentials", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-plan-cli-"));
+  try {
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("SUUNTO_") && k !== "PORT")) as Record<string, string>;
+    const out = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(process.execPath, [serverPath, "get-plan"], { cwd: dir, env: { ...env, SUUNTO_PLAN_PATH: join(dir, "plan.json") }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c: Buffer) => (stdout += c));
+      child.stderr.on("data", (c: Buffer) => (stderr += c));
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+    assert.equal(out.code, 0, out.stderr);
+    assert.equal(JSON.parse(out.stdout).plan, null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -4,8 +4,8 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SuuntoClient } from "./api.js";
-import { dayFetchBounds } from "./api.js";
-import { buildCatchup, fileSeenStore, memorySeenStore, WORKOUT_LIMIT } from "./catchup.js";
+import { dayFetchBounds, selectDays, selectNights } from "./api.js";
+import { buildCatchup, fileSeenStore, memorySeenStore, WORKOUT_LIMIT, type SeenState } from "./catchup.js";
 import { filePlanStore, memoryPlanStore, setPlan } from "./plan.js";
 
 const NOW = new Date(2026, 10, 15, 12, 0, 0); // local noon, 2026-11-15
@@ -36,12 +36,29 @@ interface Data {
 function fake(data: Data) {
   const calls: { name: string; args: any[] }[] = [];
   const client = {
-    listWorkouts: async (o: any) => (calls.push({ name: "workouts", args: [o] }), data.fail?.includes("workouts") ? Promise.reject(new Error("boom workouts")) : { payload: data.workouts ?? [] }),
-    listSleep: async (...a: any[]) => (calls.push({ name: "sleep", args: a }), data.fail?.includes("sleep") ? Promise.reject(new Error("boom sleep")) : { payload: data.sleeps ?? [] }),
-    listRecovery: async (...a: any[]) => (calls.push({ name: "recovery", args: a }), data.fail?.includes("recovery") ? Promise.reject(new Error("boom recovery")) : { payload: data.recoveries ?? [] }),
+    // like the real list: newest first, since/until inclusive on startTime, at most `limit`
+    listWorkouts: async (o: any) => {
+      calls.push({ name: "workouts", args: [o] });
+      if (data.fail?.includes("workouts")) throw new Error("boom workouts");
+      const rows = (data.workouts ?? []).filter((w) => (o.since == null || w.startTime >= o.since) && (o.until == null || w.startTime <= o.until));
+      return { payload: rows.sort((x, y) => y.startTime - x.startTime).slice(0, o.limit ?? 25) };
+    },
+    listSleep: async (from: string, to: string) => {
+      calls.push({ name: "sleep", args: [from, to] });
+      if (data.fail?.includes("sleep")) throw new Error("boom sleep");
+      return selectNights({ payload: data.sleeps ?? [] }, from, to);
+    },
+    listRecovery: async (from: string, to: string) => {
+      calls.push({ name: "recovery", args: [from, to] });
+      if (data.fail?.includes("recovery")) throw new Error("boom recovery");
+      return selectDays({ payload: data.recoveries ?? [] }, from, to);
+    },
   } as unknown as SuuntoClient;
   return { client, calls };
 }
+
+const state = (over: Partial<SeenState> = {}): SeenState => ({ workouts: [], workoutDate: null, cursorMs: null, sleepEndMs: null, recoveryAtMs: null, seenThrough: null, updatedAt: "", ...over });
+const at = (day: number) => new Date(2026, 10, day, 12, 0, 0);
 
 async function withDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "suunto-seen-"));
@@ -67,7 +84,7 @@ test("catchup: first call looks back 7 days with three bounded list calls and re
   });
   const r = await buildCatchup(client, memorySeenStore(), none, {}, NOW);
   assert.deepEqual(calls.map((c) => c.name).sort(), ["recovery", "sleep", "workouts"], "one request per section");
-  assert.deepEqual(calls.find((c) => c.name === "workouts")!.args[0], { since: dayFetchBounds("2026-11-08", "2026-11-15").from, limit: WORKOUT_LIMIT });
+  assert.deepEqual(calls.find((c) => c.name === "workouts")!.args[0], { since: dayFetchBounds("2026-11-08", "2026-11-15").from, limit: WORKOUT_LIMIT + 1 });
   assert.deepEqual(calls.find((c) => c.name === "sleep")!.args, ["2026-11-07", "2026-11-15"]);
   assert.deepEqual(calls.find((c) => c.name === "recovery")!.args, ["2026-11-08", "2026-11-15"]);
   assert.deepEqual(r.since, { from: "2026-11-08", firstCall: true });
@@ -117,7 +134,7 @@ test("catchup: markSeen true moves the marker; the next call shows only what cam
     const saved = JSON.parse(await readFile(file, "utf8"));
     assert.equal(saved.version, 1);
     assert.equal(saved.seenThrough, "2026-11-15");
-    assert.equal(saved.workoutStartMs, WK_B.startTime);
+    assert.deepEqual(saved.workouts, [{ key: WK_B.workoutKey, startMs: WK_B.startTime }, { key: WK_A.workoutKey, startMs: WK_A.startTime }]);
     assert.equal(saved.sleepEndMs, Date.parse(NIGHT_1.entryData.BedtimeEnd));
 
     const quiet = await buildCatchup(fake(data).client, seen, none, {}, NOW);
@@ -151,7 +168,7 @@ test("catchup: plan items are done, missed or pending by date; a workout counts 
   const plans = memoryPlanStore();
   await setPlan({ goal: "g", sessions: [{ date: "2026-11-09", title: "too early" }, { date: "2026-11-10", title: "Push A" }, { date: "2026-11-13", title: "Pull B" }, { date: "2026-11-15", title: "Legs C" }, { date: "2026-11-16", title: "future" }] }, plans);
   const seen = memorySeenStore();
-  await seen.save({ workoutStartMs: WK_B.startTime, workoutDate: "2026-11-14", sleepEndMs: null, recoveryAtMs: null, seenThrough: "2026-11-10", updatedAt: "" });
+  await seen.save(state({ workouts: [WK_B, WK_A].map((w) => ({ key: w.workoutKey, startMs: w.startTime })), workoutDate: "2026-11-14", seenThrough: "2026-11-10" }));
   const r: any = await buildCatchup(fake({ workouts: [WK_B, WK_A] }).client, seen, plans, {}, NOW);
   assert.equal(r.newWorkouts.length, 0, "both workouts were seen already");
   assert.deepEqual(r.plan.items.map((i: any) => [i.date, i.status]), [["2026-11-10", "missed"], ["2026-11-13", "done"], ["2026-11-15", "pending"]]);
@@ -166,44 +183,127 @@ test("catchup: no plan is null; an unreadable plan file is reported in the plan 
     await writeFile(file, "{ broken");
     const r: any = await buildCatchup(fake({}).client, memorySeenStore(), filePlanStore(file), {}, NOW);
     assert.match(r.plan.error, /not valid JSON/);
+    assert.deepEqual(r.errors.map((e: any) => e.section), ["plan"], "also listed in errors");
     assert.equal(await readFile(file, "utf8"), "{ broken");
   });
 });
 
-test("catchup: a failing section is listed, keeps its old marker and does not advance the plan review", async () => {
+test("catchup: a failing section is listed, keeps its old marker and keeps the review window open (seenThrough stays)", async () => {
   const seen = memorySeenStore();
-  const old = { workoutStartMs: 1000, workoutDate: "2026-11-01", sleepEndMs: 2000, recoveryAtMs: 3000, seenThrough: "2026-11-12", updatedAt: "" };
-  await seen.save(old);
+  await seen.save(state({ workoutDate: "2026-11-01", sleepEndMs: 2000, recoveryAtMs: 3000, seenThrough: "2026-11-12" }));
   const r = await buildCatchup(fake({ workouts: [WK_B], sleeps: [NIGHT_1], recoveries: [recovery("2026-11-14T06:30:00.000Z", 0.8)], fail: ["sleep"] }).client, seen, none, { markSeen: true }, NOW);
   assert.deepEqual(r.errors.map((e) => e.section), ["sleep"]);
   assert.equal(r.newNights.length, 0);
-  const state = (await seen.load())!;
-  assert.equal(state.sleepEndMs, 2000, "sleep marker kept");
-  assert.equal(state.workoutStartMs, WK_B.startTime);
-  assert.equal(state.recoveryAtMs, Date.parse("2026-11-14T06:30:00.000Z"));
+  const s1 = (await seen.load())!;
+  assert.equal(s1.sleepEndMs, 2000, "sleep marker kept");
+  assert.deepEqual(s1.workouts, [{ key: WK_B.workoutKey, startMs: WK_B.startTime }]);
+  assert.equal(s1.recoveryAtMs, Date.parse("2026-11-14T06:30:00.000Z"));
+  assert.equal(s1.seenThrough, "2026-11-12", "one section failed: the window does not move");
 
-  const noWorkouts = await buildCatchup(fake({ fail: ["workouts"] }).client, seen, none, { markSeen: true }, NOW);
-  assert.deepEqual(noWorkouts.errors.map((e) => e.section), ["workouts"]);
-  assert.equal((await seen.load())!.seenThrough, "2026-11-15", "unchanged from the call before");
   const stale = memorySeenStore();
+  const old = state({ workoutDate: "2026-11-01", sleepEndMs: 2000, recoveryAtMs: 3000, seenThrough: "2026-11-12" });
   await stale.save({ ...old });
-  await buildCatchup(fake({ fail: ["workouts"] }).client, stale, none, { markSeen: true }, NOW);
-  assert.deepEqual(await stale.load(), { ...old, updatedAt: NOW.toISOString(), sleepEndMs: 2000, recoveryAtMs: 3000 }, "a failed workouts section moves neither the workout marker nor seenThrough");
+  const noWorkouts = await buildCatchup(fake({ fail: ["workouts"] }).client, stale, none, { markSeen: true }, NOW);
+  assert.deepEqual(noWorkouts.errors.map((e) => e.section), ["workouts"]);
+  assert.deepEqual(await stale.load(), { ...old, updatedAt: NOW.toISOString() }, "a failed workouts section moves no workout marker and not seenThrough");
 });
 
-test("catchup: hitting the workout limit reports it and does not advance the workout marker or the plan review", async () => {
-  const many = Array.from({ length: WORKOUT_LIMIT }, (_, i) => workout(i.toString(16).padStart(24, "0"), "2026-11-14", "10:00", { startTime: WK_B.startTime - i * 60_000 }));
+test("catchup: sleep failing three days in a row with markSeen, then working, reports every night", async () => {
   const seen = memorySeenStore();
-  const r = await buildCatchup(fake({ workouts: many }).client, seen, none, { markSeen: true }, NOW);
-  assert.match(r.errors[0].error, /50-workout limit/);
-  const state = (await seen.load())!;
-  assert.equal(state.workoutStartMs, null);
-  assert.equal(state.seenThrough, null);
+  const nights = [12, 13, 14, 15, 16].map((d) => sleep(d, `2026-11-${d - 1}T22:30:00.000Z`, `2026-11-${d}T04:30:00.000Z`));
+  const data = { sleeps: nights };
+  const day12 = await buildCatchup(fake(data).client, seen, none, { markSeen: true }, at(12));
+  assert.equal(day12.newNights.length, 1);
+  assert.equal((await seen.load())!.seenThrough, "2026-11-12");
+  for (const d of [13, 14, 15]) {
+    const r = await buildCatchup(fake({ ...data, fail: ["sleep"] }).client, seen, none, { markSeen: true }, at(d));
+    assert.deepEqual(r.errors.map((e) => e.section), ["sleep"]);
+  }
+  const back = await buildCatchup(fake(data).client, seen, none, { markSeen: true }, at(16));
+  assert.deepEqual(back.newNights.map((n) => n.bedtimeEnd), nights.slice(1).map((n) => n.entryData.BedtimeEnd), "the nights of the 13th, 14th, 15th and 16th are all there");
+  assert.equal((await seen.load())!.seenThrough, "2026-11-16", "moves once every section was read");
+});
+
+test("catchup: an unreadable plan file is an error, keeps seenThrough, and the missed session shows once the file is fixed", async () => {
+  await withDir(async (dir) => {
+    const file = join(dir, "plan.json");
+    const seen = memorySeenStore();
+    await seen.save(state({ seenThrough: "2026-11-10" }));
+    await writeFile(file, '{"version":1,"plan":"nope"}');
+    const broken = await buildCatchup(fake({}).client, seen, filePlanStore(file), { markSeen: true }, NOW);
+    assert.deepEqual(broken.errors.map((e) => e.section), ["plan"]);
+    assert.equal((await seen.load())!.seenThrough, "2026-11-10");
+    await rm(file);
+    await setPlan({ goal: "g", sessions: [{ date: "2026-11-12", title: "Push A" }] }, filePlanStore(file));
+    const fixed: any = await buildCatchup(fake({}).client, seen, filePlanStore(file), { markSeen: true }, NOW);
+    assert.deepEqual(fixed.plan.items.map((i: any) => [i.date, i.status]), [["2026-11-12", "missed"]]);
+    assert.deepEqual(fixed.errors, []);
+    assert.equal((await seen.load())!.seenThrough, "2026-11-15");
+  });
+});
+
+test("catchup: a workout that syncs late with an earlier start than one already seen is still reported, once", async () => {
+  const seen = memorySeenStore();
+  await buildCatchup(fake({ workouts: [WK_B] }).client, seen, none, { markSeen: true }, NOW);
+  const early = workout("eeeeeeeeeeeeeeeeeeeeeeee", "2026-11-14", "09:00");
+  const r = await buildCatchup(fake({ workouts: [WK_B, early] }).client, seen, none, { markSeen: true }, NOW);
+  assert.deepEqual(r.newWorkouts.map((w) => w.workoutKey), [early.workoutKey]);
+  assert.deepEqual((await buildCatchup(fake({ workouts: [WK_B, early] }).client, seen, none, {}, NOW)).newWorkouts, []);
+});
+
+test("catchup: the list of seen workout keys stays bounded and drops what is out of reach", async () => {
+  const seen = memorySeenStore();
+  const old = workout("0d0d0d0d0d0d0d0d0d0d0d0d", "2026-10-01", "10:00");
+  await seen.save(state({ workouts: [{ key: old.workoutKey, startMs: old.startTime }] }));
+  await buildCatchup(fake({ workouts: [WK_B] }).client, seen, none, { markSeen: true }, NOW);
+  assert.deepEqual((await seen.load())!.workouts.map((w) => w.key), [WK_B.workoutKey]);
+});
+
+const batch = (n: number) => Array.from({ length: n }, (_, i) => workout(i.toString(16).padStart(24, "0"), "2026-11-14", "10:00", { startTime: WK_B.startTime - i * 60_000 }));
+
+test("catchup: exactly 50 workouts is complete (no error); more are paged, 51 asked for per page", async () => {
+  const exact = fake({ workouts: batch(WORKOUT_LIMIT) });
+  const r = await buildCatchup(exact.client, memorySeenStore(), none, {}, NOW);
+  assert.equal(r.newWorkouts.length, 50);
+  assert.deepEqual(r.errors, []);
+  assert.equal(exact.calls.filter((c) => c.name === "workouts").length, 1);
+
+  const more = fake({ workouts: batch(120) });
+  const seen = memorySeenStore();
+  const r2 = await buildCatchup(more.client, seen, none, { markSeen: true }, NOW);
+  assert.equal(r2.newWorkouts.length, 120, "paged, every workout once");
+  assert.deepEqual(r2.errors, []);
+  assert.ok(more.calls.filter((c) => c.name === "workouts").every((c) => c.args[0].limit === WORKOUT_LIMIT + 1));
+  assert.equal((await seen.load())!.seenThrough, "2026-11-15");
+});
+
+test("catchup: more workouts than one call can page are reported, nothing stalls, and repeated calls finish the list", async () => {
+  const data = { workouts: batch(230) };
+  const seen = memorySeenStore();
+  const one = await buildCatchup(fake(data).client, seen, none, { markSeen: true }, NOW);
+  assert.equal(one.newWorkouts.length, 200);
+  assert.match(one.errors[0].error, /more workouts than one call reads.*call again/is);
+  const s1 = (await seen.load())!;
+  assert.equal(s1.seenThrough, null, "the review window stays open");
+  assert.ok(s1.cursorMs !== null);
+  const two = await buildCatchup(fake(data).client, seen, none, { markSeen: true }, NOW);
+  assert.equal(two.newWorkouts.length, 30, "the rest, below where the last call stopped");
+  assert.deepEqual(two.errors, []);
+  const s2 = (await seen.load())!;
+  assert.equal(s2.cursorMs, null);
+  assert.equal(s2.seenThrough, "2026-11-15");
+  assert.equal((await buildCatchup(fake(data).client, seen, none, {}, NOW)).newWorkouts.length, 0);
+});
+
+test("catchup: without markSeen a truncated read writes no cursor either", async () => {
+  const seen = memorySeenStore();
+  await buildCatchup(fake({ workouts: batch(230) }).client, seen, none, {}, NOW);
+  assert.equal(await seen.load(), null);
 });
 
 test("catchup: a marker older than 14 days is capped at 14 days and says so", async () => {
   const seen = memorySeenStore();
-  await seen.save({ workoutStartMs: null, workoutDate: null, sleepEndMs: null, recoveryAtMs: null, seenThrough: "2026-10-01", updatedAt: "" });
+  await seen.save(state({ seenThrough: "2026-10-01" }));
   const { client, calls } = fake({});
   const r = await buildCatchup(client, seen, none, {}, NOW);
   assert.equal(r.since.from, "2026-11-01");
@@ -217,8 +317,10 @@ test("catchup: an unreadable or foreign seen file stops the call (even with mark
       ["{ nope", /not valid JSON/],
       ["[]", /not a suunto-mcp seen file/],
       ['{"version":2}', /version/],
-      ['{"workoutStartMs":5}', /version/],
-      ['{"version":1,"workoutStartMs":"x"}', /workoutStartMs must be a timestamp/],
+      ['{"workoutDate":null}', /version/],
+      ['{"version":1,"sleepEndMs":"x"}', /sleepEndMs must be a timestamp/],
+      ['{"version":1,"workouts":"x"}', /workouts must be an array/],
+      ['{"version":1,"workouts":[{"key":"a"}]}', /workouts\[0\]/],
       ['{"version":1,"seenThrough":"2026-02-30"}', /seenThrough must be a calendar date/],
       ['{"version":1,"extra":1}', /extra is not a known field/],
     ];
