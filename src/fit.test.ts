@@ -121,3 +121,14 @@ test("fit: parseFit rejects obvious garbage", async () => {
 test("fit: parseFit rejects empty input", async () => {
   await assert.rejects(parseFit(Buffer.alloc(0)));
 });
+
+test("fit: a file with a valid header but a garbage body is 'not a readable FIT file', not the parser's internal error", async () => {
+  const bytes = Buffer.from(buildMinimalFit(64));
+  bytes.fill(0x00, 14, 14 + 64); // zeros where the first record header and definition should be: the parser fails inside itself
+  await assert.rejects(parseFit(bytes), (err: Error) => {
+    assert.match(err.message, /^not a readable FIT file/);
+    assert.doesNotMatch(err.message, /globalMessageNumber|Cannot read properties/);
+    assert.ok(err.cause instanceof Error, "the parser's own error stays available as the cause");
+    return true;
+  });
+});

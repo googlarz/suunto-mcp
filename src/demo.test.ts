@@ -349,6 +349,22 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
   });
 });
 
+test("e2e demo: push_week_plan's dry run (the default) validates and returns the plan; a real push still only returns the demo note", async () => {
+  await withDemo(async (call, _rpc, fetchLog) => {
+    const guides = [{ title: "T", date: today(), exercises: [{ name: "A", detail: "x", sets: 3, restSec: 60 }] }];
+    const dry = await ok(call, "push_week_plan", { guides });
+    assert.equal(dry.dryRun, true);
+    assert.ok(Array.isArray(dry.notes) && dry.notes.length > 0);
+    assert.equal((await ok(call, "push_week_plan", { guides, dryRun: true })).dryRun, true);
+    const bad = await call("push_week_plan", { guides: [{ title: "T", date: today(), exercises: [] }] });
+    assert.equal(bad.isError, true, "a dry run still rejects a guide that does not validate");
+    const real = await ok(call, "push_week_plan", { guides, dryRun: false });
+    assert.match(real.message, /Demo mode: nothing was written.*push_week_plan would/);
+    assert.equal(real.dryRun, undefined);
+    assert.equal(await fetchLog(), "");
+  });
+});
+
 test("e2e demo: set_plan / get_plan / get_catchup work in memory and write nothing to disk", async () => {
   await withDemo(async (call, rpc, fetchLog) => {
     const tools: any[] = (await rpc("tools/list")).result.tools;

@@ -52,7 +52,7 @@ export function saveLastExportedDate(date: string): void {
   mkdirSync(dirname(path), { recursive: true });
   // Temp file + rename, so a crash can't leave a truncated state file.
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify({ lastDate: date }, null, 2));
+  writeFileSync(tmp, JSON.stringify({ lastDate: date }, null, 2), { mode: 0o600 });
   renameSync(tmp, path);
 }
 

@@ -38,17 +38,29 @@ src/
 Tests live alongside source as `*.test.ts` and run via Node's built-in
 `node:test` runner — no test framework deps.
 
+## The 1.x contract and its fixtures
+
+[docs/CONTRACT.md](docs/CONTRACT.md) says what stays compatible within 1.x. `src/contract.test.ts` enforces it: it starts the real server in demo mode and compares the tool list (names, input schemas, annotations), the key shape of every read-only tool's result (with the fields demo data never fills listed under `unobserved`) and the names of `bin` commands, environment variables, MCP prompts and resources with `test-fixtures/contract/tools.json`, `outputs.json` and `surface.json`. A new environment variable must also be added to the README's table. Any difference fails, and the message says whether it is BREAKING (a removed or renamed tool or property, a changed type, a newly required input, changed annotations) or additive.
+
+When you add a tool, an optional input or an output key on purpose, regenerate the fixtures and commit them with your change:
+
+```bash
+UPDATE_CONTRACT=1 npm test
+git diff test-fixtures/contract/   # review: only additions should show
+```
+
+Never regenerate to make a BREAKING difference pass. A new read-only tool also needs a call in `OUTPUT_CALLS` in `src/contract.test.ts`.
+
 ## Where things tend to need work
 
 - **24/7 product paths** in `api.ts` are best-effort. If your apizone
   entitlement uses a different prefix, set `SUUNTO_DAILY_PREFIX` and (if
   it's general) submit a fix.
 - **Webhook subscription CRUD** is on the roadmap but not built.
-- **MCP Prompts** (preset templates) aren't wired up yet.
 
 ## PR checklist
 
-- [ ] `npm test` passes
+- [ ] `npm test` passes (if the contract test failed on an addition you meant, `UPDATE_CONTRACT=1 npm test` and commit the fixtures)
 - [ ] `npm run build` succeeds
 - [ ] New behavior has a test (or a clear note why it's not testable)
 - [ ] No new top-level deps unless justified — Node's built-ins go a long way

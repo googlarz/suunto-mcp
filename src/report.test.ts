@@ -348,6 +348,23 @@ test("report: the workouts table and the week's training stress come from one so
   assert.match(same.markdown, /Training stress this week: 50 \(the sum of the workouts above\)/);
 });
 
+test("report: the durations in the workouts table add up to its Total and to the summary line (each row is rounded to the minute first)", async () => {
+  // 40.5 min rounds to 41 per row: three rows are 123 min, while the exact sum, 121.5 min, would round to 122
+  const workouts = ["2026-11-03", "2026-11-04", "2026-11-05"].map((d, i) => ({ ...dayOf(d), totalTime: 2430, workoutKey: String(i).repeat(24) }));
+  const r = await buildWeeklyReport(clientWith({ listWorkouts: async () => ({ payload: workouts }) }), { week: WEEK }, deps());
+  const minutes = (cell: string) => {
+    const m = /^(?:(\d+) h )?(\d+) min$/.exec(cell.trim());
+    assert.ok(m, `not a duration: ${cell}`);
+    return Number(m[1] ?? 0) * 60 + Number(m[2]);
+  };
+  const rows = r.markdown.split("\n").filter((l) => /^\| 2026-11-0\d /.test(l));
+  const total = r.markdown.split("\n").find((l) => l.startsWith("| Total"))!;
+  assert.deepEqual(rows.map((l) => minutes(l.split("|")[3])), [41, 41, 41]);
+  assert.equal(minutes(total.split("|")[3]), 123, total);
+  assert.match(r.markdown, /3 workouts, 2 h 03 min in total/);
+  assert.equal(r.workouts!.totalTimeS, 7290, "the JSON keeps the exact seconds");
+});
+
 test("report: the demo week's table rows add up to the printed total", async () => {
   const r = await buildWeeklyReport(new DemoClient(NOW), { week: WEEK }, deps());
   const rows = r.markdown.split("\n").filter((l) => /^\| 2026-11-0\d /.test(l));

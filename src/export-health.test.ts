@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, writeFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveTokens } from "./storage.js";
@@ -107,6 +107,11 @@ test("exportHealthCsv: an unreadable state file stops the sync — it is not a f
   await writeFile(statePath, JSON.stringify({ lastDate: daysAgo(2) }));
   const ok = await exportHealthCsv(cfg, { healthRoot: tmp });
   assert.equal(ok.rowCount, 1, "with a good watermark only yesterday is new");
+});
+
+test("saveLastExportedDate: the state file is created owner-only (0600)", async () => {
+  saveLastExportedDate("2026-09-27");
+  assert.equal((await stat(statePath)).mode & 0o777, 0o600);
 });
 
 test("saveLastExportedDate: writes the watermark whole and leaves no temp file", async () => {

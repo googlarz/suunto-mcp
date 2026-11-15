@@ -110,7 +110,9 @@ What works: every read tool and the four prompts (`suunto-morning`, `suunto-week
 
 `set_plan`, `get_plan`, `get_catchup`, `archive_workouts`, `get_archive_status` and `get_weekly_report` (its `save` too) work too, on in-memory state only: the plan, the catch-up marker and the workout archive live as long as the server process and never reach the disk. `get_tag_effects` runs on a small synthetic journal (gym sessions tagged `strength`, Saturday runs `long-run`); your real journal is not read.
 
-What does not: anything else that writes (`upload_workout`, `upload_route`, `push_*_guide`, `push_week_plan`, `delete_guide`, `generate_daily_digest`, `log_session`) writes nothing and only returns a short note on what it would do with real credentials. `get_upload_status` has no uploads to find.
+`push_week_plan` works as a dry run (its default: it validates the guides and returns what it would push, and contacts nothing).
+
+What does not: anything else that writes (`upload_workout`, `upload_route`, `push_*_guide`, `push_week_plan` with `dryRun: false`, `delete_guide`, `generate_daily_digest`, `log_session`) writes nothing and only returns a short note on what it would do with real credentials. `get_upload_status` has no uploads to find.
 
 You can't mistake demo data for real data: every tool result is JSON with a top-level `"demo": true` (a result that is a list, or text such as a GPX file, comes back as `{ "demo": true, "data": … }`), the server's instructions and the prompts say the data is synthetic, and the startup line says DEMO MODE. Errors are unchanged. `npm run doctor` with `SUUNTO_DEMO=1` just reports that demo mode is on. When your API access arrives, remove `SUUNTO_DEMO` and follow the setup below. Demo mode applies to the MCP server only, not to the terminal commands.
 
@@ -524,12 +526,29 @@ Use your email address to sign in to apizone. Your username will appear once you
 
 ---
 
+## Known limits / not yet verified on real devices
+
+None of the following has been checked against a real watch or real Suunto files; the tests use synthetic data. Treat each as open until you have seen it work on your own. What stays stable from release to release, and what does not, is in [docs/CONTRACT.md](docs/CONTRACT.md).
+
+- **Guides on the watch.** How the `TODAY` popup (the `last` / `target` hint of `push_strength_guide`) and the newer step titles and popups (`3/6 - 2/3`, `SET 2/3`, `LAST SET`) render on a real watch has not been checked on a device.
+- **Guides dated in the future.** `push_week_plan` pushes guides up to 14 dates ahead. Whether the watch shows each one on its day, and when it appears after the phone's sync, has not been verified.
+- **Location-triggered guides.** Not implemented. Guides are pushed by date only.
+- **Units of `recoveryTime`, `pte` and `peakEpoc`.** Suunto does not document them, so `get_workout_laps` passes them through under their own names with no unit claimed.
+- **FIT checks.** The integrity check looks at the FIT header and the length only; the CRC is not checked. The heart-rate quality thresholds (coverage, dropout gaps, plausible range 30-230 bpm, stuck-sensor and jump rules) were set lenient on purpose and have not been validated on real Suunto files. The timebase alignment in `get_workout_rest_profile` and whether Suunto's FIT export carries the SuuntoPlus developer fields are likewise unverified.
+- **`get_tag_effects`.** Its false-alarm rates (roughly 9% of tags at 15 nights per group with no real difference, more when nights are correlated) come from a simulation, not from real nights. It reports an association, never a cause.
+- **`estimate_route_time`.** The model (flat pace plus extra time per metre climbed and descended, fitted to your archived workouts) has not been checked against real finished times; its in-sample error is a fit to the past, not a forecast. Without enough archived workouts it falls back to a generic rule that is not your pace.
+- **Daily calories.** The energy in `get_daily_activity_statistics` looks like active energy, not total; not verified against the watch.
+- **The `.mcpb` bundle.** Not opened in a real host, not signed, no automatic updates (see [One-click install](#one-click-install-mcpb-bundle)).
+- **Deleting a route.** Whether Suunto's API accepts a DELETE on a route is unconfirmed, and no tool offers it: remove routes in the Suunto app.
+
+---
+
 ## Upgrading
 
 - **npx:** `npx -y suunto-mcp` fetches the newest version on a fresh start; if you pinned a version in `args`, change it. Restart Claude afterwards.
 - **Cloned folder:** `git pull`, `npm install`, `npm run build`, then restart Claude.
 
-See [CHANGELOG.md](CHANGELOG.md) for what changed.
+See [CHANGELOG.md](CHANGELOG.md) for what changed. From 1.0 on, [docs/CONTRACT.md](docs/CONTRACT.md) says what stays compatible within 1.x (tool names, input schemas, documented output fields, local file formats) and what does not.
 
 ## Environment variables
 
@@ -551,6 +570,10 @@ Set these in the `env` block of your Claude config (or in `.env` for terminal co
 | `SUUNTO_SEEN_PATH` | no | The `get_catchup` marker file; default `~/.suunto-mcp/seen.json` |
 | `SUUNTO_ARCHIVE_DIR` | no | Folder of the `archive_workouts` archive (FIT files and workout summaries); default `~/.suunto-mcp/archive/` |
 | `SUUNTO_REPORTS_DIR` | no | Folder where `get_weekly_report` with `save: true` writes `week-<Monday>.md`; default `~/.suunto-mcp/reports/` |
+| `SUUNTO_ENABLE_LEGACY_TOOLS` | no | `1` lists the three hidden tools (`get_workout_samples`, `export_workout_gpx`, `list_subscriptions`) that Suunto's servers no longer answer |
+| `SUUNTO_DAILY_PREFIX` | no | Path prefix of the 24/7 (sleep, recovery, daily activity) endpoints; default `/247samples`. Only change it if your apizone entitlement uses another one |
+| `SUUNTO_HEALTH_EXPORT_STATE_PATH` | no | State file of `sync-to-health-skill` (which days were already copied); default `~/.suunto-mcp/health-export-state.json` |
+| `SUUNTO_WRITE_GAP_MS`, `SUUNTO_ROUTE_IMPORT_GAP_MS`, `SUUNTO_ROUTE_VERIFY_DELAY_MS`, `SUUNTO_UPLOAD_POLL_MS` | no | Pacing of writes to Suunto in milliseconds (all default to 2000 except the route read-back delay, 3000): the pause between guide pushes and workout uploads, between route imports, before a route is read back, and between upload status polls. Leave them alone unless you are testing |
 | `SUUNTO_WEBHOOK_SECRET`, `SUUNTO_WEBHOOK_HOST`, `SUUNTO_WEBHOOK_LOG`, `SUUNTO_WEBHOOK_ALLOW_UNSIGNED`, `PORT` | webhook only | See the Webhooks section |
 
 ---
@@ -750,7 +773,7 @@ Claude picks the right tool automatically — you don't need to know these. For 
 | `get_upload_status` | Check whether an upload finished processing |
 | `push_workout_guide` | Push a structured workout (exercises, weights, rest, notifications) as a SuuntoPlus Guide — requires `SUUNTO_APP_NAME` |
 | `push_interval_guide` | Push an auto-advancing interval/cardio guide (timed or distance-based segments, target HR ranges) — requires `SUUNTO_APP_NAME` |
-| `push_strength_guide` | Push a per-set strength session (prep stopwatch, set/rest lap tracking, configurable rest mode, `3/6 - 2/3` step titles (exercise/set), optional rest target HR, optional per-exercise `last` / `target` hints such as `3x8@60kg` / `3x8@62.5kg` shown in a `TODAY` popup when the exercise's prep step starts, at most 36 characters (a long `last` is shortened, then dropped, so the target is never cut; if nothing fits there is no popup), not part of the lap labels) — requires `SUUNTO_APP_NAME` |
+| `push_strength_guide` | Push a per-set strength session (prep stopwatch, set/rest lap tracking, configurable rest mode, `3/6 - 2/3` step titles (exercise/set), optional rest target HR, optional per-exercise `last` / `target` hints such as `3x8@60kg` / `3x8@62.5kg` shown in a `TODAY` popup when the exercise's prep step starts, at most 36 characters (a long `last` is shortened, then dropped, so the target is never cut; if nothing fits there is no popup), not part of the lap labels; how the titles and popups render on a real watch is not yet verified, see [Known limits](#known-limits--not-yet-verified-on-real-devices)) — requires `SUUNTO_APP_NAME` |
 | `push_week_plan` | Push a week of strength guides in one call: one NEW guide per date (the arguments of `push_strength_guide` per guide, without `guideId`; at most 14, dates must differ), each read back like `push_strength_guide`. **`dryRun` defaults to true**: it then only validates every guide and returns what it would push, without contacting Suunto; pass `dryRun: false` to push. The first failure stops the push and the result names what was pushed, what failed and what was left. Pushing the same plan twice creates duplicates (`list_guides` / `delete_guide`). Requires `SUUNTO_APP_NAME` for a real push |
 | `list_guides` | List all SuuntoPlus Guides on your account |
 | `delete_guide` | Permanently delete a guide by id |
