@@ -54,6 +54,11 @@ const summaryOf = (rows: Map<string, any>, r: WorkoutRecord) => {
   return row ? summarizeWorkouts({ payload: [row] }, r.date)[0] : undefined;
 };
 
+const shape = (e: ExerciseRecord, entry: JournalEntry | undefined) => {
+  const { kg, source } = loadOf(e, entry);
+  return { name: e.name, detail: e.detail, kg, loadSource: source, reps: reps(e.detail), setsDone: e.setsDone, plannedSets: e.plannedSets, restEndHr: e.reliable && e.restAfterSet1 ? e.restAfterSet1.endHr : null, reliable: e.reliable };
+};
+
 const reps = (detail: string | null): number | null => {
   const m = detail === null ? null : PLANNED.exec(detail);
   return m ? Number(m[2]) : null;
@@ -73,9 +78,20 @@ export function benchmarkFrom(
     if ("guide" in query && (guide === null || norm(guide) !== norm(query.guide))) return [];
     const exercises = r.exercises.filter((e) => !("exercise" in query) || nameMatches(query.exercise, e));
     if (exercises.length === 0) return [];
-    const shaped = exercises.map((e: ExerciseRecord) => {
-      const { kg, source } = loadOf(e, journal[r.workoutKey]);
-      return { name: e.name, detail: e.detail, kg, loadSource: source, reps: reps(e.detail), setsDone: e.setsDone, plannedSets: e.plannedSets, restEndHr: e.reliable && e.restAfterSet1 ? e.restAfterSet1.endHr : null, reliable: e.reliable };
+    // One entry per exercise per session: an exercise that appears twice (two blocks, a superset) is merged, so it counts
+    // once in the series. Merged: the heaviest block's detail, load and reps, sets added (planned sets unknown when any
+    // block's are), the median of the blocks' rest HR, reliable only when every block is.
+    const blocks = new Map<string, ReturnType<typeof shape>[]>();
+    for (const e of exercises) blocks.set(norm(e.name), [...(blocks.get(norm(e.name)) ?? []), shape(e, journal[r.workoutKey])]);
+    const shaped = [...blocks.values()].map((parts) => {
+      const top = parts.reduce((a, b) => ((b.kg ?? -1) > (a.kg ?? -1) ? b : a));
+      const hrs = parts.map((p) => p.restEndHr).filter((x): x is number => x !== null);
+      return {
+        name: parts[0].name, detail: top.detail, kg: top.kg, loadSource: top.loadSource, reps: top.reps,
+        setsDone: parts.reduce((n, p) => n + p.setsDone, 0),
+        plannedSets: parts.some((p) => p.plannedSets === null) ? null : parts.reduce((n, p) => n + p.plannedSets!, 0),
+        restEndHr: hrs.length ? median(hrs) : null, reliable: parts.every((p) => p.reliable), parts: parts.length,
+      };
     });
     const hrs = shaped.map((e) => e.restEndHr).filter((x): x is number => x !== null);
     return [{ date: r.date, workoutKey: r.workoutKey, guide, durationS: summary?.totalTimeS ?? null, tss: summary?.tss ?? null, restEndHrMedian: hrs.length ? Math.round(median(hrs)) : null, exercises: shaped }];

@@ -85,8 +85,8 @@ test("stdio: every tool has a title and annotations consistent with what it does
       // a replace wipes the stored plan; get_catchup only writes a small marker and is the same call twice
       if (t.name === "set_plan") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
       if (catchup) assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
-      // archive_workouts writes only new local files and reads Suunto: not destructive, idempotent, open-world
-      if (t.name === "archive_workouts") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
+      // archive_workouts writes only new local files and reads Suunto: not destructive, not idempotent (each call archives more), open-world
+      if (t.name === "archive_workouts") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
       if (t.name === "get_archive_status") assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
     }
   });

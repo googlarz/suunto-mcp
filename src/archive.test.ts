@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SuuntoClient } from "./api.js";
@@ -216,6 +216,79 @@ test("archive: a FIT file already there is never overwritten: a different one bl
     assert.match(res.errors[0].error, /already exists and differs; left untouched/);
     assert.equal(await readFile(join(dir, `${keyOf(1)}.fit`), "utf8"), "somebody else's file");
     assert.deepEqual(await ls(dir), [`${keyOf(1)}.fit`, `${keyOf(2)}.fit`, `${keyOf(2)}.json`], "no record for the blocked one");
+    // the blocked one stays visible as incomplete, never as archived and never as damaged
+    const st: any = await archiveStatus(fileArchiveStore(dir));
+    assert.deepEqual([st.archived, st.problems, st.incomplete.map((i: any) => i.workoutKey)], [1, [], [keyOf(1)]]);
+  });
+});
+
+test("archive status: a FIT file with no record is listed as incomplete (not ignored, not a problem), and the next archive_workouts completes it", async () => {
+  await withDir(async (dir) => {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${keyOf(1)}.fit`), fitFor(1)); // what an interrupted run leaves
+    await writeFile(join(dir, `${keyOf(2)}.fit`), fitFor(2));
+    const before: any = await archiveStatus(fileArchiveStore(dir));
+    assert.deepEqual([before.archived, before.problems, before.otherFiles], [0, [], 0]);
+    assert.deepEqual(before.incomplete.map((i: any) => i.workoutKey), [keyOf(1), keyOf(2)]);
+    assert.match(before.incomplete[0].problem, /no record/);
+    assert.match(before.notes.join(" "), /2 workout\(s\) have a FIT file but no record/);
+    const run = fake([workout(1)]);
+    const res: any = await archiveWorkouts(run.client, fileArchiveStore(dir), {}, NOW);
+    assert.deepEqual([res.newlyArchived, res.errors, res.refused], [1, [], []], "an identical FIT file is no obstacle");
+    const after: any = await archiveStatus(fileArchiveStore(dir));
+    assert.deepEqual([after.archived, after.incomplete.map((i: any) => i.workoutKey)], [1, [keyOf(2)]]);
+    // an empty folder or a complete one has none
+    assert.deepEqual((await archiveStatus(memoryArchiveStore()) as any).incomplete, []);
+  });
+});
+
+// ---------- never overwrite, across processes ----------
+
+test("archive: two writers racing for one key: exactly one wins, the other is refused, nothing is overwritten or left behind", async () => {
+  await withDir(async (dir) => {
+    for (let i = 1; i <= 20; i++) {
+      const key = keyOf(i);
+      const [a, b] = [fitFor(i), fitFor(i + 1000)]; // two different downloads of "the same" workout
+      const rec = (fit: Buffer, at: string) => ({ version: 1 as const, workoutKey: key, archivedAt: at, fit: { bytes: fit.length, sha256: createHash("sha256").update(fit).digest("hex") }, workout: { workoutKey: key } });
+      const results = await Promise.allSettled([fileArchiveStore(dir).save(key, a, rec(a, "A")), fileArchiveStore(dir).save(key, b, rec(b, "B"))]);
+      const won = results.filter((r) => r.status === "fulfilled");
+      assert.equal(won.length, 1, `key ${i}: ${JSON.stringify(results.map((r) => r.status))}`);
+      const lost = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+      assert.match(String(lost.reason.message), /already exists and differs; left untouched/);
+      const winner = results[0].status === "fulfilled" ? "A" : "B";
+      assert.deepEqual(await readFile(join(dir, `${key}.fit`)), winner === "A" ? a : b);
+      assert.equal(JSON.parse(await readFile(join(dir, `${key}.json`), "utf8")).archivedAt, winner);
+    }
+    assert.ok((await ls(dir)).every((f) => /^[0-9a-f]{24}\.(fit|json)$/.test(f)), `no temp files left: ${(await ls(dir)).filter((f) => !/^[0-9a-f]{24}\.(fit|json)$/.test(f))}`);
+  });
+});
+
+test("archive: two writers with the SAME FIT bytes both get past the FIT, and only one writes the record", async () => {
+  await withDir(async (dir) => {
+    const key = keyOf(1);
+    const fit = fitFor(1);
+    const rec = (at: string) => ({ version: 1 as const, workoutKey: key, archivedAt: at, fit: { bytes: fit.length, sha256: createHash("sha256").update(fit).digest("hex") }, workout: {} });
+    const results = await Promise.allSettled([fileArchiveStore(dir).save(key, fit, rec("A")), fileArchiveStore(dir).save(key, fit, rec("B"))]);
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+    assert.match(String((results.find((r) => r.status === "rejected") as PromiseRejectedResult).reason.message), /already exists and differs/);
+    assert.deepEqual(await readFile(join(dir, `${key}.fit`)), fit);
+    assert.deepEqual(await ls(dir), [`${key}.fit`, `${key}.json`]);
+  });
+});
+
+// ---------- folder permissions ----------
+
+test("archive: a folder the tool creates is 0700; an existing folder keeps the mode it has", async () => {
+  await withDir(async (dir) => {
+    await mkdir(dir, { recursive: true });
+    await chmod(dir, 0o755);
+    await archiveWorkouts(fake([workout(1)]).client, fileArchiveStore(dir), {}, NOW);
+    assert.equal(await mode(dir), 0o755, "not ours to change");
+    assert.equal(await mode(join(dir, `${keyOf(1)}.json`)), 0o600, "the files are always 0600");
+  });
+  await withDir(async (dir) => {
+    await archiveWorkouts(fake([workout(1)]).client, fileArchiveStore(join(dir, "a", "b")), {}, NOW);
+    assert.equal(await mode(join(dir, "a", "b")), 0o700);
   });
 });
 

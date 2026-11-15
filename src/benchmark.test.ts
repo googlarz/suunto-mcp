@@ -83,7 +83,7 @@ test("benchmarkFrom (guide): per session duration, TSS, median rest HR and per e
   assert.equal(res.sessions.length, 5, "only the sessions of that guide, matched ignoring case and spacing");
   const s = res.sessions[0];
   assert.deepEqual([s.date, s.guide, s.durationS, s.tss, s.restEndHrMedian], ["2026-10-01", "PUSH A", 3000, 50, 118]);
-  assert.deepEqual(s.exercises[0], { name: "Bench Press", detail: "62.5kg 3x8", kg: 62.5, loadSource: "label", reps: 8, setsDone: 3, plannedSets: 3, restEndHr: 117, reliable: true });
+  assert.deepEqual(s.exercises[0], { name: "Bench Press", detail: "62.5kg 3x8", kg: 62.5, loadSource: "label", reps: 8, setsDone: 3, plannedSets: 3, restEndHr: 117, reliable: true, parts: 1 });
   assert.deepEqual(res.series.durationS, { n: 5, first: 3000, last: 2600, best: 2600, better: "lower", trend: "down", change: -300 });
   assert.equal(res.series.tss.best, null);
   assert.equal(res.series.tss.trend, "up");
@@ -122,6 +122,30 @@ test("benchmarkFrom: unreliable heart-rate sessions do not enter rest HR; missin
   const journal: Record<string, JournalEntry> = { [recs[4].workoutKey]: { workoutKey: recs[4].workoutKey, loggedAt: "x", exercises: [{ name: "Bench Press", sets: [{ reps: 8, kg: 80 }, { reps: 8, kg: 77.5 }] }] } };
   const logged = benchmarkFrom(recs, rows, journal, { exercise: "Bench Press" });
   assert.deepEqual([logged.sessions[4].exercises[0].kg, logged.sessions[4].exercises[0].loadSource], [80, "journal"]);
+});
+
+test("benchmarkFrom: an exercise that appears twice in a session is ONE entry for that session (sets added, heaviest load, median rest HR) and one value in the series", () => {
+  const { recs, rows } = fiveSessions();
+  // session 3 does Bench Press twice: a 60 kg block and a 70 kg block (and a second block with no rest recovery in session 4)
+  recs[2].exercises = [ex("Bench Press", "60kg 3x8", 60, 110), ex("Overhead Press", "40kg 3x8", 40, 118), ex("Bench Press", "70kg 2x5", 70, 100, { setsDone: 2, plannedSets: 2 })];
+  recs[3].exercises = [ex("Bench Press", "70kg 3x8", 70, 105), ex("bench  press", "50kg 2x12", 50, null, { setsDone: 2, plannedSets: null, reliable: false })];
+  const res = benchmarkFrom(recs, rows, {}, { guide: "PUSH A" });
+  const third = res.sessions[2].exercises;
+  assert.deepEqual(third.map((e) => e.name), ["Bench Press", "Overhead Press"], "one entry per exercise, in order of first appearance");
+  assert.deepEqual(third[0], { name: "Bench Press", detail: "70kg 2x5", kg: 70, loadSource: "label", reps: 5, setsDone: 5, plannedSets: 5, restEndHr: 105, reliable: true, parts: 2 });
+  const fourth = res.sessions[3].exercises;
+  assert.equal(fourth.length, 1);
+  assert.deepEqual([fourth[0].kg, fourth[0].setsDone, fourth[0].plannedSets, fourth[0].restEndHr, fourth[0].reliable, fourth[0].parts], [70, 5, null, 105, false, 2], "an unplanned part makes the planned total unknown, an unreliable one marks the entry");
+  const bench = res.series.exercises.find((e) => e.name === "Bench Press")!;
+  assert.equal(bench.kg.n, 5, "five sessions, five values");
+  assert.equal(bench.kg.last, 72.5);
+  assert.equal(res.series.exercises.length, 2);
+  // the exercise query merges the same way
+  const byExercise = benchmarkFrom(recs, rows, {}, { exercise: "Bench Press" });
+  assert.equal(byExercise.sessions[2].exercises.length, 1);
+  assert.equal(byExercise.series.exercises[0].kg.n, 5);
+  // and the session's rest HR median uses the merged entries
+  assert.equal(res.sessions[2].restEndHrMedian, Math.round((105 + 118) / 2));
 });
 
 test("benchmarkFrom: a rep range or an unreadable detail has no reps (never guessed)", () => {

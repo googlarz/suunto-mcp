@@ -4,7 +4,7 @@
 // summary from the list, plus the FIT's size and SHA-256). The .json is written last: it is the mark "archived".
 // Only reads from Suunto; writes only new files here. Nothing is ever deleted or overwritten: a file that is damaged,
 // foreign or does not match its record is reported and left as it is. In demo mode the archive lives in memory.
-import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +37,7 @@ export interface ArchiveScan {
   dir: string | null; // null: in memory
   records: Map<string, ArchiveRecord>;
   problems: ArchiveProblem[];
+  incomplete: ArchiveProblem[]; // a FIT file with no record: an interrupted call left it; the next call completes it
   otherFiles: number; // files in the folder that are not <key>.json / <key>.fit: not ours, never touched
 }
 export interface ArchiveStore {
@@ -68,32 +69,30 @@ function parseRecord(raw: unknown, key: string): ArchiveRecord {
   return { version: 1, workoutKey: key, archivedAt: raw.archivedAt, fit: { bytes: fit.bytes as number, sha256: fit.sha256 }, workout: raw.workout };
 }
 
+// Writes `data` to `path` only if nothing is there: the file is written complete under a temporary name and then linked
+// to `path`, which fails if `path` exists (so even another process racing for the same name cannot be overwritten).
+// An existing identical file is fine when `sameIsFine`; anything else there is left untouched and refused.
 async function writeNew(path: string, data: Buffer, sameIsFine: boolean): Promise<void> {
-  let existing: Buffer | null = null;
-  try {
-    existing = await readFile(path);
-  } catch (err: any) {
-    if (err.code !== "ENOENT") throw err;
-  }
-  if (existing !== null) {
-    if (sameIsFine && existing.equals(data)) return;
-    throw new Error(`${path} already exists and differs; left untouched`);
-  }
   const tmp = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   try {
     await writeFile(tmp, data, { mode: 0o600 });
     await chmod(tmp, 0o600);
-    await rename(tmp, path);
-  } catch (err) {
+    try {
+      await link(tmp, path);
+    } catch (err: any) {
+      if (err.code !== "EEXIST") throw err;
+      if (sameIsFine && (await readFile(path)).equals(data)) return;
+      throw new Error(`${path} already exists and differs; left untouched`);
+    }
+  } finally {
     await rm(tmp, { force: true }).catch(() => undefined);
-    throw err;
   }
 }
 
 export function fileArchiveStore(dir = archiveDir()): ArchiveStore {
   return {
     async scan() {
-      const scan: ArchiveScan = { dir, records: new Map(), problems: [], otherFiles: 0 };
+      const scan: ArchiveScan = { dir, records: new Map(), problems: [], incomplete: [], otherFiles: 0 };
       let names: string[];
       try {
         names = await readdir(dir);
@@ -101,10 +100,13 @@ export function fileArchiveStore(dir = archiveDir()): ArchiveStore {
         if (err.code === "ENOENT") return scan; // no folder yet: an empty archive (not created by a read)
         throw err;
       }
+      const hasRecord = new Set(names.flatMap((n) => (n.endsWith(".json") ? [FILE.exec(n)?.[1] ?? ""] : [])));
       for (const name of names.sort()) {
         const m = FILE.exec(name);
         if (!m) scan.otherFiles++;
-        else if (m[2] === "json") {
+        else if (m[2] === "fit") {
+          if (!hasRecord.has(m[1])) scan.incomplete.push({ workoutKey: m[1], problem: `${name} has no record (${m[1]}.json): an interrupted archive_workouts left it, and the next call completes it while the workout is still listed` });
+        } else {
           const key = m[1];
           const problem = (p: string) => scan.problems.push({ workoutKey: key, problem: `${p}; left untouched` });
           let record: ArchiveRecord;
@@ -134,7 +136,7 @@ export function fileArchiveStore(dir = archiveDir()): ArchiveStore {
 export function memoryArchiveStore(): ArchiveStore {
   const held = new Map<string, { fit: Buffer; record: ArchiveRecord }>();
   return {
-    scan: async () => ({ dir: null, records: new Map([...held].map(([k, v]) => [k, v.record])), problems: [], otherFiles: 0 }),
+    scan: async () => ({ dir: null, records: new Map([...held].map(([k, v]) => [k, v.record])), problems: [], incomplete: [], otherFiles: 0 }),
     save: async (key, fit, record) => void held.set(key, { fit, record }),
   };
 }
@@ -211,6 +213,7 @@ export async function archiveStatus(store: ArchiveStore) {
   const dates = [...scan.records.values()].map((r) => workoutDate(r.workout)).filter((d) => d !== "").sort();
   const notes = ["Each archived workout's FIT file is checked by its size against its record, not read again or re-hashed (the record holds the SHA-256 for that)."];
   if (scan.problems.length > 0) notes.push(`${scan.problems.length} workout(s) have a damaged, foreign or incomplete record or FIT file (see problems); they are not counted as archived and are never changed or deleted.`);
+  if (scan.incomplete.length > 0) notes.push(`${scan.incomplete.length} workout(s) have a FIT file but no record (see incomplete): they are not counted as archived. archive_workouts completes one when its workout is still in the list and the FIT file is identical to the download; otherwise it is left as it is.`);
   if (scan.otherFiles > 0) notes.push(`${scan.otherFiles} other file(s) in the folder are not part of the archive and are never touched.`);
   return {
     dir: scan.dir,
@@ -219,6 +222,7 @@ export async function archiveStatus(store: ArchiveStore) {
     oldest: dates[0] ?? null,
     newest: dates[dates.length - 1] ?? null,
     problems: scan.problems,
+    incomplete: scan.incomplete,
     otherFiles: scan.otherFiles,
     notes,
   };

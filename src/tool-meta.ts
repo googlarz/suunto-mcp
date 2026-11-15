@@ -42,8 +42,8 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   get_benchmark: { title: "Get benchmark: a repeatable session over time", annotations: READ },
   // Reads Suunto's list and the local journal; writes nothing.
   get_tag_effects: { title: "Get tag effects: journal tags against the next night", annotations: READ },
-  // Reads Suunto (list + FIT downloads) and writes ONLY new files in the local archive folder: never overwrites or deletes, so not destructive; the same call again only continues, so idempotent.
-  archive_workouts: { title: "Archive workouts to local files (writes nothing at Suunto)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+  // Reads Suunto (list + FIT downloads) and writes ONLY new files in the local archive folder: never overwrites or deletes, so not destructive. Not idempotent: each call archives the next batch, so the same call twice has a different effect.
+  archive_workouts: { title: "Archive workouts to local files (writes nothing at Suunto)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
   get_archive_status: { title: "Get the local workout archive status", annotations: { readOnlyHint: true, openWorldHint: false } },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },

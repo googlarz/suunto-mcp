@@ -391,13 +391,13 @@ test("e2e demo: get_tag_effects and get_benchmark work on the synthetic sessions
     const tags = await ok(call, "get_tag_effects", { days: 56 });
     assert.deepEqual(tags.tags.map((t: any) => t.tag).sort(), ["long-run", "strength"]);
     const strength = tags.tags.find((t: any) => t.tag === "strength");
-    assert.ok(strength.taggedNights >= 8, `strength nights ${strength.taggedNights}`);
-    assert.equal(tags.thresholds.minTaggedNights, 8);
+    assert.ok(strength.taggedNights >= 15, `strength nights ${strength.taggedNights}`);
+    assert.equal(tags.thresholds.minTaggedNights, 15);
     assert.deepEqual(Object.keys(strength.metrics).sort(), ["hrv", "recoveryMorning", "sleepDurationS", "sleepScore"]);
     assert.ok(["insufficient", "within-noise", "differs"].includes(strength.verdict));
     assert.deepEqual(tags.errors, []);
     assert.equal((await ok(call, "get_tag_effects", { days: 56, tag: "STRENGTH" })).tags.length, 1);
-    assert.equal((await call("get_tag_effects", { days: 10 })).isError, true, "days below 28 is refused by the schema");
+    assert.equal((await call("get_tag_effects", { days: 29 })).isError, true, "days below 30 is refused by the schema");
 
     // three guides, each about 8 occurrences in the 8 demo weeks; the guide mode and the exercise mode agree
     for (let i = 0; i < 4; i++) {
@@ -423,7 +423,7 @@ test("e2e demo: archive_workouts and get_archive_status work in memory, bounded 
   await withDemo(async (call, rpc, fetchLog) => {
     const tools: any[] = (await rpc("tools/list")).result.tools;
     const ann = (n: string) => tools.find((t) => t.name === n).annotations;
-    assert.deepEqual(ann("archive_workouts"), { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
+    assert.deepEqual(ann("archive_workouts"), { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
     assert.deepEqual(ann("get_archive_status"), { readOnlyHint: true, openWorldHint: false });
 
     const empty = await ok(call, "get_archive_status");
