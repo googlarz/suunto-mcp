@@ -28,42 +28,39 @@ const NOW = new Date(2026, 10, 15, 12, 0, 0); // local noon, Sunday 2026-11-15
 const TODAY = "2026-11-15";
 const KEY = "0123456789abcdef01234567";
 
-const ok = (over: Record<string, unknown> = {}) => ({ about: "2026-11-16", kind: "session_done", probability: 0.8, ...over });
+const ok = (over: Record<string, unknown> = {}) => ({ date: "2026-11-16", kind: "session_done", probability: 0.8, ...over });
 
 // ---------- logging ----------
 
 test("log_prediction: each kind is stored with its own fields, an id, madeAt and the due date", async () => {
   const store = memoryPredictionStore();
   const a = await logPrediction(ok({ note: "planned", rule: "deload-rule" }), store, { now: NOW });
-  assert.deepEqual(a.saved, { id: "p1", madeAt: NOW.toISOString(), about: "2026-11-16", kind: "session_done", probability: 0.8, note: "planned", rule: "deload-rule", due: "2026-11-18" });
+  assert.deepEqual(a.saved, { id: "p1", madeAt: NOW.toISOString(), date: "2026-11-16", kind: "session_done", probability: 0.8, note: "planned", rule: "deload-rule", due: "2026-11-18" });
   assert.equal(a.predictions, 1);
-  const b = await logPrediction({ about: "2026-11-17", kind: "reps_hit", probability: 0.6, exercise: "Back Squat", sets: 3, reps: 5, kg: 100 }, store, { now: NOW });
+  const b = await logPrediction({ date: "2026-11-17", kind: "reps_hit", probability: 0.6, exercise: "Back Squat", sets: 3, reps: 5, kg: 100 }, store, { now: NOW });
   assert.deepEqual([b.saved.id, b.saved.exercise, b.saved.sets, b.saved.reps, b.saved.kg, b.saved.due], ["p2", "Back Squat", 3, 5, 100, "2026-11-19"]);
-  const c = await logPrediction({ about: TODAY, kind: "recovery_morning_at_least", probability: 0.5, threshold: 0.6 }, store, { now: NOW });
-  assert.deepEqual([c.saved.id, c.saved.threshold, c.saved.due], ["p3", 0.6, "2026-11-17"]);
-  const d = await logPrediction({ about: "2026-11-16", kind: "hrv_in_band", probability: 0 }, store, { now: NOW });
+  const c = await logPrediction({ date: "2026-11-16", kind: "recovery_morning_at_least", probability: 0.5, threshold: 0.6 }, store, { now: NOW });
+  assert.deepEqual([c.saved.id, c.saved.threshold, c.saved.due], ["p3", 0.6, "2026-11-18"]);
+  const d = await logPrediction({ date: "2026-11-16", kind: "hrv_in_band", probability: 0 }, store, { now: NOW });
   assert.equal(d.saved.probability, 0);
   assert.equal((await store.load())!.predictions.length, 4);
-});
-
-test("log_prediction: a reps_hit about a workoutKey is due two days after it was made (the workout's date is not known yet)", async () => {
-  const store = memoryPredictionStore();
-  const r = await logPrediction({ about: KEY.toUpperCase(), kind: "reps_hit", probability: 0.5, exercise: "Bench Press", sets: 3, reps: 8 }, store, { now: NOW });
-  assert.equal(r.saved.about, KEY);
-  assert.equal(r.saved.due, "2026-11-17");
+  assert.equal("about" in a.saved, false, "the field is called date");
 });
 
 test("log_prediction: strict validation refuses bad input and writes nothing", async () => {
-  const reps = { about: "2026-11-16", kind: "reps_hit", probability: 0.5, exercise: "Squat", sets: 3, reps: 5 };
+  const reps = { date: "2026-11-16", kind: "reps_hit", probability: 0.5, exercise: "Squat", sets: 3, reps: 5 };
   const bad: [unknown, RegExp][] = [
     [null, /object/],
     [[], /object/],
-    [{}, /about is required/],
-    [ok({ about: "tomorrow" }), /about must be a calendar date/],
-    [ok({ about: "2026-02-30" }), /about must be a calendar date/],
-    [ok({ about: KEY }), /about must be a calendar date YYYY-MM-DD/], // a workoutKey only for reps_hit
-    [ok({ about: "2026-11-14" }), /about .* before today/],
-    [ok({ about: "2027-01-15" }), /more than 60 days/],
+    [{}, /date is required/],
+    [ok({ date: "tomorrow" }), /date must be a calendar date/],
+    [ok({ date: "2026-02-30" }), /date must be a calendar date/],
+    [ok({ date: KEY }), /date must be a calendar date YYYY-MM-DD/], // no workoutKey form for any kind
+    [{ date: KEY, kind: "reps_hit", probability: 0.5, exercise: "Squat", sets: 3, reps: 5 }, /date must be a calendar date YYYY-MM-DD$/],
+    [ok({ about: "2026-11-16" }), /about is not a known field/],
+    [ok({ date: "2026-11-14" }), /date \(2026-11-14\) must be after today/],
+    [ok({ date: TODAY }), /date \(2026-11-15\) must be after today \(2026-11-15\)/],
+    [ok({ date: "2027-01-15" }), /more than 60 days/],
     [ok({ kind: undefined }), /kind is required/],
     [ok({ kind: "weather" }), /kind must be one of/],
     [ok({ probability: undefined }), /probability is required/],
@@ -91,10 +88,10 @@ test("log_prediction: strict validation refuses bad input and writes nothing", a
     [{ ...reps, kg: -1 }, /kg must be between 0 and 1000/],
     [{ ...reps, kg: 1001 }, /kg must be between 0 and 1000/],
     [{ ...reps, threshold: 0.5 }, /threshold is only for kind recovery_morning_at_least/],
-    [{ about: "2026-11-16", kind: "recovery_morning_at_least", probability: 0.5 }, /threshold is required for kind recovery_morning_at_least/],
-    [{ about: "2026-11-16", kind: "recovery_morning_at_least", probability: 0.5, threshold: 1.01 }, /threshold must be between 0 and 1/],
-    [{ about: "2026-11-16", kind: "recovery_morning_at_least", probability: 0.5, threshold: -0.1 }, /threshold must be between 0 and 1/],
-    [{ about: "2026-11-16", kind: "session_done", probability: 0.5, sets: 3 }, /sets is only for kind reps_hit/],
+    [{ date: "2026-11-16", kind: "recovery_morning_at_least", probability: 0.5 }, /threshold is required for kind recovery_morning_at_least/],
+    [{ date: "2026-11-16", kind: "recovery_morning_at_least", probability: 0.5, threshold: 1.01 }, /threshold must be between 0 and 1/],
+    [{ date: "2026-11-16", kind: "recovery_morning_at_least", probability: 0.5, threshold: -0.1 }, /threshold must be between 0 and 1/],
+    [{ date: "2026-11-16", kind: "session_done", probability: 0.5, sets: 3 }, /sets is only for kind reps_hit/],
   ];
   for (const [input, re] of bad) {
     const store = memoryPredictionStore();
@@ -103,20 +100,52 @@ test("log_prediction: strict validation refuses bad input and writes nothing", a
   }
 });
 
-test("log_prediction: boundaries — about today and today+60 are accepted, probability 0 and 1 too, yesterday and today+61 are not", async () => {
+test("log_prediction: boundaries: tomorrow and today+60 are accepted, probability 0 and 1 too; today, yesterday and today+61 are not", async () => {
   const store = memoryPredictionStore();
-  await logPrediction(ok({ about: TODAY, probability: 1 }), store, { now: NOW });
-  await logPrediction(ok({ about: "2027-01-14", probability: 0 }), store, { now: NOW }); // 60 days ahead
+  await logPrediction(ok({ date: "2026-11-16", probability: 1 }), store, { now: NOW });
+  await logPrediction(ok({ date: "2027-01-14", probability: 0 }), store, { now: NOW }); // 60 days ahead
   assert.equal(MAX_DAYS_AHEAD, 60);
-  await assert.rejects(logPrediction(ok({ about: "2027-01-15" }), store, { now: NOW }), /more than 60 days/);
-  await assert.rejects(logPrediction(ok({ about: "2026-11-14" }), store, { now: NOW }), /before today/);
+  await assert.rejects(logPrediction(ok({ date: "2027-01-15" }), store, { now: NOW }), /more than 60 days/);
+  await assert.rejects(logPrediction(ok({ date: TODAY }), store, { now: NOW }), /must be after today/);
+  await assert.rejects(logPrediction(ok({ date: "2026-11-14" }), store, { now: NOW }), /must be after today/);
+  // the same for every kind
+  for (const extra of [{ kind: "hrv_in_band" }, { kind: "recovery_morning_at_least", threshold: 0.5 }, { kind: "reps_hit", exercise: "Squat", sets: 3, reps: 5 }]) {
+    await assert.rejects(logPrediction(ok({ ...extra, date: TODAY }), store, { now: NOW }), /must be after today/, JSON.stringify(extra));
+  }
+  // the server's local day decides: just before midnight it is still the 15th
+  await assert.rejects(logPrediction(ok({ date: TODAY }), store, { now: new Date(2026, 10, 15, 23, 59) }), /must be after today/);
+  await logPrediction(ok({ date: "2026-11-16", kind: "hrv_in_band" }), store, { now: new Date(2026, 10, 15, 23, 59) });
+});
+
+test("log_prediction: a prediction identical to one still open is refused, naming the open one; probability, note and rule do not make it different", async () => {
+  const store = memoryPredictionStore();
+  await logPrediction(ok({ kind: "recovery_morning_at_least", threshold: 0.6 }), store, { now: NOW });
+  const same = ok({ kind: "recovery_morning_at_least", threshold: 0.6, probability: 0.1, note: "again", rule: "x" });
+  await assert.rejects(logPrediction(same, store, { now: NOW }), /same as p1 \(still open\)/);
+  // any parameter that differs is a different prediction
+  for (const other of [{ threshold: 0.61 }, { date: "2026-11-17" }, { kind: "hrv_in_band", threshold: undefined }]) {
+    await logPrediction({ ...same, ...other }, store, { now: NOW });
+  }
+  const reps = { date: "2026-11-20", kind: "reps_hit", probability: 0.5, exercise: "Back Squat", sets: 3, reps: 5, kg: 100 };
+  await logPrediction(reps, store, { now: NOW });
+  await assert.rejects(logPrediction({ ...reps, exercise: "  back squat " }, store, { now: NOW }), /same as p5/, "the exercise is compared ignoring case and spaces at the ends");
+  for (const other of [{ sets: 4 }, { reps: 6 }, { kg: 102.5 }, { kg: undefined }, { exercise: "Bench Press" }]) await logPrediction({ ...reps, ...other }, store, { now: NOW });
+  // a voided or a scored one is not open: the same prediction may be logged again
+  const s2 = memoryPredictionStore();
+  await logPrediction(ok(), s2, { now: NOW });
+  await voidPrediction({ id: "p1", reason: "r" }, s2, { now: NOW });
+  await logPrediction(ok(), s2, { now: NOW });
+  const s3 = memoryPredictionStore();
+  await s3.save({ predictions: [{ id: "p1", madeAt: "2026-11-01T00:00:00.000Z", date: "2026-11-16", kind: "session_done", probability: 0.5, due: "2026-11-18", outcome: { result: "hit", scoredAt: "2026-11-19T00:00:00.000Z", detail: "x" } }] });
+  await logPrediction(ok(), s3, { now: NOW });
+  assert.equal((await s3.load())!.predictions.length, 2);
 });
 
 test("log_prediction: the id never reuses a number, and a full ledger refuses another entry", async () => {
   const store = memoryPredictionStore();
-  const base: Prediction = { id: "p7", madeAt: NOW.toISOString(), about: "2026-11-16", kind: "session_done", probability: 0.5, due: "2026-11-18" };
+  const base: Prediction = { id: "p7", madeAt: NOW.toISOString(), date: "2026-11-16", kind: "session_done", probability: 0.5, due: "2026-11-18" };
   await store.save({ predictions: [base] });
-  assert.equal((await logPrediction(ok(), store, { now: NOW })).saved.id, "p8");
+  assert.equal((await logPrediction(ok({ date: "2026-11-17" }), store, { now: NOW })).saved.id, "p8");
   const full: Ledger = { predictions: Array.from({ length: 2000 }, (_, i) => ({ ...base, id: `p${i + 1}` })) };
   await store.save(full);
   await assert.rejects(logPrediction(ok(), store, { now: NOW }), /at most 2000/);
@@ -126,7 +155,7 @@ test("log_prediction: the id never reuses a number, and a full ledger refuses an
 test("log_prediction: logged predictions cannot be edited: logging again adds a new one and changes nothing else", async () => {
   const store = memoryPredictionStore();
   const first = (await logPrediction(ok(), store, { now: NOW })).saved;
-  await logPrediction(ok({ probability: 0.1 }), store, { now: new Date(2026, 10, 15, 13) });
+  await logPrediction(ok({ probability: 0.1, date: "2026-11-17" }), store, { now: new Date(2026, 10, 15, 13) });
   const [p1, p2] = (await store.load())!.predictions;
   assert.deepEqual(p1, first);
   assert.equal(p2.id, "p2");
@@ -136,19 +165,20 @@ test("log_prediction: logged predictions cannot be edited: logging again adds a 
 
 const withOne = async (over: Partial<Prediction> = {}) => {
   const store = memoryPredictionStore();
-  await store.save({ predictions: [{ id: "p1", madeAt: NOW.toISOString(), about: "2026-11-16", kind: "session_done", probability: 0.5, due: "2026-11-18", ...over }] });
+  await store.save({ predictions: [{ id: "p1", madeAt: NOW.toISOString(), date: "2026-11-16", kind: "session_done", probability: 0.5, due: "2026-11-18", ...over }] });
   return store;
 };
 
-test("void_prediction: marks it void with the reason and keeps everything else; due day minus one works, due day does not", async () => {
+test("void_prediction: only on a day strictly before the prediction's date: the day before works, the day itself does not (the date is 2026-11-16)", async () => {
   const store = await withOne();
-  const r = await voidPrediction({ id: "p1", reason: "plans changed" }, store, { now: new Date(2026, 10, 17, 9) }); // 2026-11-17 = due - 1
-  assert.deepEqual(r.voided, { at: new Date(2026, 10, 17, 9).toISOString(), reason: "plans changed" });
+  const r = await voidPrediction({ id: "p1", reason: "plans changed" }, store, { now: new Date(2026, 10, 15, 23, 59) });
+  assert.deepEqual(r.voided, { at: new Date(2026, 10, 15, 23, 59).toISOString(), reason: "plans changed" });
   const stored = (await store.load())!.predictions[0];
-  assert.deepEqual([stored.id, stored.about, stored.probability, stored.voided?.reason], ["p1", "2026-11-16", 0.5, "plans changed"]);
+  assert.deepEqual([stored.id, stored.date, stored.probability, stored.voided?.reason], ["p1", "2026-11-16", 0.5, "plans changed"]);
 
   const late = await withOne();
-  await assert.rejects(voidPrediction({ id: "p1", reason: "too late" }, late, { now: new Date(2026, 10, 18, 9) }), /due date \(2026-11-18\)/);
+  await assert.rejects(voidPrediction({ id: "p1", reason: "too late" }, late, { now: new Date(2026, 10, 16, 0, 1) }), /about 2026-11-16, which has begun: a prediction can only be voided on a day before its date/);
+  await assert.rejects(voidPrediction({ id: "p1", reason: "too late" }, late, { now: new Date(2026, 10, 18, 9) }), /can only be voided on a day before its date/);
   assert.equal((await late.load())!.predictions[0].voided, undefined);
 });
 
@@ -160,7 +190,7 @@ test("void_prediction: refuses unknown ids, empty or missing reasons and scored 
   await assert.rejects(voidPrediction({ reason: "x" }, store, { now: NOW }), /id is required/);
   await assert.rejects(voidPrediction({ id: "p1", reason: "x", extra: 1 }, store, { now: NOW }), /extra is not a known field/);
   const first = await voidPrediction({ id: "p1", reason: "first" }, store, { now: NOW });
-  const again = await voidPrediction({ id: "p1", reason: "second" }, store, { now: new Date(2026, 10, 16) });
+  const again = await voidPrediction({ id: "p1", reason: "second" }, store, { now: new Date(2026, 10, 17) });
   assert.equal(again.alreadyVoided, true);
   assert.deepEqual(again.voided, first.voided);
 
@@ -195,7 +225,7 @@ test("recovery_morning_at_least: at the threshold is a hit, just below a miss, n
   assert.deepEqual([none.result, /no morning recovery/.test(none.detail)], ["unresolvable", true]);
 });
 
-const rep = (over: Partial<Prediction> = {}): Prediction => ({ id: "p1", madeAt: NOW.toISOString(), about: "2026-11-10", kind: "reps_hit", probability: 0.5, exercise: "Back Squat", sets: 3, reps: 5, kg: 100, due: "2026-11-12", ...over });
+const rep = (over: Partial<Prediction> = {}): Prediction => ({ id: "p1", madeAt: NOW.toISOString(), date: "2026-11-10", kind: "reps_hit", probability: 0.5, exercise: "Back Squat", sets: 3, reps: 5, kg: 100, due: "2026-11-12", ...over });
 const found = (over: Record<string, unknown> = {}) => ({
   e: { name: "Back Squat", detail: "100kg 3x5", cut: false, load: { kg: 100 }, setsDone: 3, plannedSets: 3, restS: 120, restAfterSet1: null, deviations: [], reliable: true },
   jEx: undefined as any,
@@ -269,6 +299,7 @@ interface World {
   hrv?: Record<string, number>; // night leading into the day
   balance?: Record<string, number>;
   syncedThrough?: string; // newest day with a recovery sample
+  noSleep?: string[]; // nights (by the day they lead into) the watch recorded no sleep for
   failing?: string[];
 }
 // A fake Suunto: HRV 40..44 cycling (band p25 41, p75 43 over 28 days) unless overridden.
@@ -284,7 +315,7 @@ function world(w: World) {
     async listSleep(from: string, to: string) {
       calls.push(`listSleep ${from}..${to}`);
       if (w.failing?.includes("sleep")) throw new Error("Suunto answered 500");
-      return { payload: dayRange("2026-08-01", "2026-11-15").map((d) => sleepInto(d, hrvOf(d))) };
+      return { payload: dayRange("2026-08-01", "2026-11-15").filter((d) => !w.noSleep?.includes(d)).map((d) => sleepInto(d, hrvOf(d))) };
     },
     async listRecovery(from: string, to: string) {
       calls.push(`listRecovery ${from}..${to}`);
@@ -304,7 +335,7 @@ function world(w: World) {
   return { client: client as any, calls };
 }
 
-const pred = (id: number, over: Partial<Prediction>): Prediction => ({ id: `p${id}`, madeAt: "2026-11-01T08:00:00.000Z", about: "2026-11-10", kind: "session_done", probability: 0.5, due: "2026-11-12", ...over });
+const pred = (id: number, over: Partial<Prediction>): Prediction => ({ id: `p${id}`, madeAt: "2026-11-01T08:00:00.000Z", date: "2026-11-10", kind: "session_done", probability: 0.5, due: "2026-11-12", ...over });
 const seed = async (...ps: Prediction[]) => {
   const store = memoryPredictionStore();
   await store.save({ predictions: ps });
@@ -312,18 +343,19 @@ const seed = async (...ps: Prediction[]) => {
 };
 const byId = async (store: ReturnType<typeof memoryPredictionStore>) => Object.fromEntries((await store.load())!.predictions.map((p) => [p.id, p]));
 
-test("score_predictions: session_done is a hit with a workout that day, a miss without one once the watch has synced past the day, else unresolvable", async () => {
+test("score_predictions: session_done is a hit with a workout that day, a miss without one once the watch has synced past the day, else pending (unscored)", async () => {
   const store = await seed(
-    pred(1, { about: "2026-11-10" }), // a workout: hit
-    pred(2, { about: "2026-11-09", due: "2026-11-11" }), // none, synced through 11-14: miss
-    pred(3, { about: "2026-11-13", due: "2026-11-15" }), // none; the probe's newest day is 11-13 = not past the day: unresolvable
+    pred(1, { date: "2026-11-10" }), // a workout: hit
+    pred(2, { date: "2026-11-09", due: "2026-11-11" }), // none, synced through 11-14: miss
+    pred(3, { date: "2026-11-13", due: "2026-11-15" }), // none; the probe's newest day is 11-13 = not past the day: pending
   );
   const r = await scorePredictions(world({ workouts: [{ key: keyOf(1), date: "2026-11-10" }], syncedThrough: "2026-11-13" }).client, store, {}, { now: NOW });
   const p = await byId(store);
-  assert.deepEqual([p.p1.outcome?.result, p.p2.outcome?.result, p.p3.outcome?.result], ["hit", "miss", "unresolvable"]);
-  assert.match(p.p3.outcome!.detail, /not synced anything after that day/);
-  assert.deepEqual([r.scored.length, r.hits, r.misses, r.unresolvable], [3, 1, 1, 1]);
-  const full = await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-14" }).client, await seed(pred(1, { about: "2026-11-13", due: "2026-11-15" })), {}, { now: NOW });
+  assert.deepEqual([p.p1.outcome?.result, p.p2.outcome?.result, p.p3.outcome], ["hit", "miss", undefined]);
+  assert.deepEqual(r.pending.map((x) => [x.id, x.date, x.kind]), [["p3", "2026-11-13", "session_done"]]);
+  assert.match(r.pending[0].reason, /not synced anything after that day/);
+  assert.deepEqual([r.scored.length, r.hits, r.misses, r.unresolvable], [2, 1, 1, 0]);
+  const full = await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-14" }).client, await seed(pred(1, { date: "2026-11-13", due: "2026-11-15" })), {}, { now: NOW });
   assert.equal(full.misses, 1, "synced through the day after the predicted day is enough");
 });
 
@@ -331,10 +363,10 @@ test("score_predictions: hrv_in_band and recovery_morning_at_least use get_basel
   // about 11-10: the night after 11-10 leads into 11-11. Band over 28 days before 11-11: 40..44 cycling.
   const hrv: Record<string, number> = { "2026-11-11": 42, "2026-11-10": 60 };
   const store = await seed(
-    pred(1, { about: "2026-11-10", kind: "hrv_in_band" }), // night into 11-11: 42, within -> hit
-    pred(2, { about: "2026-11-09", kind: "hrv_in_band", due: "2026-11-11" }), // night into 11-10: 60, above -> miss
-    pred(3, { about: "2026-11-10", kind: "recovery_morning_at_least", threshold: 0.6 }),
-    pred(4, { about: "2026-11-09", kind: "recovery_morning_at_least", threshold: 0.6, due: "2026-11-11" }),
+    pred(1, { date: "2026-11-10", kind: "hrv_in_band" }), // night into 11-11: 42, within -> hit
+    pred(2, { date: "2026-11-09", kind: "hrv_in_band", due: "2026-11-11" }), // night into 11-10: 60, above -> miss
+    pred(3, { date: "2026-11-10", kind: "recovery_morning_at_least", threshold: 0.6 }),
+    pred(4, { date: "2026-11-09", kind: "recovery_morning_at_least", threshold: 0.6, due: "2026-11-11" }),
   );
   const w = world({ workouts: [], hrv, balance: { "2026-11-11": 0.62, "2026-11-10": 0.55 } });
   await scorePredictions(w.client, store, {}, { now: NOW });
@@ -345,11 +377,55 @@ test("score_predictions: hrv_in_band and recovery_morning_at_least use get_basel
   assert.ok(w.calls.some((c) => c === "listSleep 2026-10-13..2026-11-10"), "one baselines read for the judged day 2026-11-11 (28 days)");
 });
 
+test("score_predictions: a night with no value is pending until the watch has synced a later day, and only then unresolvable (same rule as a missing workout)", async () => {
+  // the night after 2026-11-10 leads into 11-11; a later day than that morning is 11-12
+  const preds = () => seed(pred(1, { date: "2026-11-10", kind: "hrv_in_band" }), pred(2, { date: "2026-11-10", kind: "recovery_morning_at_least", threshold: 0.6 }));
+  const store = await preds();
+  const early = await scorePredictions(world({ workouts: [], noSleep: ["2026-11-11"], syncedThrough: "2026-11-11" }).client, store, {}, { now: NOW });
+  assert.deepEqual([early.scored.length, early.pending.length, early.notes.some((n) => /2 .*waiting for data/.test(n))], [0, 2, true]);
+  assert.deepEqual(early.pending.map((x) => [x.id, x.date, x.kind]), [["p1", "2026-11-10", "hrv_in_band"], ["p2", "2026-11-10", "recovery_morning_at_least"]]);
+  assert.match(early.pending[0].reason, /no HRV was recorded.*not synced anything after that night/);
+  assert.deepEqual(Object.values(await byId(store)).map((x) => x.outcome), [undefined, undefined], "still unscored, so the next call looks again");
+
+  const late = await scorePredictions(world({ workouts: [], noSleep: ["2026-11-11"], syncedThrough: "2026-11-12" }).client, store, {}, { now: NOW });
+  assert.deepEqual([late.scored.map((x) => x.result), late.pending.length], [["unresolvable", "unresolvable"], 0]);
+  assert.match(late.scored[0].detail, /no HRV was recorded/);
+
+  // a watch that never synced at all stays pending too
+  const none = await scorePredictions(world({ workouts: [], noSleep: ["2026-11-11"], syncedThrough: "2026-08-01" }).client, await preds(), {}, { now: NOW });
+  assert.equal(none.pending.length, 2);
+  // with the night recorded nothing waits
+  const there = await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-11" }).client, await preds(), {}, { now: NOW });
+  assert.deepEqual([there.pending.length, there.scored.length], [0, 2]);
+});
+
+test("score_predictions: calling again after a later sync settles what was pending", async () => {
+  const store = await seed(pred(1, { date: "2026-11-10", kind: "hrv_in_band" }));
+  assert.equal((await scorePredictions(world({ workouts: [], noSleep: ["2026-11-11"], syncedThrough: "2026-11-11" }).client, store, {}, { now: NOW })).pending.length, 1);
+  const r = await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-15" }).client, store, {}, { now: NOW });
+  assert.deepEqual([r.pending.length, (await byId(store)).p1.outcome?.result], [0, "hit"]);
+});
+
+test("score_predictions: never-scored due predictions come first, rescored unresolvable ones after them, so a call always advances", async () => {
+  const stale = Array.from({ length: 21 }, (_, i) => pred(i + 1, { date: "2026-11-01", due: "2026-11-03", outcome: { result: "unresolvable", scoredAt: "2026-11-04T00:00:00.000Z", detail: "no workout found" } }));
+  const fresh = [22, 23, 24].map((i) => pred(i, { date: "2026-11-10" })); // due 11-12, later than every stale one
+  const store = await seed(...stale, ...fresh);
+  const w = world({ workouts: [{ key: keyOf(1), date: "2026-11-10" }], syncedThrough: "2026-11-15" });
+  const r = await scorePredictions(w.client, store, { rescoreUnresolvable: true }, { now: NOW });
+  const p = await byId(store);
+  assert.deepEqual(["p22", "p23", "p24"].map((id) => p[id].outcome?.result), ["hit", "hit", "hit"], "the new ones were not crowded out by older unresolvable ones");
+  assert.deepEqual([r.scored.length, r.remaining], [20, 4]);
+  // without the flag the unresolvable ones are not candidates at all
+  const store2 = await seed(...stale, ...fresh);
+  const r2 = await scorePredictions(w.client, store2, {}, { now: NOW });
+  assert.deepEqual([r2.scored.length, r2.remaining], [3, 0]);
+});
+
 test("score_predictions: only due predictions are scored (due day itself counts, the day before does not); voided ones never", async () => {
   const store = await seed(
-    pred(1, { about: "2026-11-13", due: "2026-11-15" }), // due today
-    pred(2, { about: "2026-11-14", due: "2026-11-16" }), // tomorrow
-    pred(3, { about: "2026-11-10", voided: { at: "2026-11-09T00:00:00.000Z", reason: "x" } }),
+    pred(1, { date: "2026-11-13", due: "2026-11-15" }), // due today
+    pred(2, { date: "2026-11-14", due: "2026-11-16" }), // tomorrow
+    pred(3, { date: "2026-11-10", voided: { at: "2026-11-09T00:00:00.000Z", reason: "x" } }),
   );
   const r = await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-15" }).client, store, {}, { now: NOW });
   const p = await byId(store);
@@ -361,7 +437,7 @@ test("score_predictions: only due predictions are scored (due day itself counts,
 });
 
 test("score_predictions: calling again changes nothing (same file, same outcomes), and scored outcomes are never rescored", async () => {
-  const store = await seed(pred(1, { about: "2026-11-10" }));
+  const store = await seed(pred(1, { date: "2026-11-10" }));
   const w = world({ workouts: [{ key: keyOf(1), date: "2026-11-10" }] });
   await scorePredictions(w.client, store, {}, { now: NOW });
   const once = JSON.stringify(await store.load());
@@ -374,7 +450,7 @@ test("score_predictions: calling again changes nothing (same file, same outcomes
 
 test("score_predictions: at most 20 per call, oldest due first, and `remaining` says how many are left", async () => {
   assert.equal(MAX_SCORED_PER_CALL, 20);
-  const ps = Array.from({ length: 21 }, (_, i) => pred(i + 1, { about: "2026-11-10", due: `2026-11-${String(1 + (i % 10)).padStart(2, "0")}` }));
+  const ps = Array.from({ length: 21 }, (_, i) => pred(i + 1, { date: "2026-11-10", due: `2026-11-${String(1 + (i % 10)).padStart(2, "0")}` }));
   const store = await seed(...ps);
   const w = world({ workouts: [{ key: keyOf(1), date: "2026-11-10" }] });
   const r = await scorePredictions(w.client, store, {}, { now: NOW });
@@ -388,7 +464,7 @@ test("score_predictions: at most 20 per call, oldest due first, and `remaining` 
 });
 
 test("score_predictions: a failed request leaves the prediction unscored (never unresolvable) and names the error; the others are still scored", async () => {
-  const store = await seed(pred(1, { about: "2026-11-10", kind: "hrv_in_band" }), pred(2, { about: "2026-11-10" }));
+  const store = await seed(pred(1, { date: "2026-11-10", kind: "hrv_in_band" }), pred(2, { date: "2026-11-10" }));
   const r = await scorePredictions(world({ workouts: [{ key: keyOf(1), date: "2026-11-10" }], failing: ["sleep"] }).client, store, {}, { now: NOW });
   const p = await byId(store);
   assert.equal(p.p1.outcome, undefined);
@@ -401,50 +477,76 @@ test("score_predictions: a failed request leaves the prediction unscored (never 
 });
 
 test("score_predictions: an unresolvable outcome stays unless rescoreUnresolvable is passed; then it is read again and only a changed outcome is written", async () => {
-  const store = await seed(pred(1, { about: "2026-11-13", due: "2026-11-15" }));
-  await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-13" }).client, store, {}, { now: NOW });
+  const k1 = keyOf(1);
+  const store = await seed(pred(1, { date: "2026-11-10", kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5, kg: 100 }));
+  const w = world({ workouts: [{ key: k1, date: "2026-11-10" }] });
+  const nothing = async () => ({});
+  const logged = async () => ({ [k1]: { workoutKey: k1, loggedAt: "2026-11-10T20:00:00.000Z", exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 100 }, { reps: 5, kg: 100 }] }] } }) as any;
+  await scorePredictions(w.client, store, {}, { now: NOW, loadJournal: nothing });
   assert.equal((await byId(store)).p1.outcome?.result, "unresolvable");
-  const skipped = await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-15" }).client, store, {}, { now: NOW });
+  const skipped = await scorePredictions(w.client, store, {}, { now: NOW, loadJournal: logged });
   assert.equal(skipped.scored.length, 0);
   assert.equal((await byId(store)).p1.outcome?.result, "unresolvable");
   const before = JSON.stringify(await store.load());
-  const same = await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-13" }).client, store, { rescoreUnresolvable: true }, { now: NOW });
+  const same = await scorePredictions(w.client, store, { rescoreUnresolvable: true }, { now: NOW, loadJournal: nothing });
   assert.equal(same.scored.length, 0);
   assert.equal(JSON.stringify(await store.load()), before, "still unresolvable for the same reason: the record is untouched");
-  const fresh = await scorePredictions(world({ workouts: [], syncedThrough: "2026-11-15" }).client, store, { rescoreUnresolvable: true }, { now: NOW });
+  const fresh = await scorePredictions(w.client, store, { rescoreUnresolvable: true }, { now: NOW, loadJournal: logged });
   assert.equal(fresh.scored.length, 1);
-  assert.equal((await byId(store)).p1.outcome?.result, "miss");
+  assert.equal((await byId(store)).p1.outcome?.result, "hit");
 });
 
-test("score_predictions: reps_hit — the watch's set laps and the journal decide; a workoutKey prediction waits until the workout is two days old", async () => {
+test("score_predictions: reps_hit: the journal's logged sets and the watch's set laps decide", async () => {
   const k1 = keyOf(1);
   const journal = { [k1]: { workoutKey: k1, loggedAt: "2026-11-10T20:00:00.000Z", exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 100 }, { reps: 5, kg: 100 }] }, { name: "Bench Press", sets: [{ reps: 8, kg: 70 }, { reps: 6, kg: 70 }, { reps: 8, kg: 70 }] }] } };
   const store = await seed(
-    pred(1, { about: "2026-11-10", kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5, kg: 100 }), // journal: hit
-    pred(2, { about: "2026-11-10", kind: "reps_hit", exercise: "Bench Press", sets: 3, reps: 8, kg: 70 }), // a 6 rep set: miss
-    pred(3, { about: "2026-11-10", kind: "reps_hit", exercise: "Seated Cable Row", sets: 3, reps: 12, kg: 55 }), // 2 set laps, no journal: miss (3 predicted)
-    pred(4, { about: "2026-11-10", kind: "reps_hit", exercise: "Seated Cable Row", sets: 2, reps: 12, kg: 55 }), // no journal, enough laps: unresolvable
-    pred(5, { about: "2026-11-10", kind: "reps_hit", exercise: "Deadlift", sets: 3, reps: 5 }), // not in the session
-    pred(6, { about: k1, kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5, kg: 100, due: "2026-11-12" }),
-    pred(7, { about: keyOf(2), kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5, due: "2026-11-12" }), // workout from 11-14: too new
-    pred(8, { about: keyOf(99), kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5, due: "2026-11-12" }), // unknown workout
+    pred(1, { date: "2026-11-10", kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5, kg: 100 }), // journal: hit
+    pred(2, { date: "2026-11-10", kind: "reps_hit", exercise: "Bench Press", sets: 3, reps: 8, kg: 70 }), // a 6 rep set: miss
+    pred(3, { date: "2026-11-10", kind: "reps_hit", exercise: "Seated Cable Row", sets: 3, reps: 12, kg: 55 }), // 2 set laps, no journal: miss (3 predicted)
+    pred(4, { date: "2026-11-10", kind: "reps_hit", exercise: "Seated Cable Row", sets: 2, reps: 12, kg: 55 }), // no journal, enough laps: unresolvable
+    pred(5, { date: "2026-11-10", kind: "reps_hit", exercise: "Deadlift", sets: 3, reps: 5 }), // not in the session
   );
-  const w = world({ workouts: [{ key: k1, date: "2026-11-10" }, { key: keyOf(2), date: "2026-11-14" }] });
+  const w = world({ workouts: [{ key: k1, date: "2026-11-10" }] });
   const r = await scorePredictions(w.client, store, {}, { now: NOW, loadJournal: async () => journal as any });
   const p = await byId(store);
-  assert.deepEqual(
-    [1, 2, 3, 4, 5, 6, 7, 8].map((i) => p[`p${i}`].outcome?.result ?? "unscored"),
-    ["hit", "miss", "miss", "unresolvable", "unresolvable", "hit", "unscored", "unresolvable"],
-  );
+  assert.deepEqual([1, 2, 3, 4, 5].map((i) => p[`p${i}`].outcome?.result ?? "unscored"), ["hit", "miss", "miss", "unresolvable", "unresolvable"]);
   assert.match(p.p3.outcome!.detail, /2 set laps/);
   assert.match(p.p5.outcome!.detail, /no exercise matching "Deadlift"/);
-  assert.match(p.p8.outcome!.detail, /not found/);
-  assert.equal(r.pending, 1);
+  assert.deepEqual(r.pending, []);
   assert.equal(w.calls.filter((c) => c === `laps ${k1}`).length, 1, "the same session is read once for all its predictions");
+  assert.equal(p.p1.outcome!.basis, undefined, "a manual journal entry has no basis mark");
+});
+
+test("score_predictions: a reps_hit scored from a journal entry made from a confirmed draft is marked basis 'draft-confirmed'; a miss proved by the watch alone is not", async () => {
+  const k1 = keyOf(1);
+  const journal = { [k1]: { workoutKey: k1, loggedAt: "2026-11-10T20:00:00.000Z", source: "draft", exercises: [{ name: "Back Squat", sets: [{ reps: 5, kg: 100 }, { reps: 5, kg: 100 }, { reps: 5, kg: 100 }] }] } };
+  const store = await seed(
+    pred(1, { date: "2026-11-10", kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5, kg: 100 }),
+    pred(2, { date: "2026-11-10", kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 6, kg: 100 }), // a miss from the draft-confirmed sets
+    pred(3, { date: "2026-11-10", kind: "reps_hit", exercise: "Seated Cable Row", sets: 3, reps: 12 }), // the watch proves the miss: no journal sets
+  );
+  await scorePredictions(world({ workouts: [{ key: k1, date: "2026-11-10" }] }).client, store, {}, { now: NOW, loadJournal: async () => journal as any });
+  const p = await byId(store);
+  assert.deepEqual([p.p1.outcome!.result, p.p1.outcome!.basis, p.p2.outcome!.result, p.p2.outcome!.basis, p.p3.outcome!.result, p.p3.outcome!.basis], ["hit", "draft-confirmed", "miss", "draft-confirmed", "miss", undefined]);
+});
+
+test("score_predictions: a workout that started before the prediction was made is never evidence", async () => {
+  // hand-written (log_prediction cannot make this): made at 12:00 UTC on the day, the workout started at 10:00 UTC
+  const store = await seed(
+    pred(1, { date: "2026-11-10", madeAt: "2026-11-10T12:00:00.000Z" }),
+    pred(2, { date: "2026-11-10", madeAt: "2026-11-10T09:59:59.999Z" }), // made 1 ms before the workout
+    pred(3, { date: "2026-11-10", kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5, madeAt: "2026-11-10T12:00:00.000Z" }),
+  );
+  const k1 = keyOf(1);
+  const w = world({ workouts: [{ key: k1, date: "2026-11-10" }], syncedThrough: "2026-11-15" });
+  await scorePredictions(w.client, store, {}, { now: NOW, loadJournal: async () => ({}) });
+  const p = await byId(store);
+  assert.deepEqual([p.p1.outcome?.result, p.p2.outcome?.result, p.p3.outcome?.result], ["miss", "hit", "miss"]);
+  assert.equal(w.calls.filter((c) => c === `laps ${k1}`).length, 0, "the early workout's laps are not even read");
 });
 
 test("score_predictions: reps_hit with no workout that day is a miss once synced, and a day with only unguided workouts is unresolvable", async () => {
-  const store = await seed(pred(1, { kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5 }), pred(2, { about: "2026-11-09", due: "2026-11-11", kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5 }));
+  const store = await seed(pred(1, { kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5 }), pred(2, { date: "2026-11-09", due: "2026-11-11", kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5 }));
   await scorePredictions(world({ workouts: [{ key: keyOf(3), date: "2026-11-09", laps: false }], syncedThrough: "2026-11-15" }).client, store, {}, { now: NOW, loadJournal: async () => ({}) });
   const p = await byId(store);
   assert.equal(p.p1.outcome?.result, "miss");
@@ -452,7 +554,7 @@ test("score_predictions: reps_hit with no workout that day is a miss once synced
 });
 
 test("score_predictions: an unreadable journal stops reps_hit scoring (nothing is guessed) and the rest still works", async () => {
-  const store = await seed(pred(1, { kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5 }), pred(2, { about: "2026-11-10" }));
+  const store = await seed(pred(1, { kind: "reps_hit", exercise: "Back Squat", sets: 3, reps: 5 }), pred(2, { date: "2026-11-10" }));
   const w = world({ workouts: [{ key: keyOf(1), date: "2026-11-10" }] });
   const r = await scorePredictions(w.client, store, {}, { now: NOW, loadJournal: async () => Promise.reject(new Error("journal.json is not valid JSON")) });
   const p = await byId(store);
@@ -471,7 +573,7 @@ test("score_predictions: without a ledger there is nothing to do and no file is 
 // ---------- stats ----------
 
 const scored = (id: number, probability: number, hit: boolean, over: Partial<Prediction> = {}): Prediction => ({
-  id: `p${id}`, madeAt: "2026-10-01T08:00:00.000Z", about: "2026-10-05", kind: "session_done", probability, due: "2026-10-07",
+  id: `p${id}`, madeAt: "2026-10-01T08:00:00.000Z", date: "2026-10-05", kind: "session_done", probability, due: "2026-10-07",
   outcome: { result: hit ? "hit" : "miss", scoredAt: "2026-10-08T08:00:00.000Z", detail: "d" }, ...over,
 });
 
@@ -538,6 +640,22 @@ test("stats: per kind and per rule, each with its own minimum (a kind with 19 sc
   assert.deepEqual([rule("weekly-plan").n, rule("weekly-plan").verdict, rule(null).n, rule(null).verdict], [20, "ok", 19, "insufficient"]);
 });
 
+test("stats: hit rate with and without the predictions scored from a confirmed draft, each under its own minimum", () => {
+  const manual = Array.from({ length: 20 }, (_, i) => scored(i + 1, 0.7, i < 10));
+  const draft = (n: number, hits: number, from: number) => Array.from({ length: n }, (_, i) => scored(from + i, 0.7, i < hits, { kind: "reps_hit", outcome: { result: i < hits ? "hit" : "miss", scoredAt: "2026-10-08T08:00:00.000Z", detail: "d", basis: "draft-confirmed" } }));
+  const s = predictionStats({ predictions: [...manual, ...draft(5, 4, 21)] }, NOW);
+  assert.deepEqual(s.overall.basis, { draftConfirmed: { n: 5, hits: 4, hitRate: null }, other: { n: 20, hits: 10, hitRate: 0.5 } });
+  assert.equal(s.overall.n, 25, "they count in the overall score");
+  const big = predictionStats({ predictions: [...manual, ...draft(20, 15, 21)] }, NOW);
+  assert.deepEqual(big.overall.basis, { draftConfirmed: { n: 20, hits: 15, hitRate: 0.75 }, other: { n: 20, hits: 10, hitRate: 0.5 } });
+  assert.equal(big.overall.hitRate, 0.625);
+  assert.deepEqual(predictionStats({ predictions: [...manual, ...draft(19, 15, 21)] }, NOW).overall.basis.draftConfirmed, { n: 19, hits: 15, hitRate: null });
+  // a group below the overall minimum still says how many of its scored ones were draft-confirmed
+  const small = predictionStats({ predictions: draft(3, 1, 1) }, NOW);
+  assert.deepEqual([small.overall.verdict, small.overall.basis.draftConfirmed.n, small.overall.basis.other.n], ["insufficient", 3, 0]);
+  assert.match(s.notes.join(" "), /confirmed draft/);
+});
+
 test("stats: recent lists the newest predictions first with a plain status", () => {
   const ps: Prediction[] = [
     scored(1, 0.7, true),
@@ -572,9 +690,9 @@ test("the file: written as version 1, owner-only, read back; a second process's 
     assert.equal((await stat(path)).mode & 0o777, 0o600);
     // another process wrote an entry after our first read: the next write is made on what is stored now
     const other = filePredictionStore(path);
-    await logPrediction(ok({ about: "2026-11-20" }), other, { now: NOW });
-    await logPrediction(ok({ about: "2026-11-21" }), a, { now: NOW });
-    assert.deepEqual((await a.load())!.predictions.map((p) => [p.id, p.about]), [["p1", "2026-11-16"], ["p2", "2026-11-20"], ["p3", "2026-11-21"]]);
+    await logPrediction(ok({ date: "2026-11-20" }), other, { now: NOW });
+    await logPrediction(ok({ date: "2026-11-21" }), a, { now: NOW });
+    assert.deepEqual((await a.load())!.predictions.map((p) => [p.id, p.date]), [["p1", "2026-11-16"], ["p2", "2026-11-20"], ["p3", "2026-11-21"]]);
     assert.deepEqual((await readdir(join(path, ".."))).sort(), ["predictions.json"]);
   });
 });

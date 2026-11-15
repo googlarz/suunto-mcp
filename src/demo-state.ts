@@ -19,15 +19,15 @@ export async function seedDemoState(predictions: PredictionStore, experiments: E
 
   // Thirty predictions about the 30 days from 33 to 4 days ago, each written the evening before; the due ones are scored by score_predictions.
   for (let i = 0; i < 30; i++) {
-    const about = addDays(today, -(33 - i));
-    const made = noon(addDays(about, -1));
+    const date = addDays(today, -(33 - i));
+    const made = noon(addDays(date, -1));
     const kind = (["session_done", "hrv_in_band", "recovery_morning_at_least"] as const)[i % 3];
     await logPrediction(
       kind === "session_done"
-        ? { about, kind, probability: pct(0.5, 0.9), rule: "weekly-plan" }
+        ? { date, kind, probability: pct(0.5, 0.9), rule: "weekly-plan" }
         : kind === "hrv_in_band"
-          ? { about, kind, probability: pct(0.3, 0.6), rule: "recovery-gate" }
-          : { about, kind, probability: pct(0.4, 0.8), threshold: 0.6, rule: "recovery-gate" },
+          ? { date, kind, probability: pct(0.3, 0.6), rule: "recovery-gate" }
+          : { date, kind, probability: pct(0.4, 0.8), threshold: 0.6, rule: "recovery-gate" },
       predictions,
       { now: made },
     );
@@ -39,8 +39,8 @@ export async function seedDemoState(predictions: PredictionStore, experiments: E
     while (new Date(`${d}T00:00:00Z`).getUTCDay() !== 1) d = addDays(d, -1);
     return d;
   };
-  for (const about of [monday(4), monday(11)]) {
-    await logPrediction({ about, kind: "reps_hit", probability: 0.7, exercise: "Bench Press", sets: 4, reps: 8, kg: 70, rule: "progression" }, predictions, { now: noon(addDays(about, -1)) });
+  for (const date of [monday(4), monday(11)]) {
+    await logPrediction({ date, kind: "reps_hit", probability: 0.7, exercise: "Bench Press", sets: 4, reps: 8, kg: 70, rule: "progression" }, predictions, { now: noon(addDays(date, -1)) });
   }
 
   // One finished experiment (28 days, ended 8 days ago, 14 days of each arm) with most days logged as followed.

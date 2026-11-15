@@ -94,18 +94,18 @@ test("stdio: every tool has a title and annotations consistent with what it does
       // archive_workouts writes only new local files and reads Suunto: not destructive, not idempotent (each call archives more), open-world
       if (t.name === "archive_workouts") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
       if (t.name === "get_archive_status") assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
-      // 1.1: the prediction ledger and the experiments only add to their files (nothing replaced: not destructive); a new prediction or experiment is a new entry (not idempotent); a void, a stop and a day log
+      // 1.1: the prediction ledger and the experiments only add to their files (nothing replaced), but a void and a stop cannot be undone (destructive); a new prediction or experiment is a new entry (not idempotent); a void, a stop and a day log
       // repeated leave the same state (idempotent); score_predictions scores the next batch each call (not idempotent) and reads Suunto
       const NEW: Record<string, object> = {
         log_prediction: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-        void_prediction: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        void_prediction: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
         score_predictions: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
         get_prediction_stats: { readOnlyHint: true, openWorldHint: false },
         start_experiment: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
         get_experiment: { readOnlyHint: true, openWorldHint: false },
         log_experiment_day: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
         analyze_experiment: { readOnlyHint: true, openWorldHint: true },
-        stop_experiment: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        stop_experiment: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
         draft_session_log: { readOnlyHint: true, openWorldHint: true },
       };
       if (t.name in NEW) assert.deepEqual(t.annotations, NEW[t.name], t.name);

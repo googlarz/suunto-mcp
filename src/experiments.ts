@@ -285,7 +285,7 @@ function preregistration(e: { metric: OutcomeMetric; intervention: string; contr
       `Outcome: ${e.metric}, the night after each assigned day (the one measured by get_tag_effects and get_baselines), taken from Suunto's data. Nothing else is tested.`,
       `Design: ${e.days} days from ${e.startDate}; ${perArm} intervention and ${perArm} control days, drawn before the start in pairs (one of each, order random, seed ${e.seed}). ${e.washout > 0 ? `The ${e.washout} day(s) after each intervention day are a washout and are not analysed.` : "No washout."}`,
       "Estimate: the median of the intervention nights minus the median of the control nights.",
-      `Test: two-sided permutation test over the pairs: every way of swapping the arms within a pair is as likely as the one drawn if the intervention does nothing. Exact up to ${EXACT_MAX_BLOCKS} informative pairs, else ${PERMUTATION_DRAWS} random swaps with fixed seed ${PERMUTATION_SEED}.`,
+      `Test: two-sided permutation test over the pairs: swapping the arms within a pair. ${e.washout > 0 ? "With a washout the days after an intervention day are skipped, so a swapped pair is not always a schedule the draw could have produced: the p-value is an approximation, checked by simulation in the project's tests, not exact." : "A swapped pair is a schedule the draw could equally have produced, so the p-value is exact when the intervention does nothing."} All swaps are enumerated up to ${EXACT_MAX_BLOCKS} informative pairs, else ${PERMUTATION_DRAWS} random swaps with fixed seed ${PERMUTATION_SEED}.`,
       "Primary analysis: intention to treat (every assigned day counts as assigned, whether followed or not). Per protocol (only days logged as followed) is reported beside it and is not protected by the randomization.",
       `Verdict: 'insufficient' with fewer than ${MIN_NIGHTS_PER_ARM} nights with a value in either arm; otherwise a difference is reported only when p <= ${ALPHA} AND the median difference is larger than get_tag_effects' noise threshold (${SE_K} * 1.25 * (IQR of the control nights / 1.35) * sqrt(1/nIntervention + 1/nControl)).`,
       "Analysis is run once, after the planned end. An earlier look is exploratory and is flagged as such.",
@@ -621,6 +621,9 @@ export async function analyzeExperiment(client: Client, store: ExperimentStore, 
     perProtocol: { ...pp, note: "Only days logged as followed; a day without a log is left out. Who follows the plan is not randomized, so this comparison is not protected by the randomization." },
     adherence,
     randomized: "Which of the two days of each pair got the intervention and which the control: drawn by a seeded random generator before the start. That is what the p-value rests on.",
+    pValueBasis: e.washout > 0
+      ? "approximation: with a washout a swapped pair is not always a schedule the draw could have produced; checked by simulation in the project's tests, not exact"
+      : "valid when the intervention does nothing: a swapped pair is a schedule the draw could equally have produced",
     notControlled: [
       "Everything else that differs between days: what you ate and drank, stress, illness, training load, travel, the weather. Pairing and randomization make them even out on average; they do not remove them.",
       "You knew which arm you were in (no blinding), so expectation can move the outcome and can move how faithfully you followed it.",
@@ -632,8 +635,8 @@ export async function analyzeExperiment(client: Client, store: ExperimentStore, 
       minNightsPerArm: MIN_NIGHTS_PER_ARM,
       alpha: ALPHA,
       noiseRule: `|median difference| > ${SE_K} * 1.25 * (IQR of the control nights / 1.35) * sqrt(1/nIntervention + 1/nControl): the noise scale get_tag_effects uses (calibrated there for 15+ nights per group; here it only adds a size guard to the permutation test)`,
-      test: `two-sided permutation test over the pairs; exact up to ${EXACT_MAX_BLOCKS} informative pairs, else ${PERMUTATION_DRAWS} draws with seed ${PERMUTATION_SEED}`,
+      test: `two-sided permutation test over the pairs; all swaps enumerated up to ${EXACT_MAX_BLOCKS} informative pairs, else ${PERMUTATION_DRAWS} random swaps with seed ${PERMUTATION_SEED}`,
     },
-    notes: ["A night after a day is recorded from the second day after it, so days newer than that are not read yet.", ...(e.washout > 0 ? [`Washout days (${e.washout} after each intervention day) are never analysed.`] : [])],
+    notes: ["A night after a day is recorded from the second day after it, so days newer than that are not read yet.", ...(e.washout > 0 ? [`Washout days (${e.washout} after each intervention day) are never analysed.`, "With a washout the p-value is an approximation (see pValueBasis), not exact."] : [])],
   };
 }

@@ -443,6 +443,37 @@ test("permutation test: with no real effect it is wrong about 5% of the time at 
   assert.ok(found >= 95, `${found} of 100 found`);
 });
 
+test("pre-registration: the plan calls the test exact only without a washout, and an approximation (checked by simulation) with one", async () => {
+  const plain = (await startExperiment(design(), memoryExperimentStore(), { now: NOW0, seed: 1 })).experiment.analysisPlan.join("\n");
+  const washed = (await startExperiment(design({ washout: 1 }), memoryExperimentStore(), { now: NOW0, seed: 1 })).experiment.analysisPlan.join("\n");
+  assert.match(plain, /the p-value is exact when the intervention does nothing/);
+  assert.doesNotMatch(plain, /approximation/);
+  assert.match(washed, /approximation, checked by simulation in the project's tests, not exact/);
+  assert.doesNotMatch(washed, /p-value is exact/);
+  assert.doesNotMatch(plain + washed, /exactly what was randomized/);
+});
+
+test("permutation test with a washout: still close to its nominal 5% with no effect and carry-over between nights (seeded simulation)", () => {
+  const rng = mulberry32(77);
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng());
+  for (const washout of [0, 1, 2]) {
+    let rejected = 0;
+    const trials = 400;
+    for (let t = 0; t < trials; t++) {
+      const schedule = generateSchedule({ startDate: "2026-10-02", days: 40, washout }, 1000 + t);
+      // nights that follow one another: AR(1) with 0.3, and no effect of the arm
+      let prev = 0;
+      const value = schedule.map(() => (prev = 0.3 * prev + gauss()));
+      const byBlock = new Map<number, Block["days"]>();
+      schedule.forEach((d, i) => {
+        if (d.block !== undefined) byBlock.set(d.block, [...(byBlock.get(d.block) ?? []), { arm: d.arm as "intervention" | "control", value: value[i] }]);
+      });
+      if (permutationTest([...byBlock.values()].map((days) => ({ days }))).p! <= 0.05) rejected++;
+    }
+    assert.ok(rejected / trials <= 0.08, `washout ${washout}: ${rejected} of ${trials} rejected`);
+  }
+});
+
 // ---------- analysis ----------
 
 // A fake Suunto: the night filed under day D (the one after day D) has score valueOf(D), or no sleep when null.
@@ -524,6 +555,12 @@ test("analyze_experiment: a real difference is found; the numbers are the median
   assert.equal(itt.noiseThreshold, Math.round(thresholdOf(control, 15)! * 10) / 10);
   assert.ok(itt.effectInStandardErrors! > 3);
   assert.ok(r.randomized.length > 20 && r.notControlled.length >= 4);
+  assert.match(r.pValueBasis, /^valid when the intervention does nothing/);
+  const washed = await finished({ days: 30, washout: 1 }, 77);
+  const rw = await analyzeExperiment(fakeSleep((d) => 60 + jitter(d)).client, washed.store, {}, { now: washed.today });
+  assert.match(rw.pValueBasis, /^approximation: with a washout/);
+  assert.ok(rw.notes.some((n) => /approximation/.test(n)));
+  assert.match(rw.thresholds.test, /all swaps enumerated up to 15/);
   assert.deepEqual(r.adherence, { trialDays: 30, logged: 30, followed: 30, notFollowed: 0, notLogged: 0 });
 });
 

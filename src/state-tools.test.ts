@@ -78,7 +78,7 @@ test("demo: the prediction and experiment tools work on in-memory state and writ
     const stats0 = (await call("get_prediction_stats")).json;
     assert.equal(stats0.demo, true);
     assert.equal(stats0.overall.logged, 32, "the deterministic demo ledger");
-    const logged = await call("log_prediction", { about: "2026-11-14", kind: "session_done", probability: 0.7, rule: "demo-rule" });
+    const logged = await call("log_prediction", { date: "2026-11-14", kind: "session_done", probability: 0.7, rule: "demo-rule" });
     assert.equal(logged.isError, false, logged.text);
     assert.equal(logged.json.saved.id, "p33");
     assert.equal((await call("get_prediction_stats")).json.overall.logged, 33, "state lives in memory across calls");
@@ -118,7 +118,7 @@ test("demo: log_session stays a no-op (its note), and draft_session_log writes n
 test("without demo mode the local tools need no Suunto credentials and write their files (0600), and the reading ones need none either", async () => {
   await withServer(false, async (call, dir) => {
     assert.equal((await call("get_prediction_stats")).json.overall.logged, 0);
-    const p = await call("log_prediction", { about: "2026-11-14", kind: "hrv_in_band", probability: 0.5 });
+    const p = await call("log_prediction", { date: "2026-11-14", kind: "hrv_in_band", probability: 0.5 });
     assert.equal(p.isError, false, p.text);
     assert.equal(JSON.parse(await readFile(join(dir, "predictions.json"), "utf8")).predictions[0].id, "p1");
     assert.equal((await stat(join(dir, "predictions.json"))).mode & 0o777, 0o600);
@@ -145,9 +145,12 @@ test("without demo mode the local tools need no Suunto credentials and write the
 test("tools: bad arguments are refused before anything is read or written", async () => {
   await withServer(false, async (call, dir) => {
     const bad: [string, Record<string, unknown>, RegExp][] = [
-      ["log_prediction", { about: "2026-11-14", kind: "weather", probability: 0.5 }, /Invalid arguments for log_prediction.*kind/],
-      ["log_prediction", { about: "2026-11-14", kind: "session_done", probability: 1.5 }, /probability.*<= 1/],
-      ["log_prediction", { kind: "session_done", probability: 0.5 }, /missing required property "about"/],
+      ["log_prediction", { date: "2026-11-14", kind: "weather", probability: 0.5 }, /Invalid arguments for log_prediction.*kind/],
+      ["log_prediction", { date: "2026-11-14", kind: "session_done", probability: 1.5 }, /probability.*<= 1/],
+      ["log_prediction", { kind: "session_done", probability: 0.5 }, /missing required property "date"/],
+      ["log_prediction", { date: "0123456789abcdef01234567", kind: "reps_hit", probability: 0.5, exercise: "Squat", sets: 3, reps: 5 }, /Invalid arguments for log_prediction.*date/],
+      ["log_prediction", { date: "2026-11-13", kind: "session_done", probability: 0.5 }, /must be after today \(2026-11-13\)/],
+      ["log_prediction", { about: "2026-11-14", date: "2026-11-14", kind: "session_done", probability: 0.5 }, /about is not a known field/],
       ["void_prediction", { id: "p1" }, /missing required property "reason"/],
       ["start_experiment", { name: "X", intervention: "a", control: "b", metric: "steps", days: 14 }, /metric.*one of/],
       ["start_experiment", { name: "X", intervention: "a", control: "b", metric: "hrv", days: 13 }, /days.*>= 14/],

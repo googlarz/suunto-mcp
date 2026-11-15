@@ -1051,9 +1051,11 @@
   "log_prediction": {
     "inputSchema": {
       "properties": {
-        "about": {
-          "maxLength": 24,
+        "date": {
+          "format": "date",
+          "maxLength": 10,
           "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
           "type": "string"
         },
         "exercise": {
@@ -1106,7 +1108,7 @@
         }
       },
       "required": [
-        "about",
+        "date",
         "kind",
         "probability"
       ],
@@ -1851,7 +1853,7 @@
       "type": "object"
     },
     "annotations": {
-      "destructiveHint": false,
+      "destructiveHint": true,
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": false
@@ -1946,7 +1948,7 @@
       "type": "object"
     },
     "annotations": {
-      "destructiveHint": false,
+      "destructiveHint": true,
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": false

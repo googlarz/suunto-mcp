@@ -52,18 +52,19 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   estimate_route_time: { title: "Estimate a route's time from your own pace (and the latest start before sunset)", annotations: READ },
   get_archive_status: { title: "Get the local workout archive status", annotations: { readOnlyHint: true, openWorldHint: false } },
   // The prediction ledger (predictions.json). Nothing is ever replaced or deleted: a new prediction is a new entry (so not idempotent), a void and an outcome are added to the entry.
+  // A void cannot be undone (the prediction is out of the scoring for good), so void_prediction is destructive; so is stop_experiment.
   log_prediction: { title: "Log a prediction before the fact (local ledger, immutable)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
-  void_prediction: { title: "Void a prediction before its due date (kept, with the reason)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  void_prediction: { title: "Void a prediction before its date (kept, with the reason; cannot be undone)", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
   // Reads Suunto; writes the outcomes of due predictions to the local ledger, at most 20 per call (the next call scores the next ones), hence not idempotent.
   score_predictions: { title: "Score due predictions against Suunto's data (hit / miss / unresolvable)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
   get_prediction_stats: { title: "Get prediction statistics: hit rate, Brier score, calibration", annotations: { readOnlyHint: true, openWorldHint: false } },
-  // The experiments file (experiments.json): nothing is replaced or deleted; stop keeps everything and a corrected day log keeps the earlier answer.
+  // The experiments file (experiments.json): nothing is replaced or deleted; stop keeps everything (but cannot be undone) and a corrected day log keeps the earlier answer.
   start_experiment: { title: "Start a randomized self-experiment (pre-registered, schedule drawn up front)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   get_experiment: { title: "Get experiments: today's assignment, progress, adherence", annotations: { readOnlyHint: true, openWorldHint: false } },
   log_experiment_day: { title: "Log what actually happened on an experiment day", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   // Reads Suunto's sleep and recovery lists and the local file; writes nothing.
   analyze_experiment: { title: "Analyze an experiment: intention to treat and per protocol, permutation test", annotations: READ },
-  stop_experiment: { title: "Stop an experiment (nothing is deleted)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  stop_experiment: { title: "Stop an experiment (nothing is deleted, but it cannot be restarted)", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
   // Reads one session's laps and FIT; writes nothing: logging the draft is a separate log_session call after the user confirmed it.
   draft_session_log: { title: "Draft a session log from the watch data (read-only; the user confirms, then log_session)", annotations: READ },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },

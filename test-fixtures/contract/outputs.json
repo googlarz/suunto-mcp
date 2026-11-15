@@ -101,11 +101,15 @@
       "note: always null"
     ],
     "get_prediction_stats": [
+      "byKind[].basis.draftConfirmed.hitRate: always null",
+      "byKind[].basis.other.hitRate: always null",
       "byKind[].brier: always null",
       "byKind[].brierBaseRate: always null",
       "byKind[].calibration: always null",
       "byKind[].hitRate: always null",
-      "byKind[].meanProbability: always null"
+      "byKind[].meanProbability: always null",
+      "byRule[].basis.draftConfirmed.hitRate: always null",
+      "overall.basis.draftConfirmed.hitRate: always null"
     ],
     "get_tag_effects": [
       "errors: always an empty list"
@@ -228,6 +232,7 @@
       "notes": [
         "string"
       ],
+      "pValueBasis": "string",
       "perProtocol": {
         "controlMedian": "number",
         "effectInStandardErrors": "number",
@@ -1690,6 +1695,18 @@
     "get_prediction_stats": {
       "byKind": [
         {
+          "basis": {
+            "draftConfirmed": {
+              "hitRate": "null",
+              "hits": "number",
+              "n": "number"
+            },
+            "other": {
+              "hitRate": "null",
+              "hits": "number",
+              "n": "number"
+            }
+          },
           "brier": "null",
           "brierBaseRate": "null",
           "calibration": "null",
@@ -1709,6 +1726,18 @@
       ],
       "byRule": [
         {
+          "basis": {
+            "draftConfirmed": {
+              "hitRate": "null",
+              "hits": "number",
+              "n": "number"
+            },
+            "other": {
+              "hitRate": "null|number",
+              "hits": "number",
+              "n": "number"
+            }
+          },
           "brier": "null|number",
           "brierBaseRate": "null|number",
           "calibration": {
@@ -1750,6 +1779,18 @@
         "string"
       ],
       "overall": {
+        "basis": {
+          "draftConfirmed": {
+            "hitRate": "null",
+            "hits": "number",
+            "n": "number"
+          },
+          "other": {
+            "hitRate": "number",
+            "hits": "number",
+            "n": "number"
+          }
+        },
         "brier": "number",
         "brierBaseRate": "number",
         "calibration": [
@@ -1775,7 +1816,7 @@
       },
       "recent": [
         {
-          "about": "string",
+          "date": "string",
           "detail": "string",
           "due": "string",
           "id": "string",
