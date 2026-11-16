@@ -171,6 +171,14 @@
       "description": "Projects fitness, fatigue and form for planned training days."
     },
     {
+      "name": "propose_next_week",
+      "description": "Proposes next week's strength sessions from your plan, your logged lifts and your recovery; returns the proposal and writes nothing."
+    },
+    {
+      "name": "simulate_plan",
+      "description": "What-if for a candidate plan: fitness, fatigue and form day by day, ramp and risk days; model-based, writes nothing."
+    },
+    {
       "name": "adjust_guide",
       "description": "Adjusts a strength guide to how recovered you are; returns it and pushes nothing."
     },

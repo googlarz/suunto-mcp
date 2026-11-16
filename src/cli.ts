@@ -18,6 +18,8 @@ import { estimateRouteTime } from "./route-time.js";
 import { filePredictionStore, predictionStats } from "./predictions.js";
 import { analyzeExperiment, fileExperimentStore, getExperiment } from "./experiments.js";
 import { buildDraft } from "./draft.js";
+import { proposeNextWeek } from "./propose-week.js";
+import { simulatePlan } from "./simulate-plan.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -42,6 +44,8 @@ Workout commands:
 Analysis commands:
   get-training-load    <YYYY-MM-DD> [--days N]
   forecast-training-load <YYYY-MM-DD:TSS>... [--as-of YYYY-MM-DD]   (CTL/ATL/TSB for planned days, from today's values)
+  propose-next-week    [MONDAY YYYY-MM-DD] [--rules JSON]   (next week's strength sessions from your plan, your logged lifts and recovery, with reasons, a forecast and a risk note; read-only: prints the proposal, writes nothing)
+  simulate-plan        <YYYY-MM-DD:TSS | YYYY-MM-DD:TITLE>... [--goal-date D] [--as-of D] [--compare ENTRY]...   (what-if: CTL/ATL/TSB day by day, ramp, risk days, your own response when your history allows; model-based, read-only)
   compare-workout      <workoutKey>   (laps only, no plan comparison)
   get-workout-rest-profile <workoutKey>
   get-exercise-history [name] [--weeks N]   (load, sets, rest recovery per session; writes only the local cache)
@@ -229,6 +233,44 @@ export async function runCli(argv: string[]) {
           return { date, tss: Number(tss) };
         });
         out(await forecastTrainingLoad(suunto, { days, asOf: values["as-of"] }));
+        break;
+      }
+
+      case "propose-next-week": {
+        const usage = "Usage: propose-next-week [MONDAY YYYY-MM-DD] [--rules JSON, e.g. '{\"deloadPct\":15}']";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { rules: { type: "string" } } });
+        if (positionals.length > 1) die(usage);
+        let rules: unknown;
+        if (values.rules !== undefined) {
+          try {
+            rules = JSON.parse(values.rules);
+          } catch {
+            die(`--rules must be a JSON object, got "${values.rules}". ${usage}`);
+          }
+        }
+        out(await proposeNextWeek(suunto, filePlanStore(), { ...(positionals[0] !== undefined ? { weekStart: positionals[0] } : {}), ...(rules !== undefined ? { rules } : {}) }));
+        break;
+      }
+
+      case "simulate-plan": {
+        const usage = "Usage: simulate-plan <YYYY-MM-DD:TSS | YYYY-MM-DD:TITLE>... [--goal-date YYYY-MM-DD] [--as-of YYYY-MM-DD] [--compare ENTRY]...  (ENTRY is DATE:TSS or DATE:TITLE, repeated for each session of the compared plan)";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { "goal-date": { type: "string" }, "as-of": { type: "string" }, compare: { type: "string", multiple: true } } });
+        if (positionals.length === 0) die(usage);
+        // DATE:TSS when what follows the first colon is a number, else DATE:TITLE (a title may hold colons)
+        const session = (entry: string) => {
+          const at = entry.indexOf(":");
+          const [date, what] = at < 0 ? [entry, ""] : [entry.slice(0, at), entry.slice(at + 1)];
+          if (!date || what === "") die(`"${entry}" is not DATE:TSS or DATE:TITLE (e.g. 2026-11-17:60 or 2026-11-17:PUSH A). ${usage}`);
+          return Number.isFinite(Number(what)) ? { date, tss: Number(what) } : { date, title: what };
+        };
+        out(
+          await simulatePlan(suunto, {
+            sessions: positionals.map(session),
+            ...(values["goal-date"] !== undefined ? { goalDate: values["goal-date"] } : {}),
+            ...(values["as-of"] !== undefined ? { asOf: values["as-of"] } : {}),
+            ...(values.compare !== undefined ? { compare: { sessions: values.compare.map(session) } } : {}),
+          }),
+        );
         break;
       }
 

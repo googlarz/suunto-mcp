@@ -52,7 +52,9 @@ import { archiveStatus, archiveWorkouts, fileArchiveStore, memoryArchiveStore } 
 import { buildBenchmark } from "./benchmark.js";
 import { buildWeeklyReport, fileReportStore, memoryReportStore } from "./report.js";
 import { estimateRouteTime } from "./route-time.js";
-import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoWriteResult, isDemo, markDemo } from "./demo.js";
+import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoPlan, demoWriteResult, isDemo, markDemo } from "./demo.js";
+import { RULES as PROPOSE_RULES, proposeNextWeek } from "./propose-week.js";
+import { simulatePlan } from "./simulate-plan.js";
 
 const cfg = loadConfig();
 // SUUNTO_DEMO=1: synthetic data, no credentials, no network (see demo.ts).
@@ -1314,6 +1316,62 @@ const specTools = [
       },
     },
   },
+  {
+    name: "propose_next_week",
+    description:
+      "Proposes next week's strength sessions from the stored plan (set_plan), what the user's journal says they ACTUALLY lifted (log_session), and how recovered and loaded they are. READ-ONLY and it writes NOTHING: it returns a proposal that the caller shows to the user and may pass on, there is no auto-write (reading the history fills only the same rebuildable derived-data cache as get_exercise_history; nothing is sent to the watch). The base week is the latest week of the plan (within 4 weeks before weekStart) with a guided session; its sessions are repeated one week on (weekStart = a Monday after today, default the next Monday) with each exercise's load decided by a small closed set of NAMED rules, reported in `rulesUsed` with their values (`rules` overrides some, each inside a stated range; unknown names are refused). PROGRESS: in the lift's latest logged session every planned set reached its planned reps at one weight -> load + one step (get_exercise_history's suggestion: at most incrementKg, default 2.5 kg, at most 5% of the load, at least 1.25 kg). HOLD: anything else with evidence -> the load that was done is repeated. DELOAD (load lowered deloadPct, default 10%, rounded to 1.25 kg): stallSessions (default 2) logged sessions of the lift in a row without hitting the plan; OR today's TSB (get_training_load) below tsbDeloadBelow (default -25); OR HRV and recovery on waking (get_baselines, today) both below the user's band. NEVER raises a load without evidence: a lift with no log_session entry for the plan's own sets x reps is left as it is (and the watch records only the plan, not what was lifted), one of HRV / recovery below the band or an unread part of the history blocks every increase, and a lift whose detail has no kg ('BW 3x15', 'RPE6') or no 'NxM' is never touched. The result is `insufficient` (status, `missing` says what; sessions, guides and forecast empty or null: no changes proposed) when there is no plan, no guided session to repeat, fewer than 2 sessions with logged sets in the last 8 weeks, or no lift with usable evidence. Output: { status ('ok' | 'insufficient'), weekStart, weekEnd, asOf (today), planSource ('stored' | 'demo' | 'none'), rulesUsed: [{ name, value, default, overridden, overridable, rule }], missing, basedOn: { from, to }, signals: { ctl, atl, tsb, hrv, recoveryMorning (below | within | above | null) }, sessions: [{ date, title, guide? }] (pass to set_plan; mode 'merge' replaces the plan's sessions on those dates), guides: [strength guide specs] (pass to push_week_plan, dryRun by default; each exercise's `last` and `target` are set for the watch), changes: [{ date, session, exercise, action ('progress' | 'hold' | 'deload' | 'unchanged'), changed, from: { detail, kg }, to: { detail, kg }, reasons }] (every exercise, with the reasons for it), reasons (what applies to the whole week), forecast: { asOf, start, series: [{ date, tss, ctl, atl, tsb }], basis } (forecast_training_load's own projection from today's values through the proposed week), risk: { level ('none' | 'caution'), flags: [{ rule, detail }], tsbFloor: { threshold (default -30), minTsb, date }, weeklyLoad: { threshold (default 30 %), proposedTss, previous4wAvgTss, jumpPct, complete } } (flags: the forecast TSB below tsbRiskFloor, or the week's TSS more than weeklyJumpPct over the average week of the 28 days before it, the upper edge of the 0.8-1.3 acute:chronic range: heuristics, not safe/unsafe lines), estimates: [{ date, title, tss, sessions, scope }] (each session's TSS for the forecast: the median of the user's last 90 days' sessions of the same title, at least 2 needed, else null and counted as 0), history: { from, to, guidedSessions, loggedSessions, pending, errors }, notes, errors }. MODEL-BASED: every number is a projection or a rule's output from the user's own data, not a measurement or a prediction of how they will respond; CTL can be about 1 point off the watch. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        weekStart: { ...dateProp("The Monday the proposed week starts on, YYYY-MM-DD; must be after today. Default: the next Monday."), examples: ["2026-11-16"] },
+        rules: {
+          type: "object",
+          description: "Optional overrides of the named rules (unknown names are refused). Each is a number inside the stated range; leave out what should stay at its default.",
+          properties: Object.fromEntries(
+            Object.entries(PROPOSE_RULES).map(([name, def]) => [name, { type: "integer" in def && def.integer ? "integer" : "number", minimum: def.min, maximum: def.max, default: def.default, description: def.text }]),
+          ),
+        },
+      },
+    },
+  },
+  {
+    name: "simulate_plan",
+    description:
+      "A WHAT-IF for a candidate week or multi-week plan: what it does to Fitness (CTL), Fatigue (ATL) and Form (TSB), day by day, before the user commits to it. READ-ONLY, writes nothing, keeps no state. Give `sessions`: [{ date, tss? , title?, guide? }], each after `asOf` (default today; at most 120 days ahead), several on one date add up. A session's TSS is the given `tss`, else the median TSS of the user's own sessions with the same title (or guide.title) in the last 90 days, needing at least 2 of them; with no estimate the call is REFUSED and asks for `tss` (never a guess). propose_next_week's `sessions` fit as they are. Optional `goalDate` (a race or test day) and `compare` ({ sessions, label? }: a second candidate over the same days from the same start). Starts from today's values with forecast_training_load's own math (the 42-day / 7-day model; CTL can be about 1 point off the watch) and runs to the Sunday of the last session's week or goalDate, whichever is later. Output: { modelBased: true, asOf, start: { ctl, atl, tsb }, from, to, totalTss, sessions: [{ date, title, tss, tssSource ('given' | 'history'), historySessions }], series: [{ date, tss, ctl, atl, tsb }] (the values at the end of each day), weeks: [{ weekStart (Monday), days, complete, tss, ctlStart, ctlEnd, rampRate (CTL gained over the week), previous4wAvgTss, jumpPct }], goal: { date, ctl, atl, tsb, band ('below' | 'fresh' | 'above'), freshBand: { min: 5, max: 25 } } | null (TSB on goalDate against the stated fresh band, inclusive), lowestTsb: { date, tsb }, end, risks: [{ rule, scope ('day' | 'week'), date | weekStart, value, threshold, detail }] (the days and full weeks where the stated risk rules trip: a day with TSB below -30; a full Monday-to-Sunday week whose CTL rises by more than 8; a full week whose TSS is more than 30% over the average week of the 28 days before it; compared as printed; a part of a week is no weekly rate and is not checked; heuristics with contested evidence, not safe/unsafe lines), responseToPlan, compare: { label, ...the same fields for the second plan, difference: { totalTss, endCtl, endTsb, lowestTsb, goalTsb, risks } (second minus first) } | null, personalResponse, thresholds, notes, errors }. personalResponse is the user's OWN history, shown only when it can be: for each of the last 90 days, the next night's HRV and recovery on waking after a HIGH-load day (TSS at or above the median of the user's training days) against after the other days (rest days included), by get_tag_effects' own rule (at least 15 nights of each, and a median gap larger than 3 standard errors of the difference of two medians, the spread from the other days' nights); status 'ok' when at least one metric can be judged, else 'insufficient' with `missing` saying what (nights counted against the 15 needed); each metric's verdict ('insufficient' | 'within-noise' | 'tagged-higher' (higher after high-load days) | 'tagged-lower'). `responseToPlan` counts the plan's high-load days and gives the expected shift of the next night ONLY for a metric whose history showed a difference beyond the noise (null otherwise: no effect is claimed). An association in the user's own data, not a cause. EVERY number is MODEL-BASED: a projection of a simple model, never a prediction of how the user will feel or respond. Reads workouts, sleep and recovery; a section that cannot be read is named in errors / personalResponse.missing instead of failing the call. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 200,
+          description: "The candidate plan: one entry per session (several may share a date).",
+          items: {
+            type: "object",
+            properties: {
+              date: { ...dateProp("The session's day, YYYY-MM-DD, after asOf.") },
+              title: { type: "string", minLength: 1, maxLength: 100, description: "The session's title, e.g. 'PUSH A': its TSS is estimated from the user's own sessions of that title when `tss` is not given." },
+              tss: { type: "number", minimum: 0, maximum: 1000, description: "The session's training stress, in the unit get_training_load shows (a typical easy hour is about 40-60, a hard one 80-100+). Overrides any estimate." },
+              guide: { type: "object", description: "Optional: the session's strength guide spec (as from propose_next_week); its `title` is used for the TSS estimate, its `date` must equal the session's.", properties: { title: { type: "string" }, date: { ...dateProp() } } },
+            },
+            required: ["date"],
+          },
+        },
+        goalDate: { ...dateProp("Optional: a race or test day, YYYY-MM-DD, after asOf: the result gives TSB that day against the fresh band (TSB 5 to 25) and the series runs to it."), examples: ["2026-12-06"] },
+        asOf: { ...dateProp("The last local day whose workouts are counted as done (default today; not in the future). The simulation starts the day after; to include today in the plan pass yesterday.") },
+        compare: {
+          type: "object",
+          description: "Optional: a second candidate plan to compare, simulated over the same days from the same start.",
+          properties: {
+            sessions: { type: "array", minItems: 1, maxItems: 200, description: "Same shape as the top-level sessions.", items: { type: "object", properties: { date: { ...dateProp() }, title: { type: "string", minLength: 1, maxLength: 100 }, tss: { type: "number", minimum: 0, maximum: 1000 }, guide: { type: "object" } }, required: ["date"] } },
+            label: { type: "string", maxLength: 100, description: "A name for the compared plan." },
+          },
+          required: ["sessions"],
+        },
+      },
+      required: ["sessions"],
+    },
+  },
 ];
 
 // Titles + annotations live in tool-meta.ts; a tool without an entry there
@@ -1436,6 +1494,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await analyzeExperiment(suunto, experimentStore, { id: a.id, early: a.early === true })));
       case "stop_experiment":
         return text(JSON.stringify(await stopExperiment(a, experimentStore)));
+      case "propose_next_week":
+        // demo mode: the lifts it logged and the programme's plan are generated (nothing is read from or written to the disk there)
+        return text(JSON.stringify(await proposeNextWeek(suunto, planStore, a, demo ? { journal: await (suunto as DemoClient).demoLiftJournal(), demoPlan } : {})));
+      case "simulate_plan":
+        return text(JSON.stringify(await simulatePlan(suunto, a)));
       case "draft_session_log":
         return text(JSON.stringify(await buildDraft(suunto, { workoutKey: a.workoutKey, date: a.date, plan: a.plan })));
       case "push_week_plan": {

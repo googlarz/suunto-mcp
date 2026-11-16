@@ -1066,3 +1066,61 @@ test("e2e get_weekly_report: assembles a past week from the stub, saves 0600 int
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// ---------- the CLI mirrors of propose_next_week and simulate_plan ----------
+
+async function runCliWith(args: string[], extraEnv: Record<string, string> = {}) {
+  return withStubbedEnv(async ({ cwd, env }) => {
+    const child = spawn(process.execPath, ["--import", stub, distIndex, ...args], { cwd, env: { ...env, SUUNTO_PLAN_PATH: join(cwd, "plan.json"), ...extraEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c: Buffer) => (stdout += c));
+    child.stderr.on("data", (c: Buffer) => (stderr += c));
+    const [code] = (await once(child, "close")) as [number];
+    return { code, stdout, stderr, files: await readdir(cwd) };
+  });
+}
+
+test("e2e CLI: simulate-plan takes DATE:TSS and DATE:TITLE entries, prints the model-based what-if, and refuses a malformed entry", async () => {
+  const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10); // 2 days of slack either way: UTC vs local date
+  const ok = await runCliWith(["simulate-plan", `${day(4)}:60`, `${day(6)}:80`, "--goal-date", day(14), "--compare", `${day(4)}:30`]);
+  assert.equal(ok.code, 0, ok.stderr);
+  const out = JSON.parse(ok.stdout);
+  assert.equal(out.modelBased, true);
+  assert.deepEqual(out.sessions.map((s: any) => [s.tss, s.tssSource]), [[60, "given"], [80, "given"]]);
+  assert.equal(out.goal.date, day(14));
+  assert.equal(out.compare.sessions.length, 1);
+  assert.deepEqual(ok.files.filter((f) => f !== "tokens.json"), [], "nothing written");
+  for (const bad of [[], ["2026-11-20"], ["2026-11-20:"], [":50"], ["2026-11-20:50", "--compare", "x"]]) {
+    const r = await runCliWith(["simulate-plan", ...bad]);
+    assert.notEqual(r.code, 0, bad.join(" "));
+    assert.match(r.stderr, /Usage: simulate-plan|is not DATE:TSS or DATE:TITLE/);
+  }
+  const title = await runCliWith(["simulate-plan", `${day(4)}:NO SUCH GUIDE`]);
+  assert.notEqual(title.code, 0);
+  assert.match(title.stderr, /no TSS estimate.*Give its tss/);
+});
+
+test("e2e CLI: propose-next-week reads the plan file, prints the proposal (here: no plan, so insufficient), writes nothing, and refuses bad rules and weeks", async () => {
+  const none = await runCliWith(["propose-next-week"]);
+  assert.equal(none.code, 0, none.stderr);
+  const out = JSON.parse(none.stdout);
+  assert.equal(out.status, "insufficient");
+  assert.match(out.missing[0], /No training plan is stored/);
+  assert.ok(!none.files.includes("plan.json"), "the plan file was not created");
+  const badRules = await runCliWith(["propose-next-week", "--rules", "{nope"]);
+  assert.notEqual(badRules.code, 0);
+  assert.match(badRules.stderr, /--rules must be a JSON object/);
+  const unknownRule = await runCliWith(["propose-next-week", "--rules", '{"bogus":1}']);
+  assert.match(unknownRule.stderr, /rules.bogus is not a known rule/);
+  const notMonday = await runCliWith(["propose-next-week", "2030-01-02"]);
+  assert.match(notMonday.stderr, /is not a Monday/);
+  const tooMany = await runCliWith(["propose-next-week", "2030-01-07", "2030-01-14"]);
+  assert.match(tooMany.stderr, /Usage: propose-next-week/);
+});
+
+test("e2e CLI: --help lists the two new commands", async () => {
+  const r = await runCliWith(["--help"]);
+  assert.match(r.stdout, /propose-next-week\s+\[MONDAY/);
+  assert.match(r.stdout, /simulate-plan\s+<YYYY-MM-DD:TSS/);
+});

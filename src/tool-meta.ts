@@ -67,6 +67,10 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   stop_experiment: { title: "Stop an experiment (nothing is deleted, but it cannot be restarted)", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
   // Reads one session's laps and FIT; writes nothing: logging the draft is a separate log_session call after the user confirmed it.
   draft_session_log: { title: "Draft a session log from the watch data (read-only; the user confirms, then log_session)", annotations: READ },
+  // Reads Suunto (workouts, sleep, recovery), the local plan file and the journal; returns a proposal and writes nothing but the same rebuildable derived-data cache as get_exercise_history.
+  propose_next_week: { title: "Propose next week's strength sessions (read-only: returns a proposal, writes nothing)", annotations: READ },
+  // Reads Suunto's workouts, sleep and recovery; keeps no state and writes nothing.
+  simulate_plan: { title: "Simulate a candidate plan: CTL/ATL/TSB, ramp, risk days, your own response (read-only, model-based)", annotations: READ },
   get_daily_snapshot: { title: "Get daily snapshot", annotations: READ },
   get_baselines: { title: "Get personal baselines (sleep, HRV, recovery, steps)", annotations: READ },
   get_training_load: { title: "Get training load (CTL/ATL/TSB)", annotations: READ },

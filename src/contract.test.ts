@@ -373,6 +373,10 @@ const OUTPUT_CALLS: Record<string, (c: Ctx) => Record<string, unknown>> = {
   get_weekly_report: () => ({}), // save defaults to false: a pure read
   estimate_route_time: (c) => ({ routeId: c.routeId }),
   adjust_guide: () => ({ guide: GUIDE }),
+  propose_next_week: () => ({}), // the plan above has a guided session in the week before the next Monday (2026-11-16)
+  "propose_next_week#insufficient": () => ({ weekStart: "2026-12-28" }), // no guided session within 4 weeks before it: the other shape
+  simulate_plan: () => ({ sessions: [{ date: "2026-11-16", title: "PUSH A" }, { date: "2026-11-18", tss: 70 }], goalDate: "2026-11-29" }),
+  "simulate_plan#compare": () => ({ sessions: [{ date: "2026-11-16", tss: 80 }], compare: { label: "lighter", sessions: [{ date: "2026-11-16", tss: 40 }] } }),
   push_week_plan: () => ({ guides: [GUIDE] }), // not read-only; dryRun (the default) validates and sends nothing, in demo mode too
   get_prediction_stats: () => ({}), // the demo ledger is scored first (see takeSnapshot), so the statistics are filled in
   get_experiment: () => ({}),

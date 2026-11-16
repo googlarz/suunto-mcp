@@ -1214,6 +1214,65 @@
       "readOnlyHint": false
     }
   },
+  "propose_next_week": {
+    "inputSchema": {
+      "properties": {
+        "rules": {
+          "properties": {
+            "deloadPct": {
+              "default": 10,
+              "maximum": 20,
+              "minimum": 5,
+              "type": "number"
+            },
+            "incrementKg": {
+              "default": 2.5,
+              "maximum": 5,
+              "minimum": 0.5,
+              "type": "number"
+            },
+            "stallSessions": {
+              "default": 2,
+              "maximum": 4,
+              "minimum": 2,
+              "type": "integer"
+            },
+            "tsbDeloadBelow": {
+              "default": -25,
+              "maximum": -10,
+              "minimum": -60,
+              "type": "number"
+            },
+            "tsbRiskFloor": {
+              "default": -30,
+              "maximum": -10,
+              "minimum": -60,
+              "type": "number"
+            },
+            "weeklyJumpPct": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 10,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "weekStart": {
+          "format": "date",
+          "maxLength": 10,
+          "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true
+    }
+  },
   "push_interval_guide": {
     "inputSchema": {
       "properties": {
@@ -1752,6 +1811,124 @@
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": false
+    }
+  },
+  "simulate_plan": {
+    "inputSchema": {
+      "properties": {
+        "asOf": {
+          "format": "date",
+          "maxLength": 10,
+          "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "compare": {
+          "properties": {
+            "label": {
+              "maxLength": 100,
+              "type": "string"
+            },
+            "sessions": {
+              "items": {
+                "properties": {
+                  "date": {
+                    "format": "date",
+                    "maxLength": 10,
+                    "minLength": 10,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "guide": {
+                    "type": "object"
+                  },
+                  "title": {
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "tss": {
+                    "maximum": 1000,
+                    "minimum": 0,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "date"
+                ],
+                "type": "object"
+              },
+              "maxItems": 200,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "sessions"
+          ],
+          "type": "object"
+        },
+        "goalDate": {
+          "format": "date",
+          "maxLength": 10,
+          "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "sessions": {
+          "items": {
+            "properties": {
+              "date": {
+                "format": "date",
+                "maxLength": 10,
+                "minLength": 10,
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "type": "string"
+              },
+              "guide": {
+                "properties": {
+                  "date": {
+                    "format": "date",
+                    "maxLength": 10,
+                    "minLength": 10,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "title": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              "tss": {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "date"
+            ],
+            "type": "object"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true
     }
   },
   "start_experiment": {

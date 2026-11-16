@@ -78,7 +78,7 @@ test("stdio: every tool has a title and annotations consistent with what it does
 
       // get_catchup and get_weekly_report read by name but are not read-only: markSeen: true and save: true write a local file
       const catchup = t.name === "get_catchup" || t.name === "get_weekly_report";
-      const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate|analyze|draft)_/.test(t.name) && !catchup;
+      const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate|analyze|draft|propose|simulate)_/.test(t.name) && !catchup;
       const writes = /^(push|delete|upload|generate|log|set|archive|void|score|start|stop)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
@@ -107,6 +107,9 @@ test("stdio: every tool has a title and annotations consistent with what it does
         analyze_experiment: { readOnlyHint: true, openWorldHint: true },
         stop_experiment: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
         draft_session_log: { readOnlyHint: true, openWorldHint: true },
+        // 1.2: planning tools: they read Suunto and return a proposal or a what-if, and write nothing
+        propose_next_week: { readOnlyHint: true, openWorldHint: true },
+        simulate_plan: { readOnlyHint: true, openWorldHint: true },
       };
       if (t.name in NEW) assert.deepEqual(t.annotations, NEW[t.name], t.name);
     }

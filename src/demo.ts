@@ -14,6 +14,7 @@ import { SuuntoEmptyResponseError, SuuntoNotFoundError } from "./errors.js";
 import { addDays } from "./training-load.js";
 import { buildDemoFit } from "./demo-fit.js";
 import type { JournalEntry } from "./journal.js";
+import type { Plan } from "./plan.js";
 
 export const isDemo = (env: NodeJS.ProcessEnv = process.env): boolean => env.SUUNTO_DEMO === "1";
 
@@ -101,6 +102,28 @@ const PROGRAMME: Record<number, { guide: string; exercises: Exercise[] }> = {
     { name: "Leg Press", sets: 3, reps: 10, kg: 140, restS: 90 },
   ] },
 };
+// The load added to every exercise of the programme in the week of `date`: 0, 2.5, 5, 7.5 kg, a step every two weeks.
+const progressKg = (date: string): number => 2.5 * Math.floor((Math.floor((epochDay(date) + 3) / 7) % 8) / 2);
+
+// The plan propose_next_week starts from when demo mode has none stored (set_plan writes to memory only there): the programme's
+// three guided sessions of the week before `weekStart`, loads as the demo sessions of that week carried them.
+export function demoPlan(weekStart: string): Plan {
+  const monday = addDays(weekStart, -7);
+  const sessions = Object.entries(PROGRAMME).map(([dow, tpl]) => {
+    const date = addDays(monday, Number(dow) - 1);
+    return {
+      date,
+      title: tpl.guide,
+      guide: {
+        title: tpl.guide,
+        date,
+        exercises: tpl.exercises.map((ex) => ({ name: ex.name, detail: `${ex.kg + progressKg(date)}kg ${ex.sets}x${ex.reps}`, sets: ex.sets, restSec: ex.restS })),
+      },
+    };
+  });
+  return { goal: "Demo programme: PUSH A, PULL B, LEGS C", phases: [], sessions };
+}
+
 const MAX_HR = 185;
 const HR_ZONE_EDGES = [0.6, 0.7, 0.8, 0.9].map((f) => f * MAX_HR);
 const GUIDE_IDS: Record<string, string> = { "PUSH A": "demo0001", "PULL B": "demo0002", "LEGS C": "demo0003" };
@@ -378,7 +401,7 @@ export class DemoClient extends SuuntoClient {
     const dow = weekday(date);
     const tpl = PROGRAMME[dow];
     const r = this.rng(`gym:${date}`);
-    const progress = 2.5 * Math.floor((Math.floor((epochDay(date) + 3) / 7) % 8) / 2);
+    const progress = progressKg(date);
     const laps: DemoLap[] = [];
     let off = 0;
     let hr = 88 + r() * 8;
@@ -496,6 +519,29 @@ export class DemoClient extends SuuntoClient {
     for (const w of this.workouts()) {
       const tag = w.laps ? "strength" : weekday(this.dateOf(w)) === 6 ? "long-run" : null;
       if (tag) journal[w.key] = { workoutKey: w.key, loggedAt: new Date(w.startMs).toISOString(), tags: [tag] };
+    }
+    return journal;
+  }
+
+  // What the demo lifter logged (log_session) for propose_next_week, which reads its evidence there: every set of every gym
+  // session as planned, except the newest LEGS C (Back Squat, and the one before it too: two misses in a row) and the newest
+  // PUSH A (Bench Press): one set a rep short. So a proposal shows a progression, a hold and a deload.
+  async demoLiftJournal(): Promise<Record<string, JournalEntry>> {
+    const journal: Record<string, JournalEntry> = {};
+    const seen = new Map<string, number>(); // guide -> sessions of it already walked, newest first
+    for (const w of this.workouts().filter((x) => x.laps)) {
+      const date = this.dateOf(w);
+      const tpl = PROGRAMME[weekday(date)];
+      const fromNewest = seen.get(tpl.guide) ?? 0;
+      seen.set(tpl.guide, fromNewest + 1);
+      journal[w.key] = {
+        workoutKey: w.key,
+        loggedAt: new Date(w.startMs).toISOString(),
+        exercises: tpl.exercises.map((ex) => {
+          const short = (tpl.guide === "LEGS C" && ex.name === "Back Squat" && fromNewest < 2) || (tpl.guide === "PUSH A" && ex.name === "Bench Press" && fromNewest < 1);
+          return { name: ex.name, sets: Array.from({ length: ex.sets }, (_, i) => ({ reps: short && i === ex.sets - 1 ? ex.reps - 1 : ex.reps, kg: ex.kg + progressKg(date) })) };
+        }),
+      };
     }
     return journal;
   }

@@ -596,3 +596,85 @@ test("e2e demo: exercise history works across the demo sessions and caches nothi
     assert.equal(index.notes.filter((n: string) => /unreliable heart-rate/.test(n)).length, 1, "the demo's one session with a sensor dropout is called out");
   });
 });
+
+// ---------- propose_next_week and simulate_plan in demo mode ----------
+
+// calls again until the demo sessions are all read (8 uncached ones per call), as the result's `pending` says
+async function proposeConverged(call: Call, args: Record<string, unknown> = {}) {
+  let r: any;
+  for (let i = 0; i < 8; i++) {
+    r = await ok(call, "propose_next_week", args);
+    if (r.pending === 0) break;
+  }
+  assert.equal(r.pending, 0);
+  return r;
+}
+
+test("e2e demo: propose_next_week proposes from the demo programme and lifts, deterministically, and its output goes straight to set_plan and push_week_plan", async () => {
+  await withDemo(async (call, rpc) => {
+    const defs: any[] = (await rpc("tools/list")).result.tools;
+    for (const name of ["propose_next_week", "simulate_plan"]) assert.deepEqual(defs.find((t) => t.name === name).annotations, { readOnlyHint: true, openWorldHint: true }, name);
+    const a = await proposeConverged(call);
+    const b = await proposeConverged(call);
+    assert.equal(JSON.stringify(a), JSON.stringify(b), "the same on every call");
+    assert.equal(a.status, "ok");
+    assert.equal(a.planSource, "demo");
+    assert.deepEqual(a.sessions.map((s: any) => s.title), ["PUSH A", "PULL B", "LEGS C"]);
+    const squat = a.changes.find((c: any) => c.exercise === "Back Squat");
+    assert.equal(squat.action, "deload", "the demo lifter missed it twice in a row");
+    assert.ok(a.changes.every((c: any) => c.reasons.length > 0));
+    assert.ok(a.changes.find((c: any) => c.exercise === "Bench Press").action !== "progress", "the newest bench session was a rep short");
+    assert.equal(a.rulesUsed.find((r: any) => r.name === "stallSessions").value, 2);
+    assert.ok(a.forecast.series.length >= 7 && a.risk.basis === "model-based");
+    // straight on: the guides pass push_week_plan's own schema (dry run), the sessions pass set_plan (the demo's memory store)
+    const week = await call("push_week_plan", { guides: a.guides });
+    assert.equal(week.isError, false, week.text);
+    assert.equal(week.json.dryRun, true);
+    assert.deepEqual(week.json.wouldPush.map((w: any) => w.date), a.sessions.map((s: any) => s.date));
+    const saved = await call("set_plan", { goal: "From the proposal", sessions: a.sessions });
+    assert.equal(saved.isError, false, saved.text);
+    // with a plan stored, the stored one is used
+    assert.equal((await proposeConverged(call)).planSource, "stored");
+  });
+});
+
+test("e2e demo: propose_next_week refuses a past weekStart and an unknown rule, and is insufficient when the plan has nothing to repeat", async () => {
+  await withDemo(async (call) => {
+    const past = await call("propose_next_week", { weekStart: "2020-01-06" });
+    assert.equal(past.isError, true);
+    assert.match(past.text, /must be after today/);
+    const rule = await call("propose_next_week", { rules: { deloadPct: 99 } });
+    assert.equal(rule.isError, true);
+    assert.match(rule.text, /deloadPct/);
+    const unknown = await call("propose_next_week", { rules: { bogus: 1 } });
+    assert.equal(unknown.isError, true);
+    assert.match(unknown.text, /rules.bogus is not a known rule/);
+    const extra = await call("propose_next_week", { nope: 1 });
+    assert.equal(extra.isError, true);
+    assert.match(extra.text, /nope is not a known field/);
+    await call("set_plan", { goal: "Runs only", sessions: [{ date: localDate(-3), title: "Run" }] });
+    const thin = await ok(call, "propose_next_week");
+    assert.equal(thin.status, "insufficient");
+    assert.deepEqual([thin.sessions, thin.guides, thin.forecast], [[], [], null]);
+    assert.match(thin.missing[0], /no session with a strength guide/);
+  });
+});
+
+test("e2e demo: simulate_plan is deterministic, model-based, asks for tss where there is no estimate, and refuses what it does not know", async () => {
+  await withDemo(async (call) => {
+    const args = { sessions: [{ date: localDate(-3), title: "PUSH A" }, { date: localDate(-5), tss: 60 }], goalDate: localDate(-14), compare: { label: "lighter", sessions: [{ date: localDate(-3), tss: 20 }] } };
+    const a = await ok(call, "simulate_plan", args);
+    assert.equal(JSON.stringify(a), JSON.stringify(await ok(call, "simulate_plan", args)));
+    assert.equal(a.modelBased, true);
+    assert.equal(a.asOf, localDate(0));
+    assert.equal(a.sessions.find((s: any) => s.title === "PUSH A").tssSource, "history");
+    assert.ok(a.goal.band && a.series.length >= 14 && a.compare.difference.totalTss !== undefined);
+    assert.ok(["ok", "insufficient"].includes(a.personalResponse.status));
+    const noEstimate = await call("simulate_plan", { sessions: [{ date: localDate(-3), title: "NOT A GUIDE" }] });
+    assert.equal(noEstimate.isError, true);
+    assert.match(noEstimate.text, /Give its tss/);
+    assert.match((await call("simulate_plan", { sessions: [{ date: localDate(-3), tss: 5, load: 1 }] })).text, /load is not a known field/);
+    assert.match((await call("simulate_plan", { sessions: [{ date: localDate(0), tss: 5 }] })).text, /must be after asOf/);
+    assert.match((await call("simulate_plan", {})).text, /Invalid arguments for simulate_plan/);
+  });
+});
