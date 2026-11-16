@@ -1,9 +1,6 @@
 {
   "about": "Key shape of what each tool returns in demo mode (frozen clock, fixed seed): keys and value type names, never values. A list is the union of its items' shapes. `unobserved` lists the places where demo data is always null or empty, so the shape inside them is NOT checked. Regenerate with UPDATE_CONTRACT=1 npm test.",
   "unobserved": {
-    "adjust_guide": [
-      "queued: always null"
-    ],
     "analyze_experiment": [
       "exploratoryReason: always null"
     ],
@@ -175,12 +172,14 @@
     ],
     "propose_next_week": [
       "errors: always an empty list",
-      "estimates[].tss: always null",
+      "estimates: always an empty list",
+      "forecast: always null",
+      "guides: always an empty list",
       "history.errors: always an empty list",
-      "missing: always an empty list",
       "predictions: always an empty list",
-      "queued: always null",
-      "risk.flags: always an empty list"
+      "queuePayload: always null",
+      "risk: always null",
+      "sessions: always an empty list"
     ],
     "propose_next_week#insufficient": [
       "basedOn: always null",
@@ -191,20 +190,22 @@
       "guides: always an empty list",
       "history: always null",
       "predictions: always an empty list",
-      "queued: always null",
+      "queuePayload: always null",
       "reasons: always an empty list",
       "risk: always null",
       "sessions: always an empty list",
       "signals: always null"
     ],
-    "propose_next_week#queue": [
+    "propose_next_week#predict": [
       "errors: always an empty list",
-      "estimates[].tss: always null",
+      "estimates: always an empty list",
+      "forecast: always null",
+      "guides: always an empty list",
       "history.errors: always an empty list",
-      "missing: always an empty list",
       "predictions: always an empty list",
-      "queued.approval.resolution: always null",
-      "risk.flags: always an empty list"
+      "queuePayload: always null",
+      "risk: always null",
+      "sessions: always an empty list"
     ],
     "queue_adjustment": [
       "approval.resolution: always null"
@@ -268,7 +269,26 @@
         "title": "string"
       },
       "level": "string",
-      "queued": "null",
+      "queuePayload": {
+        "forDate": "string",
+        "kind": "string",
+        "payload": {
+          "date": "string",
+          "exercises": [
+            {
+              "detail": "string",
+              "name": "string",
+              "restSec": "number",
+              "sets": "number"
+            }
+          ],
+          "title": "string"
+        },
+        "reasons": [
+          "string"
+        ],
+        "source": "string"
+      },
       "reasons": [
         "string"
       ],
@@ -2552,6 +2572,7 @@
           "createdAt": "string",
           "expiresAt": "string",
           "forDate": "string",
+          "howToPush": "string",
           "id": "string",
           "kind": "string",
           "payload": {
@@ -2801,49 +2822,9 @@
       ],
       "demo": "boolean",
       "errors": [],
-      "estimates": [
-        {
-          "date": "string",
-          "scope": "string",
-          "sessions": "number",
-          "title": "string",
-          "tss": "null"
-        }
-      ],
-      "forecast": {
-        "asOf": "string",
-        "basis": "string",
-        "series": [
-          {
-            "atl": "number",
-            "ctl": "number",
-            "date": "string",
-            "tsb": "number",
-            "tss": "number"
-          }
-        ],
-        "start": {
-          "atl": "number",
-          "ctl": "number",
-          "tsb": "number"
-        }
-      },
-      "guides": [
-        {
-          "date": "string",
-          "exercises": [
-            {
-              "detail": "string",
-              "last": "string",
-              "name": "string",
-              "restSec": "number",
-              "sets": "number",
-              "target": "string"
-            }
-          ],
-          "title": "string"
-        }
-      ],
+      "estimates": [],
+      "forecast": "null",
+      "guides": [],
       "history": {
         "errors": [],
         "from": "string",
@@ -2852,34 +2833,20 @@
         "pending": "number",
         "to": "string"
       },
-      "missing": [],
+      "missing": [
+        "string"
+      ],
       "notes": [
         "string"
       ],
       "pending": "number",
       "planSource": "string",
       "predictions": [],
-      "queued": "null",
+      "queuePayload": "null",
       "reasons": [
         "string"
       ],
-      "risk": {
-        "basis": "string",
-        "flags": [],
-        "level": "string",
-        "tsbFloor": {
-          "date": "string",
-          "minTsb": "number",
-          "threshold": "number"
-        },
-        "weeklyLoad": {
-          "complete": "boolean",
-          "jumpPct": "number",
-          "previous4wAvgTss": "number",
-          "proposedTss": "number",
-          "threshold": "number"
-        }
-      },
+      "risk": "null",
       "rulesUsed": [
         {
           "default": "number",
@@ -2890,26 +2857,7 @@
           "value": "number"
         }
       ],
-      "sessions": [
-        {
-          "date": "string",
-          "guide": {
-            "date": "string",
-            "exercises": [
-              {
-                "detail": "string",
-                "last": "string",
-                "name": "string",
-                "restSec": "number",
-                "sets": "number",
-                "target": "string"
-              }
-            ],
-            "title": "string"
-          },
-          "title": "string"
-        }
-      ],
+      "sessions": [],
       "signals": {
         "atl": "number",
         "ctl": "number",
@@ -2940,7 +2888,7 @@
       "pending": "number",
       "planSource": "string",
       "predictions": [],
-      "queued": "null",
+      "queuePayload": "null",
       "reasons": [],
       "risk": "null",
       "rulesUsed": [
@@ -2959,7 +2907,7 @@
       "weekEnd": "string",
       "weekStart": "string"
     },
-    "propose_next_week#queue": {
+    "propose_next_week#predict": {
       "asOf": "string",
       "basedOn": {
         "from": "string",
@@ -2987,49 +2935,9 @@
       ],
       "demo": "boolean",
       "errors": [],
-      "estimates": [
-        {
-          "date": "string",
-          "scope": "string",
-          "sessions": "number",
-          "title": "string",
-          "tss": "null"
-        }
-      ],
-      "forecast": {
-        "asOf": "string",
-        "basis": "string",
-        "series": [
-          {
-            "atl": "number",
-            "ctl": "number",
-            "date": "string",
-            "tsb": "number",
-            "tss": "number"
-          }
-        ],
-        "start": {
-          "atl": "number",
-          "ctl": "number",
-          "tsb": "number"
-        }
-      },
-      "guides": [
-        {
-          "date": "string",
-          "exercises": [
-            {
-              "detail": "string",
-              "last": "string",
-              "name": "string",
-              "restSec": "number",
-              "sets": "number",
-              "target": "string"
-            }
-          ],
-          "title": "string"
-        }
-      ],
+      "estimates": [],
+      "forecast": "null",
+      "guides": [],
       "history": {
         "errors": [],
         "from": "string",
@@ -3038,50 +2946,20 @@
         "pending": "number",
         "to": "string"
       },
-      "missing": [],
+      "missing": [
+        "string"
+      ],
       "notes": [
         "string"
       ],
       "pending": "number",
       "planSource": "string",
       "predictions": [],
-      "queued": {
-        "approval": {
-          "createdAt": "string",
-          "expiresAt": "string",
-          "forDate": "string",
-          "id": "string",
-          "kind": "string",
-          "reasons": [
-            "string"
-          ],
-          "resolution": "null",
-          "source": "string",
-          "status": "string"
-        },
-        "note": "string",
-        "queued": "boolean"
-      },
+      "queuePayload": "null",
       "reasons": [
         "string"
       ],
-      "risk": {
-        "basis": "string",
-        "flags": [],
-        "level": "string",
-        "tsbFloor": {
-          "date": "string",
-          "minTsb": "number",
-          "threshold": "number"
-        },
-        "weeklyLoad": {
-          "complete": "boolean",
-          "jumpPct": "number",
-          "previous4wAvgTss": "number",
-          "proposedTss": "number",
-          "threshold": "number"
-        }
-      },
+      "risk": "null",
       "rulesUsed": [
         {
           "default": "number",
@@ -3092,26 +2970,7 @@
           "value": "number"
         }
       ],
-      "sessions": [
-        {
-          "date": "string",
-          "guide": {
-            "date": "string",
-            "exercises": [
-              {
-                "detail": "string",
-                "last": "string",
-                "name": "string",
-                "restSec": "number",
-                "sets": "number",
-                "target": "string"
-              }
-            ],
-            "title": "string"
-          },
-          "title": "string"
-        }
-      ],
+      "sessions": [],
       "signals": {
         "atl": "number",
         "ctl": "number",
@@ -3181,6 +3040,7 @@
       },
       "decision": "string",
       "demo": "boolean",
+      "howToPush": "string",
       "id": "string",
       "kind": "string",
       "note": "null",

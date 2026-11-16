@@ -337,7 +337,7 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     const nonRead = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
     // set_plan, get_catchup, archive_workouts and get_weekly_report are not read-only either, but in demo mode they work on in-memory state (tested below);
     // so do the prediction ledger and experiment writers (tested in demo-state.test.ts and state-tools.test.ts)
-    const inMemory = ["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "resolve_approval", "propose_next_week", "adjust_guide"];
+    const inMemory = ["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "resolve_approval"];
     assert.deepEqual(nonRead.filter((n) => !inMemory.includes(n)), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
     for (const [name, args] of writes) {
       const r = await call(name, args);
@@ -613,9 +613,7 @@ async function proposeConverged(call: Call, args: Record<string, unknown> = {}) 
 test("e2e demo: propose_next_week proposes from the demo programme and lifts, deterministically, and its output goes straight to set_plan and push_week_plan", async () => {
   await withDemo(async (call, rpc) => {
     const defs: any[] = (await rpc("tools/list")).result.tools;
-    assert.deepEqual(defs.find((t) => t.name === "simulate_plan").annotations, { readOnlyHint: true, openWorldHint: true });
-    // with queue: true it adds an entry to the local approval queue, so it is annotated for that (it never pushes)
-    assert.deepEqual(defs.find((t) => t.name === "propose_next_week").annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
+    for (const name of ["propose_next_week", "simulate_plan", "adjust_guide"]) assert.deepEqual(defs.find((t) => t.name === name).annotations, { readOnlyHint: true, openWorldHint: true }, name);
     const a = await proposeConverged(call);
     const b = await proposeConverged(call);
     assert.equal(JSON.stringify(a), JSON.stringify(b), "the same on every call");
@@ -685,33 +683,32 @@ test("e2e demo: simulate_plan is deterministic, model-based, asks for tss where 
 
 const GUIDE_FOR = (date: string) => ({ title: "Approval check", date, exercises: [{ name: "Bench Press", detail: "70kg 3x8", sets: 3, restSec: 90 }] });
 
-test("e2e demo: propose_next_week queue: true and predict: true; the queue lists it and resolve_approval with push: true NEVER calls the push path", async () => {
+test("e2e demo: propose_next_week hands back a queuePayload and predictions; queue_adjustment takes it as it is; resolve_approval with push: true NEVER calls the push path", async () => {
   await withDemo(async (call, rpc) => {
     const defs: any[] = (await rpc("tools/list")).result.tools;
-    assert.deepEqual(defs.find((t) => t.name === "resolve_approval").annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true });
+    assert.deepEqual(defs.find((t) => t.name === "resolve_approval").annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
     assert.deepEqual(defs.find((t) => t.name === "list_approvals").annotations, { readOnlyHint: true, openWorldHint: false });
     assert.equal((await ok(call, "list_approvals")).items.length, 0);
-    const plain = await proposeConverged(call);
-    assert.equal(plain.queued, null);
-    assert.deepEqual(plain.predictions, []);
-    assert.equal((await ok(call, "list_approvals")).items.length, 0, "queue defaults to false");
-
-    const q = await proposeConverged(call, { queue: true, predict: true });
-    assert.equal(q.queued.queued, true);
+    const q = await proposeConverged(call, { predict: true });
+    assert.equal((await ok(call, "list_approvals")).items.length, 0, "the proposal queues nothing");
+    assert.ok(q.queuePayload && q.queuePayload.kind === "week_plan" && q.queuePayload.source === "propose_next_week");
     assert.ok(q.predictions.length > 0 || q.changes.every((c: any) => c.action !== "progress"), "a payload per increase");
     for (const p of q.predictions) {
       const logged = await call("log_prediction", p.payload);
       assert.equal(logged.isError, false, logged.text);
     }
+    const queued = await ok(call, "queue_adjustment", q.queuePayload);
+    assert.equal(queued.approval.id, "a1");
     const listed = await ok(call, "list_approvals", { status: "pending" });
     assert.deepEqual(listed.items.map((i: any) => [i.id, i.kind, i.status, i.source]), [["a1", "week_plan", "pending", "propose_next_week"]]);
     const full = await ok(call, "list_approvals", { id: "a1" });
-    assert.equal(full.items[0].call.tool, "push_week_plan");
+    assert.deepEqual([full.items[0].call.tool, full.items[0].call.arguments.dryRun], ["push_week_plan", true]);
 
     const approved = await ok(call, "resolve_approval", { id: "a1", decision: "approve", push: true, dryRun: false });
     assert.equal(approved.pushed, false);
     assert.match(approved.notes[0], /Demo mode: nothing was pushed/);
-    assert.equal(approved.call.arguments.guides.length, q.guides.length);
+    assert.deepEqual(approved.call.arguments, { guides: q.guides, dryRun: true }, "the dry-run form, never a ready real push");
+    assert.doesNotMatch(JSON.stringify(approved), /"dryRun":false/);
     const again = await ok(call, "resolve_approval", { id: "a1", decision: "reject" });
     assert.deepEqual([again.alreadyResolved, again.decision], [true, "approve"], "the first answer, never twice");
     const bad = await call("resolve_approval", { id: "a1", decision: "reject", push: true });
@@ -724,19 +721,22 @@ test("e2e demo: propose_next_week queue: true and predict: true; the queue lists
   });
 });
 
-test("e2e demo: queue_adjustment refuses what push_strength_guide would refuse; adjust_guide queue: true stores a change only", async () => {
+test("e2e demo: queue_adjustment refuses what push_strength_guide would refuse and a stale or too long-lived item; adjust_guide returns a queuePayload and queues nothing", async () => {
   await withDemo(async (call) => {
     const refused = await call("queue_adjustment", { kind: "adjusted_guide", payload: { title: "x", date: localDate(-1), exercises: [] } });
     assert.equal(refused.isError, true);
     assert.match(refused.text, /not a valid push_strength_guide spec/);
     assert.match((await call("queue_adjustment", { kind: "adjusted_guide", payload: { ...GUIDE_FOR(localDate(-1)), guideId: "g" } })).text, /guideId is not allowed/);
     assert.match((await call("queue_adjustment", { kind: "week_plan", payload: { guides: [] } })).text, /at least one guide|Invalid arguments/);
+    assert.match((await call("queue_adjustment", { kind: "adjusted_guide", payload: GUIDE_FOR(localDate(2)) })).text, /before today/);
+    assert.match((await call("queue_adjustment", { kind: "adjusted_guide", payload: GUIDE_FOR(localDate(-1)), forDate: localDate(-5) })).text, /must equal the payload's date/);
+    assert.match((await call("queue_adjustment", { kind: "adjusted_guide", payload: GUIDE_FOR(localDate(-1)), expiresAt: `${localDate(-20)}T00:00:00Z` })).text, /cannot outlive the day it is for/);
     assert.equal((await ok(call, "list_approvals")).items.length, 0, "nothing stored");
-    const out = await ok(call, "adjust_guide", { guide: GUIDE_FOR(localDate(-1)), queue: true });
-    assert.equal(out.queued.queued, out.adjusted, "only a change is worth a decision");
-    const plain = await ok(call, "adjust_guide", { guide: GUIDE_FOR(localDate(-1)) });
-    assert.equal(plain.queued, null);
-    assert.equal((await ok(call, "list_approvals")).items.length, out.adjusted ? 1 : 0);
+    const out = await ok(call, "adjust_guide", { guide: GUIDE_FOR(localDate(-1)) });
+    assert.equal(out.queuePayload === null, !out.adjusted, "only a change has a payload");
+    if (out.adjusted) assert.deepEqual(Object.keys(out.queuePayload), ["kind", "payload", "forDate", "reasons", "source"]);
+    assert.equal((await call("adjust_guide", { guide: GUIDE_FOR(localDate(-1)), queue: true })).isError, false, "an unknown input is ignored by the schema check, as for every tool");
+    assert.equal((await ok(call, "list_approvals")).items.length, 0, "adjust_guide queues nothing");
   });
 });
 

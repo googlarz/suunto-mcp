@@ -93,10 +93,6 @@
             "exercises"
           ],
           "type": "object"
-        },
-        "queue": {
-          "default": false,
-          "type": "boolean"
         }
       },
       "required": [
@@ -105,10 +101,8 @@
       "type": "object"
     },
     "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
       "openWorldHint": true,
-      "readOnlyHint": false
+      "readOnlyHint": true
     }
   },
   "analyze_experiment": {
@@ -1273,10 +1267,6 @@
           "default": false,
           "type": "boolean"
         },
-        "queue": {
-          "default": false,
-          "type": "boolean"
-        },
         "rules": {
           "properties": {
             "deloadPct": {
@@ -1329,10 +1319,8 @@
       "type": "object"
     },
     "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
       "openWorldHint": true,
-      "readOnlyHint": false
+      "readOnlyHint": true
     }
   },
   "push_interval_guide": {
@@ -1757,7 +1745,7 @@
     },
     "annotations": {
       "destructiveHint": false,
-      "idempotentHint": true,
+      "idempotentHint": false,
       "openWorldHint": true,
       "readOnlyHint": false
     }

@@ -10,7 +10,7 @@ import type { ParsedFit } from "./fit.js";
 import { COLS, clearFailedSessions, suggestProgression, type WorkoutRecord } from "./history.js";
 import type { JournalEntry } from "./journal.js";
 import { memoryPlanStore, setPlan, type Plan, type PlanStore } from "./plan.js";
-import { memoryApprovalStore, resolveApproval } from "./approvals.js";
+import { memoryApprovalStore, queueAdjustment, resolveApproval } from "./approvals.js";
 import { logPrediction, memoryPredictionStore, type Prediction } from "./predictions.js";
 import { PREDICT_DEFAULT, PREDICT_MAX, PREDICT_MIN, PREDICT_RULE, predictionProbability } from "./propose-week.js";
 import { BASE_LOOKBACK_WEEKS, buildGates, HISTORY_WEEKS, MIN_LOGGED_SESSIONS, RULES, baseWeek, decideLift, deloadKg, hit, liftEvidence, parseRules, proposeNextWeek, rulesUsed, withKg, type Evidence, type Gates, type Rules } from "./propose-week.js";
@@ -131,12 +131,12 @@ test("decideLift: a set short, fewer sets, or different weights -> hold at the l
   assert.match(decide([ev(70, MISS)]).reasons.join(" "), /fell short/);
 });
 
-test("decideLift: the proposed load follows what was logged, not what the plan said (never above evidence + one step)", () => {
-  // plan says 70 but the lifter logged 65: all hit -> 67.5, not 72.5
+test("decideLift: the proposed load follows what was logged, inside the plan's own load and one step above it", () => {
+  // plan says 70 but the lifter logged 65: all hit -> the step from 65 (67.5) would be a cut: the plan's 70 stays
   const d = decide([ev(65, HIT)]);
-  assert.deepEqual([d.action, d.kg], ["progress", 67.5]);
-  // plan says 60, logged 70 and missed: held at 70
-  assert.equal(decide([ev(70, MISS)], { baseDetail: "60kg 4x8" }).kg, 70);
+  assert.deepEqual([d.action, d.kg], ["hold", 70]);
+  // plan says 60, logged 70 and missed: held one step above the plan at most
+  assert.equal(decide([ev(70, MISS)], { baseDetail: "60kg 4x8" }).kg, 62.5);
 });
 
 test("decideLift: deload after stallSessions logged sessions in a row without hitting the plan (default 2): 1 is not enough, 2 is", () => {
@@ -230,20 +230,20 @@ test("liftEvidence: only sessions with logged reps for that lift and the plan's 
     d: entry("d", [{ name: "Bench Press", sets: sets(MISS, 72.5) }, { name: "Back Squat", sets: sets(HIT, 100) }]),
     e: entry("e", [{ name: "Bench Press", sets: [{ kg: 70 }] }]),
   };
-  const { evidence, skippedScheme } = liftEvidence("Bench Press", "70kg 4x8", ordered, journal);
+  const { evidence, skippedScheme } = liftEvidence("Bench Press", "70kg 4x8", ordered, journal, () => true);
   assert.deepEqual(evidence.map((e) => [e.date, e.kg]), [["2026-10-12", 65], ["2026-11-02", 72.5]], "b has no log, c is another scheme, e logged no reps");
   assert.equal(skippedScheme, 1);
-  assert.equal(liftEvidence("Back Squat", "100kg 4x8", ordered, journal).evidence.length, 1);
-  assert.equal(liftEvidence("Overhead Press", "40kg 4x8", ordered, journal).evidence.length, 0);
+  assert.equal(liftEvidence("Back Squat", "100kg 4x8", ordered, journal, () => true).evidence.length, 1);
+  assert.equal(liftEvidence("Overhead Press", "40kg 4x8", ordered, journal, () => true).evidence.length, 0);
   // a plan whose detail has no sets x reps matches any scheme the session itself had
-  assert.equal(liftEvidence("Bench Press", "70kg", ordered, journal).evidence.length, 3);
+  assert.equal(liftEvidence("Bench Press", "70kg", ordered, journal, () => true).evidence.length, 3);
 });
 
 test("liftEvidence: a name the guide cut still matches, a similar name does not", () => {
   const ordered = [record("a", "2026-11-02", [{ name: "Seated Cable Row W", detail: "55kg 4x8", cut: true }, { name: "Squat", detail: "80kg 4x8" }])];
   const journal = { a: entry("a", [{ name: "Seated Cable Row W", sets: sets(HIT, 55) }, { name: "Squat", sets: sets(HIT, 80) }]) };
-  assert.equal(liftEvidence("Seated Cable Row Wide Grip", "55kg 4x8", ordered, journal).evidence.length, 1);
-  assert.equal(liftEvidence("Squat Jump", "55kg 4x8", ordered, journal).evidence.length, 0);
+  assert.equal(liftEvidence("Seated Cable Row Wide Grip", "55kg 4x8", ordered, journal, () => true).evidence.length, 1);
+  assert.equal(liftEvidence("Squat Jump", "55kg 4x8", ordered, journal, () => true).evidence.length, 0);
 });
 
 // ---------- the base week ----------
@@ -304,6 +304,8 @@ interface Session {
   logged?: Record<string, number[]>;
   tss?: number;
   guide?: string;
+  /** the weight logged per lift, instead of the usual one */
+  kg?: Record<string, number>;
 }
 interface Account {
   sessions: Session[];
@@ -323,7 +325,7 @@ function account(a: Account) {
   ];
   const journal: Record<string, JournalEntry> = {};
   a.sessions.forEach((s, i) => {
-    if (s.logged) journal[keys[i]] = entry(keys[i], Object.entries(s.logged).map(([name, reps]) => ({ name, sets: sets(reps, LOADS[name]) })));
+    if (s.logged) journal[keys[i]] = entry(keys[i], Object.entries(s.logged).map(([name, reps]) => ({ name, sets: sets(reps, s.kg?.[name] ?? LOADS[name]) })));
   });
   // sleep and recovery for the 35 days up to today, a quiet band, today's values as asked
   const sleeps: any[] = [];
@@ -487,7 +489,7 @@ test("proposeNextWeek: weekStart must be a future Monday (default: the next one)
   await bad({ weekStart: "2026-02-30" }, /weekStart must be a calendar date/);
   await bad({ weekStart: 5 }, /weekStart must be a calendar date/);
   await bad({ rules: { bogus: 1 } }, /rules.bogus is not a known rule/);
-  await bad({ extra: 1 }, /extra is not a known field \(allowed: weekStart, rules, queue, predict\)/);
+  await bad({ extra: 1 }, /extra is not a known field \(allowed: weekStart, rules, predict\)/);
   await bad("x", /arguments must be an object/);
   assert.deepEqual(acc.calls, []);
   assert.equal((await propose(acc, store, { weekStart: "2026-11-23" })).weekStart, "2026-11-23");
@@ -530,10 +532,17 @@ test("proposeNextWeek: sessions without a TSS estimate count as 0 and are named;
 });
 
 test("proposeNextWeek: a heavy week trips the weekly-jump and TSB-floor flags, and the caller's thresholds move them", async () => {
-  // PUSH PULL A normally scores 50; the proposed guide is a 'BIG' one that scored 400 twice, 60 and 70 days ago
+  // the proposed guide 'BIG' scored 400 four times (its logged sessions 45 and 50 days ago, two more runs 60 and 70 days ago); the last 28 days hold 4 easy 50s
   const acc = account({
-    sessions: sixSessions(() => ALL_HIT),
-    extra: [{ date: addDays(TODAY, -60), tss: 400, guide: "BIG" }, { date: addDays(TODAY, -70), tss: 400, guide: "BIG" }],
+    sessions: [
+      { date: addDays(TODAY, -50), guide: "BIG", tss: 400, logged: ALL_HIT },
+      { date: addDays(TODAY, -45), guide: "BIG", tss: 400, logged: ALL_HIT },
+    ],
+    extra: [
+      { date: addDays(TODAY, -60), tss: 400, guide: "BIG" },
+      { date: addDays(TODAY, -70), tss: 400, guide: "BIG" },
+      ...[2, 9, 16, 23].map((n) => ({ date: addDays(TODAY, -n), tss: 50, guide: "Easy run" })),
+    ],
   });
   const store = await planStoreOf([{ date: "2026-11-09", title: "Big day", guide: guideOf("2026-11-09", "BIG") as any }]);
   const out = await propose(acc, store);
@@ -547,6 +556,7 @@ test("proposeNextWeek: a heavy week trips the weekly-jump and TSB-floor flags, a
   assert.deepEqual((lax.risk as any).flags.map((f: any) => f.rule), ["weekly-load-jump"], "only the TSB line moved");
   assert.equal((lax.risk as any).tsbFloor.threshold, -60);
 });
+
 
 test("proposeNextWeek: deterministic, and nothing is written (no file, the plan untouched)", async () => {
   const dir = await mkdtemp(join(tmpdir(), "suunto-propose-"));
@@ -584,14 +594,14 @@ test("proposeNextWeek: a guideId in the stored guide is dropped (push_week_plan 
   const withId = await planStoreOf([{ date: "2026-11-09", title: "Push pull", guide: { ...guideOf("2026-11-09"), guideId: "abc123" } as any }]);
   const out = await propose(acc, withId);
   assert.equal("guideId" in (out.guides[0] as object), false);
-  const demoPlan = (weekStart: string): Plan => ({ goal: "demo", phases: [], sessions: [{ date: addDays(weekStart, -7), title: "Demo", guide: guideOf(addDays(weekStart, -7), "DEMO") as any }] });
+  const demoPlan = (weekStart: string): Plan => ({ goal: "demo", phases: [], sessions: [{ date: addDays(weekStart, -7), title: "Demo", guide: guideOf(addDays(weekStart, -7)) as any }] });
   const both = await withCacheOff(() => proposeNextWeek(acc.client, withId, {}, { ...acc.deps, demoPlan }));
   assert.deepEqual([both.planSource, (both.sessions[0] as any).title], ["stored", "Push pull"]);
   const only = await withCacheOff(() => proposeNextWeek(acc.client, memoryPlanStore(), {}, { ...acc.deps, demoPlan }));
   assert.deepEqual([only.planSource, (only.sessions[0] as any).title], ["demo", "Demo"]);
 });
 
-// ---------- predict: true and queue: true ----------
+// ---------- predict: true ----------
 
 test("predictionProbability: your own hit rate for the rule from 20 scored on, else the default; always inside 0.5..0.9 (edges included)", () => {
   assert.deepEqual([PREDICT_RULE, PREDICT_DEFAULT, PREDICT_MIN, PREDICT_MAX], ["progression", 0.65, 0.5, 0.9]);
@@ -642,38 +652,120 @@ test("proposeNextWeek predict: only increases get one (a hold or a deload does n
   assert.equal(held.status, "ok");
   assert.deepEqual(held.predictions, [], "one signal below the band: every load is held, nothing to predict");
   await assert.rejects(propose(acc, await planStoreOf(), { predict: "yes" }), /predict must be a boolean/);
-  await assert.rejects(propose(acc, await planStoreOf(), { queue: 1 }), /queue must be a boolean/);
 });
 
-test("proposeNextWeek queue: true stores the proposal as a pending week_plan approval and pushes nothing; the default stores nothing", async () => {
+// ---------- review fixes: evidence from the same session only; changes capped against the plan's own load ----------
+
+test("liftEvidence: only the sessions of the same guide count, not the same lift on another day", () => {
+  const ordered = [
+    record("a", "2026-10-19", [{ name: "Bench Press", detail: "70kg 4x8" }]), // the planned guide
+    record("b", "2026-10-21", [{ name: "Bench Press", detail: "80kg 4x8" }]), // a heavy day of another guide
+    record("c", "2026-10-26", [{ name: "Bench Press", detail: "70kg 4x8" }]), // no guide at all
+  ];
+  const journal = { a: entry("a", [{ name: "Bench Press", sets: sets(HIT, 70) }]), b: entry("b", [{ name: "Bench Press", sets: sets(HIT, 80) }]), c: entry("c", [{ name: "Bench Press", sets: sets(HIT, 70) }]) };
+  const guides = new Map([["a", "Push A"], ["b", "HEAVY PUSH"]]);
+  const same = (key: string) => (guides.get(key) ?? "").toLowerCase().replace(/\W+/g, " ").trim() === "push a";
+  const { evidence } = liftEvidence("Bench Press", "70kg 4x8", ordered, journal, same);
+  assert.deepEqual(evidence.map((e) => [e.date, e.kg]), [["2026-10-19", 70]], "b is another guide, c ran none");
+  assert.equal(liftEvidence("Bench Press", "70kg 4x8", ordered, journal, () => false).evidence.length, 0);
+});
+
+test("decideLift: a progress is never below the planned load and never more than one step above it; a cut only comes from a deload rule", () => {
+  // planned 60 kg, the evidence is a 70 kg hit: not 72.5, one step above the plan
+  const up = decide([ev(70, HIT)], { baseDetail: "60kg 4x8" });
+  assert.deepEqual([up.action, up.kg, up.target], ["progress", 62.5, "4x8@62.5kg"]);
+  // planned 100 kg, the evidence is an 80 kg hit: 82.5 would be a cut dressed as a progress: the plan's 100 stays
+  const low = decide([ev(80, [8, 8, 8, 8], "100kg 4x8")], { baseDetail: "100kg 4x8" });
+  assert.deepEqual([low.action, low.kg], ["hold", 100]);
+  assert.match(low.reasons.join(" "), /80 kg.* below the planned 100 kg/);
+  // the evidence just reaching the plan: the usual step up, to the step above the plan
+  assert.deepEqual([decide([ev(100, HIT, "100kg 4x8")], { baseDetail: "100kg 4x8" }).action, decide([ev(100, HIT, "100kg 4x8")], { baseDetail: "100kg 4x8" }).kg], ["progress", 102.5]);
+  // evidence one step below the plan: its step up only gets back to the plan: no progress
+  assert.deepEqual([decide([ev(97.5, HIT, "100kg 4x8")], { baseDetail: "100kg 4x8" }).action, decide([ev(97.5, HIT, "100kg 4x8")], { baseDetail: "100kg 4x8" }).kg], ["hold", 100]);
+  // a plan of 70 with a 65 kg log: the plan's load, not a cut to 67.5
+  assert.deepEqual([decide([ev(65, HIT)]).action, decide([ev(65, HIT)]).kg], ["hold", 70]);
+  // a miss: the load that was done, but never under the plan (no cut without a deload rule) and never over one step above it
+  assert.equal(decide([ev(65, MISS)]).kg, 70);
+  assert.equal(decide([ev(70, MISS)], { baseDetail: "60kg 4x8" }).kg, 62.5);
+  assert.equal(decide([ev(61, MISS)], { baseDetail: "60kg 4x8" }).kg, 61);
+  // a deload counts from the lower of what was lifted and what was planned
+  assert.equal(decide([ev(80, MISS), ev(80, MISS)], { baseDetail: "100kg 4x8" }).kg, deloadKg(80, 10));
+  assert.equal(decide([ev(70, MISS), ev(70, MISS)], { baseDetail: "60kg 4x8" }).kg, deloadKg(60, 10));
+});
+
+const guideNamed = (title: string, bench: string) => ({ ...guideOf("2026-11-09", title), exercises: [{ name: "Bench Press", detail: bench, sets: 3, restSec: 90 }] });
+
+test("proposeNextWeek: planned 60 kg with a 70 kg log from a heavy day of another guide: no jump to 72.5, the 60 stays", async () => {
+  const acc = account({
+    sessions: [
+      { date: monday(1), guide: "HEAVY PUSH", logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 70 } },
+      { date: monday(2), guide: "HEAVY PUSH", logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 70 } },
+      { date: monday(3), guide: "HEAVY PUSH", logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 70 } },
+    ],
+  });
+  const store = await planStoreOf([{ date: "2026-11-09", title: "Light push", guide: guideNamed("PUSH LIGHT", "60kg 3x8") as any }]);
+  const out = await propose(acc, store);
+  assert.equal(out.status, "insufficient", "nothing of the planned session was logged: nothing is proposed");
+  const bench: any = out.changes.find((c: any) => c.exercise === "Bench Press");
+  assert.deepEqual([bench.action, bench.to.detail], ["unchanged", "60kg 3x8"]);
+  assert.match(bench.reasons[0], /No evidence/);
+});
+
+test("proposeNextWeek: the evidence is the planned session's own: a heavy day of another guide beside it changes nothing", async () => {
+  const acc = account({
+    sessions: [
+      { date: monday(1), guide: "HEAVY PUSH", logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 80 } },
+      { date: monday(2), guide: "PUSH LIGHT", logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 60 } },
+      { date: monday(3), guide: "HEAVY PUSH", logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 80 } },
+      { date: monday(4), guide: "PUSH LIGHT", logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 60 } },
+    ],
+  });
+  const out = await propose(acc, await planStoreOf([{ date: "2026-11-09", title: "Light push", guide: guideNamed("PUSH LIGHT", "60kg 3x8") as any }]));
+  const bench: any = out.changes[0];
+  assert.deepEqual([bench.action, bench.to.detail], ["progress", "62.5kg 3x8"], "60 kg, a hit: one step, not 82.5");
+});
+
+test("proposeNextWeek: a plan of 100 kg with an 80 kg log of that session is not a 'progress' of 82.5", async () => {
+  const acc = account({ sessions: [{ date: monday(2), logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 80 } }, { date: monday(3), logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 80 } }, { date: monday(4), logged: { "Bench Press": [8, 8, 8] }, kg: { "Bench Press": 80 } }] });
+  const out = await propose(acc, await planStoreOf([{ date: "2026-11-09", title: "Push", guide: guideNamed("PUSH PULL A", "100kg 3x8") as any }]));
+  const bench: any = out.changes[0];
+  assert.deepEqual([bench.action, bench.to.detail], ["hold", "100kg 3x8"]);
+});
+
+test("proposeNextWeek: queuePayload is the exact arguments for queue_adjustment (nothing is queued by the proposal); queue is no input any more", async () => {
   const acc = account({ sessions: sixSessions(() => ALL_HIT) });
   const store = await planStoreOf();
+  const out: any = await propose(acc, store);
+  assert.deepEqual(Object.keys(out.queuePayload), ["kind", "payload", "forDate", "reasons", "source"]);
+  assert.deepEqual([out.queuePayload.kind, out.queuePayload.forDate, out.queuePayload.source, out.queuePayload.payload], ["week_plan", "2026-11-16", "propose_next_week", { guides: out.guides }]);
+  assert.ok(out.queuePayload.reasons.length > 0 && out.queuePayload.reasons.length <= 20 && out.queuePayload.reasons.every((r: string) => r.length <= 500));
+  assert.match(out.queuePayload.reasons.join(" "), /Bench Press: progress/);
   const approvals = memoryApprovalStore();
   const validate = (g: unknown) => (typeof (g as any)?.title === "string" ? [] : ["bad guide"]);
-  const plain = await withCacheOff(() => proposeNextWeek(acc.client, store, {}, { ...acc.deps, approvals: { store: approvals, validate } }));
-  assert.equal(plain.queued, null);
-  assert.equal(await approvals.load(), null, "queue defaults to false: nothing stored");
-  const out: any = await withCacheOff(() => proposeNextWeek(acc.client, store, { queue: true }, { ...acc.deps, approvals: { store: approvals, validate } }));
-  assert.equal(out.queued.queued, true);
-  const a = (await approvals.load())!.approvals[0];
-  assert.deepEqual([a.id, a.kind, a.forDate, a.source, a.resolution], ["a1", "week_plan", "2026-11-16", "propose_next_week", undefined]);
-  assert.deepEqual((a.payload as any).guides, out.guides, "the exact guides push_week_plan would take");
-  assert.ok(a.reasons.length > 0 && a.reasons.length <= 20 && a.reasons.every((r) => r.length <= 500));
-  assert.match(a.reasons.join(" "), /Bench Press: progress/);
-  // approving it hands back the exact call and still pushes nothing
-  const r: any = await resolveApproval({ id: "a1", decision: "approve" }, approvals, { demo: false, appName: "x", validate, push: async () => assert.fail("approve alone never pushes") });
-  assert.equal(r.call.tool, "push_week_plan");
-  assert.deepEqual(r.call.arguments.guides, out.guides);
+  assert.equal(await approvals.load(), null, "the proposal queued nothing");
+  const queued = await queueAdjustment(out.queuePayload, approvals, { now: NOW, validate });
+  assert.equal(queued.approval.forDate, "2026-11-16", "queue_adjustment takes it as it is");
+  assert.equal((await approvals.load())!.approvals.length, 1);
+  assert.equal((await propose(account({ sessions: [] }), memoryPlanStore()) as any).queuePayload, null, "nothing proposed, nothing to queue");
+  await assert.rejects(propose(acc, store, { queue: true }), /queue is not a known field \(allowed: weekStart, rules, predict\)/);
 });
 
-test("proposeNextWeek queue: true without a proposal queues nothing and says so; without the queue it is refused; a queue failure does not lose the proposal", async () => {
+test("proposeNextWeek predict: the probability uses the hit rate of the predictions NOT scored from a confirmed draft, and needs 20 of those", async () => {
   const acc = account({ sessions: sixSessions(() => ALL_HIT) });
-  const approvals = memoryApprovalStore();
-  const none: any = await withCacheOff(() => proposeNextWeek(acc.client, memoryPlanStore(), { queue: true }, { ...acc.deps, approvals: { store: approvals, validate: () => [] } }));
-  assert.deepEqual([none.status, none.queued.queued, await approvals.load()], ["insufficient", false, null]);
-  await assert.rejects(propose(acc, await planStoreOf(), { queue: true }), /queue: true needs the approval queue/);
-  const refusing: any = await withCacheOff(async () => proposeNextWeek(acc.client, await planStoreOf(), { queue: true }, { ...acc.deps, approvals: { store: approvals, validate: () => ["schema says no"] } }));
-  assert.equal(refusing.status, "ok", "the proposal is still returned");
-  assert.match(refusing.queued.reason, /schema says no/);
-  assert.equal(refusing.queued.queued, false);
+  const store = await planStoreOf();
+  const at = async (ledger: { predictions: Prediction[] }) => {
+    const l = memoryPredictionStore();
+    await l.save(ledger);
+    return ((await withCacheOff(() => proposeNextWeek(acc.client, store, { predict: true }, { ...acc.deps, predictions: l }))).predictions[0] as any).payload.probability;
+  };
+  const withBasis = (n: number, hits: number, draft: number): { predictions: Prediction[] } => {
+    const l = scoredLedger(n, hits);
+    l.predictions.slice(0, draft).forEach((p) => (p.outcome!.basis = "draft-confirmed"));
+    return l;
+  };
+  assert.equal(await at(withBasis(20, 15, 0)), 0.75);
+  assert.equal(await at(withBasis(20, 20, 20)), 0.65, "20 scored, all from confirmed drafts: no history of its own: the default");
+  assert.equal(await at(withBasis(25, 25, 6)), 0.65, "19 others: not enough");
+  assert.equal(await at(withBasis(26, 26, 6)), 0.9, "20 others, all hit: the hit rate of those, capped");
+  assert.equal(await at(withBasis(30, 20, 10)), 0.5, "20 others with 10 hits is 0.5");
 });

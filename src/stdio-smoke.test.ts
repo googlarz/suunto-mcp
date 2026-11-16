@@ -77,8 +77,7 @@ test("stdio: every tool has a title and annotations consistent with what it does
       assert.equal(t.annotations.openWorldHint, !LOCAL_ONLY.includes(t.name), `${t.name}: talks to Suunto's cloud (${LOCAL_ONLY.join(", ")} alone are local files)`);
 
       // get_catchup and get_weekly_report read by name but are not read-only: markSeen: true and save: true write a local file
-      // 1.2: propose_next_week and adjust_guide read by name but queue: true adds an entry to the approval queue (a local file)
-      const catchup = ["get_catchup", "get_weekly_report", "propose_next_week", "adjust_guide"].includes(t.name);
+      const catchup = t.name === "get_catchup" || t.name === "get_weekly_report";
       const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate|analyze|draft|propose|simulate)_/.test(t.name) && !catchup;
       const writes = /^(push|delete|upload|generate|log|set|archive|void|score|start|stop|queue|resolve)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
@@ -109,12 +108,12 @@ test("stdio: every tool has a title and annotations consistent with what it does
         stop_experiment: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
         draft_session_log: { readOnlyHint: true, openWorldHint: true },
         // 1.2: planning tools: they read Suunto and return a proposal or a what-if, and write nothing
-        propose_next_week: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-        adjust_guide: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-        // 1.2: the approval queue: only resolve_approval can lead to a push, and only with push: true on an approve; it never overwrites
+        propose_next_week: { readOnlyHint: true, openWorldHint: true },
+        adjust_guide: { readOnlyHint: true, openWorldHint: true }, // as in 1.1.0: it returns a spec and a queuePayload, queues nothing
+        // 1.2: the approval queue: only resolve_approval can lead to a push, and only with push: true on an approve; it never overwrites. Not idempotent: an approve without push can be followed by the push itself
         queue_adjustment: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
         list_approvals: { readOnlyHint: true, openWorldHint: false },
-        resolve_approval: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+        resolve_approval: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
         get_data_overview: { readOnlyHint: true, openWorldHint: false },
         simulate_plan: { readOnlyHint: true, openWorldHint: true },
       };

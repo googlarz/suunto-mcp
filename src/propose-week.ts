@@ -14,12 +14,12 @@
 import type { SuuntoClient } from "./api.js";
 import { dayFetchBounds, localDate } from "./api.js";
 import { buildBaselines } from "./baselines.js";
-import { COLS, PLANNED, collectRecords, loadOf, nameMatches, parseLoadKg, suggestProgression, type HistoryDeps, type WorkoutRecord } from "./history.js";
+import { COLS, PLANNED, collectRecords, loadOf, nameMatches, parseLoadKg, stepFor, suggestProgression, type HistoryDeps, type WorkoutRecord } from "./history.js";
 import type { JournalEntry } from "./journal.js";
 import type { Plan, PlanSession, PlanStore } from "./plan.js";
-import { MIN_TSS_SESSIONS, TSB_RISK_FLOOR, TSS_HISTORY_DAYS, WEEKLY_JUMP_PCT, estimateTss, mondayOf, projectLoad, roundPoint, tsbFloorCheck, weekLoad } from "./plan-load.js";
+import { norm } from "./compare.js";
+import { guideNameOf, MIN_TSS_SESSIONS, TSB_RISK_FLOOR, TSS_HISTORY_DAYS, WEEKLY_JUMP_PCT, estimateTss, mondayOf, projectLoad, roundPoint, tsbFloorCheck, weekLoad } from "./plan-load.js";
 import { MAX_DAYS_AHEAD, MIN_SCORED, predictionStats, type PredictionStore } from "./predictions.js";
-import { queueAdjustment, type ApprovalStore } from "./approvals.js";
 import { isValidCalendarDate } from "./schema-validate.js";
 import { addDays, buildTrainingLoad } from "./training-load.js";
 
@@ -152,7 +152,12 @@ export function decideLift(input: { baseDetail: string; evidence: Evidence[]; sk
   if (PLANNED.exec(baseDetail) === null) return { action: "unchanged", kg: null, last: null, target: null, reasons: ["The plan's detail has no sets x reps ('NxM') to compare the logs with: left as it is."] };
 
   const newest = evidence[evidence.length - 1];
-  const refKg = newest?.kg ?? baseKg;
+  // A deload counts from the lower of what was lifted and what was planned; nothing else ever goes below the plan's own load.
+  const refKg = newest?.kg == null ? baseKg : Math.min(newest.kg, baseKg);
+  const step = stepFor(baseKg, rules.incrementKg);
+  // Outside a deload a load stays between the planned one and one step above it: evidence can move a session's load up by one step,
+  // never down (that takes a deload rule) and never further (a heavier day elsewhere is no licence).
+  const within = (kg: number) => Math.min(Math.max(kg, baseKg), baseKg + step);
   let run = 0;
   for (let i = evidence.length - 1; i >= 0 && !hit(evidence[i].row, rules.incrementKg); i--) run++;
 
@@ -172,31 +177,43 @@ export function decideLift(input: { baseDetail: string; evidence: Evidence[]; sk
     };
   }
   if (newest === undefined) {
-    const why = input.skippedScheme > 0 ? `${input.skippedScheme} logged session(s) used another sets x reps than the plan's, so they are no evidence for it` : "no log_session entry with sets for this lift in the history (the watch records only the plan)";
+    const why = input.skippedScheme > 0 ? `${input.skippedScheme} logged session(s) used another sets x reps than the plan's, so they are no evidence for it` : "no log_session entry with sets for this lift in this session (the same guide) in the history (the watch records only the plan)";
     return { action: "unchanged", kg: null, last: null, target: null, reasons: [`No evidence to change the load: ${why}. Left as it is.`] };
   }
   const sug = suggestProgression({ sessions: { cols: COLS, rows: evidence.map((e) => e.row) } }, { incrementKg: rules.incrementKg });
   const targetKg = sug.target === null ? null : KG_AT.exec(sug.target);
   const last = sug.last;
+  const holdAt = (kg: number, why: string[]): LiftDecision => {
+    const at = within(kg);
+    if (at !== kg) why.push(`${num(kg)} kg is ${kg < baseKg ? "below the planned load" : `more than one step (${num(step)} kg) above the planned ${num(baseKg)} kg`}: ${num(at)} kg instead (only a deload rule cuts a load).`);
+    return { action: "hold", kg: at, last, target: targetText(baseDetail, at), reasons: why };
+  };
   if (hit(newest.row, rules.incrementKg) && targetKg !== null) {
+    const stepped = Number(targetKg[1]);
     if (gates.recoveryOne || gates.incomplete) {
       reasons.push(`Every planned set was reached (${sug.reason}), but ${gates.recoveryOne ? "HRV or recovery on waking is below your band" : "part of the history could not be read"}: no increase, the load is repeated.`);
-      return { action: "hold", kg: refKg, last, target: targetText(baseDetail, refKg), reasons };
+      return holdAt(newest.kg ?? baseKg, reasons);
     }
-    return { action: "progress", kg: Number(targetKg[1]), last, target: targetText(baseDetail, Number(targetKg[1])), reasons: [`Latest logged session: ${sug.reason}.`] };
+    if (stepped <= baseKg) {
+      return holdAt(baseKg, [`The newest logged session lifted ${num(newest.kg ?? baseKg)} kg, below the planned ${num(baseKg)} kg: every set was reached, but the step from there (${num(stepped)} kg) would be a cut, so the plan's ${num(baseKg)} kg stays (a cut needs a deload rule).`]);
+    }
+    const kg = Math.min(stepped, baseKg + step);
+    return { action: "progress", kg, last, target: targetText(baseDetail, kg), reasons: [`Latest logged session: ${sug.reason}.`, ...(kg < stepped ? [`Capped at one step (${num(step)} kg) above the planned ${num(baseKg)} kg: ${num(kg)} kg, not ${num(stepped)} kg.`] : [])] };
   }
-  const holdKg = targetKg === null ? refKg : Number(targetKg[1]);
-  return { action: "hold", kg: holdKg, last, target: targetText(baseDetail, holdKg), reasons: [`Latest logged session: ${sug.reason}.`] };
+  return holdAt(targetKg === null ? (newest.kg ?? baseKg) : Number(targetKg[1]), [`Latest logged session: ${sug.reason}.`]);
 }
 
 const suggestLast = (evidence: Evidence[], rules: Rules): string | null => suggestProgression({ sessions: { cols: COLS, rows: evidence.map((e) => e.row) } }, { incrementKg: rules.incrementKg }).last;
 
-// The lift's sessions with logged sets and the plan's own sets x reps, oldest first (`ordered` is oldest first).
-export function liftEvidence(name: string, baseDetail: string, ordered: WorkoutRecord[], journal: Record<string, JournalEntry>): { evidence: Evidence[]; skippedScheme: number } {
+// The lift's sessions with logged sets and the plan's own sets x reps, oldest first (`ordered` is oldest first), from the SAME session as
+// the planned exercise only (`sameSession` says whether a workout ran the planned guide): the same lift on another day, with another
+// load, is no evidence for this one.
+export function liftEvidence(name: string, baseDetail: string, ordered: WorkoutRecord[], journal: Record<string, JournalEntry>, sameSession: (workoutKey: string) => boolean): { evidence: Evidence[]; skippedScheme: number } {
   const planned = PLANNED.exec(baseDetail);
   const evidence: Evidence[] = [];
   let skippedScheme = 0;
   for (const r of ordered) {
+    if (!sameSession(r.workoutKey)) continue;
     const entry = journal[r.workoutKey];
     for (const e of r.exercises) {
       if (!nameMatches(name, e)) continue;
@@ -236,7 +253,6 @@ export interface ProposeDeps {
   history?: HistoryDeps;
   journal?: Record<string, JournalEntry>; // used instead of the journal file (demo mode has a journal of its own)
   demoPlan?: (weekStart: string) => Plan; // demo mode: the plan to use when none is stored
-  approvals?: { store: ApprovalStore; validate: (guide: unknown) => string[] }; // for queue: true
   predictions?: PredictionStore; // for predict: true: the ledger whose 'progression' hit rate sets the probability
 }
 
@@ -251,10 +267,9 @@ type Client = SuuntoClient;
 
 export async function proposeNextWeek(client: Client, planStore: PlanStore, args: unknown, deps: ProposeDeps = {}) {
   if (!isObject(args)) throw new Error("arguments must be an object");
-  const extra = Object.keys(args).find((k) => !["weekStart", "rules", "queue", "predict"].includes(k));
-  if (extra !== undefined) throw new Error(`${extra} is not a known field (allowed: weekStart, rules, queue, predict)`);
-  for (const flag of ["queue", "predict"] as const) if (args[flag] !== undefined && typeof args[flag] !== "boolean") throw new Error(`${flag} must be a boolean`);
-  if (args.queue === true && deps.approvals === undefined) throw new Error("queue: true needs the approval queue, which this caller does not have.");
+  const extra = Object.keys(args).find((k) => !["weekStart", "rules", "predict"].includes(k));
+  if (extra !== undefined) throw new Error(`${extra} is not a known field (allowed: weekStart, rules, predict)`);
+  if (args.predict !== undefined && typeof args.predict !== "boolean") throw new Error("predict must be a boolean");
   const rules = parseRules(args.rules);
   const today = localDate(0, deps.now);
   const nextMonday = addDays(mondayOf(today), 7);
@@ -286,7 +301,7 @@ export async function proposeNextWeek(client: Client, planStore: PlanStore, args
     forecast: null as unknown,
     risk: null as unknown,
     estimates: [] as unknown[],
-    queued: (args.queue === true ? { queued: false, reason: "Nothing is proposed, so nothing was queued." } : null) as unknown,
+    queuePayload: null as unknown,
     predictions: [] as unknown[],
     history: null as unknown,
     notes: ["Nothing is proposed. Model-based throughout: a proposal from simple stated rules, not a prescription."],
@@ -315,6 +330,7 @@ export async function proposeNextWeek(client: Client, planStore: PlanStore, args
   const workoutRows = rowsOf(await client.listWorkouts({ since: bounds.from, until: bounds.to, limit: 600 }));
   const history = await collectRecords(client, { weeks: HISTORY_WEEKS, date: today }, deps.history);
   const journal = deps.journal ?? history.journal;
+  const guideNames = new Map<string, string>(history.items.flatMap((w) => { const g = guideNameOf(w.row); return g === null ? [] : [[w.key, g] as [string, string]]; }));
 
   const bands = (baselines?.metrics ?? {}) as Record<string, { latestVsBand?: string | null }>;
   const hrv = bands.hrv?.latestVsBand ?? null;
@@ -345,12 +361,18 @@ export async function proposeNextWeek(client: Client, planStore: PlanStore, args
       continue;
     }
     const guide = structuredClone(s.guide) as Record<string, any>;
+    // evidence comes from the sessions that ran THIS guide, nothing else (a heavier day of another guide is no evidence)
+    const guideTitle = norm(String(guide.title ?? s.title));
+    const sameSession = (key: string) => {
+      const ran = guideNames.get(key);
+      return ran !== undefined && norm(ran) === guideTitle;
+    };
     guide.date = date;
     delete guide.guideId;
     for (const ex of Array.isArray(guide.exercises) ? (guide.exercises as Record<string, any>[]) : []) {
       if (typeof ex?.name !== "string" || typeof ex.detail !== "string") continue;
       const from = { detail: ex.detail, kg: parseLoadKg(ex.detail) };
-      const { evidence, skippedScheme } = liftEvidence(ex.name, ex.detail, history.ordered, journal);
+      const { evidence, skippedScheme } = liftEvidence(ex.name, ex.detail, history.ordered, journal, sameSession);
       const d = decideLift({ baseDetail: ex.detail, evidence, skippedScheme, gates, rules });
       const why = [...d.reasons];
       if (d.kg !== null && from.kg !== null && d.kg !== from.kg) {
@@ -400,29 +422,23 @@ export async function proposeNextWeek(client: Client, planStore: PlanStore, args
   const notes = [
     "Model-based throughout: every number is a projection or a rule's output from your own data, not a measurement or a prediction of how you will respond. CTL can be about 1 point off the watch.",
     `Each session's TSS is the median of your last ${TSS_HISTORY_DAYS} days' sessions of the same title (at least ${MIN_TSS_SESSIONS} needed); a session without an estimate counts as 0${unknown.length ? ` (${unknown.map((u) => `${u.date} ${u.title}`).join(", ")})` : ""}, so its load is underestimated.`,
-    "The proposal is returned only: pass `sessions` to set_plan (mode 'merge' replaces the plan's sessions on those dates) and `guides` to push_week_plan (dryRun by default). Nothing was written and nothing was sent to the watch (reading the history fills only the rebuildable derived-data cache).",
+    "The proposal is returned only: pass `sessions` to set_plan (mode 'merge' replaces the plan's sessions on those dates) and `guides` to push_week_plan (dryRun by default), or `queuePayload` to queue_adjustment to ask for approval. Apart from the rebuildable derived-data cache that reading the history fills, this call wrote nothing, and nothing was sent to the watch.",
     "Workouts after today are not read. Days between today and weekStart count the stored plan's sessions (scope carry-in) with the same TSS estimate.",
   ];
   const existing = plan.sessions.filter((s) => s.date >= weekStart && s.date <= weekEnd).map((s) => s.date);
   if (existing.length) notes.push(`The stored plan already has sessions on ${existing.join(", ")} in that week; set_plan 'merge' replaces them by date.`);
   if (history.notes.length) notes.push(...history.notes.filter((n) => /not read|could not be read|ignored/.test(n)));
 
-  // ---- queue: true (the approval queue, nothing is pushed) and predict: true (payloads only, nothing is logged) ----
-  let queued: unknown = null;
-  if (args.queue === true) {
-    const lines = [...reasons, ...changes.filter((c) => c.action !== "unchanged").map((c) => `${c.session} ${c.exercise}: ${c.action}, ${c.from.detail} -> ${c.to.detail}. ${c.reasons[0] ?? ""}`)];
-    try {
-      queued = await queueAdjustment({ kind: "week_plan", payload: { guides }, forDate: weekStart, reasons: lines.map((l) => l.slice(0, 500)).slice(0, 20), source: "propose_next_week" }, deps.approvals!.store, { now: deps.now, validate: deps.approvals!.validate });
-    } catch (err: any) {
-      queued = { queued: false, reason: String(err?.message ?? err) };
-    }
-  }
+  // ---- predict: true (payloads only, nothing is logged) and the payload that queue_adjustment takes (nothing is queued) ----
+  const lines = [...reasons, ...changes.filter((c) => c.action !== "unchanged").map((c) => `${c.session} ${c.exercise}: ${c.action}, ${c.from.detail} -> ${c.to.detail}. ${c.reasons[0] ?? ""}`)];
+  const queuePayload = { kind: "week_plan" as const, payload: { guides }, forDate: (guides as { date: string }[]).map((g) => g.date).sort()[0], reasons: lines.map((l) => l.slice(0, 500)).slice(0, 20), source: "propose_next_week" };
   const predictions: { session: string; payload: Record<string, unknown>; basis: unknown }[] = [];
   if (args.predict === true) {
     let stats: { n: number; hitRate: number | null } | null = null;
     try {
+      // the predictions scored from a confirmed draft began as the plan itself: only the others say how the rule does
       const row = predictionStats((await deps.predictions?.load()) ?? null, deps.now).byRule.find((r) => r.rule === PREDICT_RULE);
-      stats = row ? { n: row.n, hitRate: row.hitRate } : null;
+      stats = row ? { n: row.basis.other.n, hitRate: row.basis.other.hitRate } : null;
     } catch (err: any) {
       errors.push({ section: "predictions", error: String(err?.message ?? err) });
     }
@@ -459,7 +475,7 @@ export async function proposeNextWeek(client: Client, planStore: PlanStore, args
       basis: "model-based",
     },
     estimates,
-    queued,
+    queuePayload,
     predictions,
     history: historyInfo,
     notes,

@@ -135,7 +135,7 @@ export interface QueueDeps {
 }
 
 // The push tool's own checks, dry-run style: the schema, then building the guide (as the push does) without sending it.
-async function checkPayload(kind: Kind, payload: Record<string, unknown>, validate: QueueDeps["validate"]): Promise<{ forDate: string }> {
+async function checkPayload(kind: Kind, payload: Record<string, unknown>, validate: QueueDeps["validate"]): Promise<{ dates: string[] }> {
   if (JSON.stringify(payload).length > MAX_PAYLOAD_CHARS) throw new Error(`payload must be at most ${MAX_PAYLOAD_CHARS} characters as JSON`);
   if (kind === "adjusted_guide") {
     if (payload.guideId !== undefined) throw new Error("payload.guideId is not allowed: an approval only creates a new guide (a guideId would overwrite an existing one; use push_strength_guide for that).");
@@ -146,7 +146,7 @@ async function checkPayload(kind: Kind, payload: Record<string, unknown>, valida
     } catch (err: any) {
       throw new Error(`payload cannot be built as a strength guide: ${err.message ?? err}`);
     }
-    return { forDate: payload.date as string };
+    return { dates: [payload.date as string] };
   }
   onlyKeys(payload, ["guides"], "payload.");
   // push_week_plan's own dry run: schema, unique dates, no guideId, every guide built; it never calls push
@@ -158,13 +158,17 @@ async function checkPayload(kind: Kind, payload: Record<string, unknown>, valida
       throw new Error("a dry run pushes nothing");
     },
   });
-  return { forDate: (payload.guides as { date: string }[]).map((g) => g.date).sort()[0] };
+  return { dates: (payload.guides as { date: string }[]).map((g) => g.date).sort() };
 }
 
-const queueRun = serialQueue();
+// ONE queue for every writer of approvals.json (queue_adjustment and resolve_approval, a push included): each call re-reads the file
+// inside the queue, so a save can never erase what another call just wrote, and a second resolve of an item waits for the first
+// and finds it resolved. A lock within this process only: two server processes writing within the same moments can still collide,
+// as with the other local files (local-store.ts). A slow push holds the queue, so a queue_adjustment made meanwhile waits for it.
+const writers = serialQueue();
 
 export function queueAdjustment(args: unknown, store: ApprovalStore, deps: QueueDeps) {
-  return queueRun(async () => {
+  return writers(async () => {
     if (!isObject(args)) throw new Error("arguments must be an object");
     onlyKeys(args, ["kind", "payload", "forDate", "reasons", "source", "expiresAt"], "");
     if (!(KINDS as readonly string[]).includes(args.kind as string)) throw new Error(`kind must be one of: ${KINDS.join(", ")}`);
@@ -173,12 +177,20 @@ export function queueAdjustment(args: unknown, store: ApprovalStore, deps: Queue
     const checked = await checkPayload(kind, args.payload, deps.validate);
     const now = deps.now ?? new Date();
     const today = localDate(0, now);
-    const forDate = args.forDate === undefined ? checked.forDate : calendarDate(args.forDate, "forDate");
-    if (forDate < today) throw new Error(`forDate ${forDate} is before today (${today}): there is nothing to approve for a day that has passed.`);
+    // a change is for the day of its guide (the earliest guide's for a week) and cannot outlive that day: an approval must not be pushable
+    // after the day it was prepared for, or for a day that has already passed
+    const forDate = checked.dates[0];
+    if (args.forDate !== undefined && calendarDate(args.forDate, "forDate") !== forDate) {
+      throw new Error(`forDate ${String(args.forDate)} must equal the payload's date ${forDate}${kind === "week_plan" ? " (the earliest guide's)" : ""}: leave forDate out to use it.`);
+    }
+    const past = checked.dates.find((d) => d < today);
+    if (past !== undefined) throw new Error(`guide dated ${past} is before today (${today}): there is nothing to approve for a day that has passed.`);
     if (args.reasons !== undefined && (!Array.isArray(args.reasons) || args.reasons.length > MAX_REASONS || args.reasons.some((r) => typeof r !== "string" || r.length > MAX_TEXT))) {
       throw new Error(`reasons must be a list of at most ${MAX_REASONS} strings of at most ${MAX_TEXT} characters`);
     }
-    const expiresAt = args.expiresAt === undefined ? endOfDay(forDate) : stamp(args.expiresAt, "expiresAt");
+    const lastMoment = endOfDay(forDate);
+    const expiresAt = args.expiresAt === undefined ? lastMoment : stamp(args.expiresAt, "expiresAt");
+    if (Date.parse(expiresAt) > Date.parse(lastMoment)) throw new Error(`expiresAt ${expiresAt} is after the end of ${forDate} (${lastMoment}): an approval cannot outlive the day it is for.`);
     if (now.getTime() > Date.parse(expiresAt)) throw new Error(`expiresAt ${expiresAt} has already passed.`);
     const file = (await store.load()) ?? { approvals: [] };
     if (file.approvals.length >= MAX_APPROVALS) throw new Error(`the queue holds ${MAX_APPROVALS} approvals already (nothing is deleted automatically): resolve some, or remove old ones from the file.`);
@@ -203,10 +215,15 @@ export function queueAdjustment(args: unknown, store: ApprovalStore, deps: Queue
 
 // ---------- list_approvals ----------
 
-const callOf = (a: Approval) =>
-  a.kind === "adjusted_guide"
-    ? { tool: "push_strength_guide", arguments: a.payload }
-    : { tool: "push_week_plan", arguments: { guides: a.payload.guides, dryRun: false } };
+// The dates of the guides in a payload.
+const datesOf = (a: Approval): string[] => (a.kind === "adjusted_guide" ? [a.payload.date as string] : (a.payload.guides as { date: string }[]).map((g) => g.date));
+const guidesOf = (a: Approval): unknown[] => (a.kind === "adjusted_guide" ? [a.payload] : (a.payload.guides as unknown[]));
+
+// What to look at before deciding: the DRY-RUN form of the push (push_week_plan validates and sends nothing). A ready real push is never
+// handed out; the one way to push is resolve_approval with decision approve and push: true, in the same call.
+const callOf = (a: Approval) => ({ tool: "push_week_plan", arguments: { guides: guidesOf(a), dryRun: true } });
+const howToPush = (a: Approval): string =>
+  `The only way to push this is resolve_approval with { id: "${a.id}", decision: "approve", push: true }, when the user says to${a.kind === "week_plan" ? " (a week plan is a dry run until dryRun: false is added)" : ""}.`;
 
 function summary(a: Approval, now: Date) {
   return { id: a.id, kind: a.kind, status: statusOf(a, now), forDate: a.forDate, source: a.source, createdAt: a.createdAt, expiresAt: a.expiresAt, reasons: a.reasons, resolution: a.resolution ?? null };
@@ -222,7 +239,7 @@ export async function listApprovals(store: ApprovalStore, args: { status?: strin
   if (args.id !== undefined) {
     const a = file.approvals.find((x) => x.id === args.id);
     if (!a) throw new Error(`no approval ${args.id} (see list_approvals)`);
-    return { now: now.toISOString(), counts, items: [{ ...summary(a, now), payload: a.payload, call: callOf(a) }], notes: [] };
+    return { now: now.toISOString(), counts, items: [{ ...summary(a, now), payload: a.payload, call: callOf(a), howToPush: howToPush(a) }], notes: [] };
   }
   const want = args.status ?? "all";
   const items = file.approvals
@@ -264,7 +281,6 @@ export interface PushDeps {
   now?: Date;
 }
 
-const resolveRun = serialQueue();
 
 export interface ResolveResult {
   alreadyResolved: boolean;
@@ -277,13 +293,14 @@ export interface ResolveResult {
   payload?: Record<string, unknown>;
   call?: { tool: string; arguments: Record<string, unknown> };
   pushResult?: unknown;
+  howToPush?: string;
   notes: string[];
 }
 
 export function resolveApproval(args: unknown, store: ApprovalStore, deps: PushDeps): Promise<ResolveResult> {
   // One call at a time, the whole call: a second resolve of the same item waits for the first (push included) and then
   // finds it resolved, so a push never happens twice.
-  return resolveRun(async () => {
+  return writers(async () => {
     if (!isObject(args)) throw new Error("arguments must be an object");
     onlyKeys(args, ["id", "decision", "note", "push", "dryRun"], "");
     const id = str(args.id, "id", 20, true)!;
@@ -309,7 +326,7 @@ export function resolveApproval(args: unknown, store: ApprovalStore, deps: PushD
       resolvedAt: x.resolution!.at,
       note: x.resolution!.note ?? null,
       pushed: x.resolution!.pushed,
-      ...(x.resolution!.decision === "approve" ? { payload: x.payload, call: callOf(x) } : {}),
+      ...(x.resolution!.decision === "approve" ? { payload: x.payload, call: callOf(x), howToPush: howToPush(x) } : {}),
       ...(x.resolution!.pushResult !== undefined ? { pushResult: x.resolution!.pushResult } : {}),
       ...extra,
     });
@@ -319,11 +336,17 @@ export function resolveApproval(args: unknown, store: ApprovalStore, deps: PushD
       return base(a, { alreadyResolved: true, notes: ["This approval was resolved before; this is the first result and nothing was done again."] });
     }
     if (decision === "approve" && !a.resolution && status === "expired") {
-      throw new Error(`approval ${id} expired at ${a.expiresAt} and cannot be approved: prepare it again (queue_adjustment, or propose_next_week / adjust_guide with queue: true).`);
+      throw new Error(`approval ${id} expired at ${a.expiresAt} and cannot be approved: prepare it again (queue_adjustment with a fresh queuePayload from propose_next_week / adjust_guide).`);
     }
     // pushing an approved item after it expired is refused too
     if (push && now.getTime() > Date.parse(a.expiresAt)) {
       throw new Error(`approval ${id} expired at ${a.expiresAt} and cannot be pushed: prepare it again.`);
+    }
+    // a guide for a day that has passed is stale whatever the expiry says: approving or pushing it is refused (rejecting it is not)
+    if (decision === "approve") {
+      const today = localDate(0, now);
+      const stale = datesOf(a).filter((d) => d < today).sort()[0];
+      if (stale !== undefined) throw new Error(`approval ${id}: guide dated ${stale} is before today (${today}), so it cannot be approved or pushed: prepare it again.`);
     }
 
     let pushed = false;

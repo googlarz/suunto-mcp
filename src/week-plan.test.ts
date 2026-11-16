@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adjustStrengthGuide, planWeek } from "./week-plan.js";
+import { adjustQueuePayload, adjustStrengthGuide, planWeek } from "./week-plan.js";
 
 const guide = () => ({
   title: "Push A",
@@ -141,4 +141,15 @@ test("planWeek: the first failure stops the push and names what was pushed, what
   assert.deepEqual(r.pushed!.map((g) => g.date), ["2026-11-16"]);
   assert.deepEqual(r.failed, { date: "2026-11-18", error: "403 Forbidden" });
   assert.deepEqual(r.notPushed, ["2026-11-20"]);
+});
+
+test("adjustQueuePayload: queue_adjustment's exact arguments for a changed guide; nothing for an unchanged one", () => {
+  const changed = adjustStrengthGuide(guide(), { hrv: "below" });
+  const p = adjustQueuePayload(changed)!;
+  assert.deepEqual(Object.keys(p), ["kind", "payload", "forDate", "reasons", "source"]);
+  assert.deepEqual([p.kind, p.source, p.forDate, p.payload], ["adjusted_guide", "adjust_guide", guide().date, changed.guide]);
+  assert.deepEqual(p.reasons, changed.reasons);
+  assert.equal(adjustQueuePayload(adjustStrengthGuide(guide(), {})), null, "unchanged: nothing to approve");
+  const long = adjustQueuePayload({ adjusted: true, guide: guide(), reasons: Array.from({ length: 25 }, () => "x".repeat(600)) })!;
+  assert.deepEqual([long.reasons.length, long.reasons[0].length], [20, 500], "at most what queue_adjustment takes");
 });

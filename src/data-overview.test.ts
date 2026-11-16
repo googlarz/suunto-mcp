@@ -77,9 +77,22 @@ test("dataOverview: a file that is not 0600 and a folder that is not 0700 are wa
     assert.equal(file(o, "journal").modeWarning, null);
     assert.match(dir(o, "cache").modeWarning!, /cache has mode 0755, the server creates it as 0700/);
     assert.equal(dir(o, "reports").modeWarning, null);
+    await mkdir(at("archive"));
+    await chmod(at("archive"), 0o500);
+    assert.match(dir(await dataOverview(), "archive").modeWarning!, /archive has mode 0500: its owner cannot write it/);
+    await chmod(at("archive"), 0o700);
     assert.equal(o.warnings.length, 3);
+    // stricter than 0600 is no leak: it warns only because the owner then cannot write what the server must update
     await chmod(at("journal.json"), 0o400);
-    assert.match(file(await dataOverview(), "journal").modeWarning!, /mode 0400/, "the rule is the server's own mode, 0600: anything else is shown");
+    assert.match(file(await dataOverview(), "journal").modeWarning!, /mode 0400: its owner cannot write it, so the server could not use or update it \(chmod 600/);
+    await chmod(at("journal.json"), 0o200);
+    assert.match(file(await dataOverview(), "journal").modeWarning!, /its owner cannot read it/);
+    await chmod(at("journal.json"), 0o660);
+    assert.match(file(await dataOverview(), "journal").modeWarning!, /other users may be able to read it/);
+    for (const mode of [0o604, 0o602, 0o601, 0o640]) {
+      await chmod(at("journal.json"), mode);
+      assert.match(file(await dataOverview(), "journal").modeWarning!, /other users may be able to read it/, mode.toString(8));
+    }
     assert.equal(file(o, "plan").status, "ok", "a warning does not change the status");
   });
 });

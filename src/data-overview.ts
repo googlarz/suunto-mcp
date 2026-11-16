@@ -53,10 +53,15 @@ export const DIRS: DirSpec[] = [
 ];
 
 const modeOf = (m: number): string => (m & 0o777).toString(8).padStart(4, "0");
-// The server creates its files 0600 and folders 0700; anything looser lets other users on the machine read them.
+// The server creates its files 0600 and folders 0700. Warn when the group or others have any access (other users of the machine may read it),
+// or when the owner lacks what the server needs (a file it must read and write, a folder it must also enter): that is a file the server
+// could not update, not a safer one.
 function modeWarning(mode: number, expected: number, path: string, what: string): string | null {
   if (process.platform === "win32") return null;
-  return (mode & 0o777) === expected ? null : `${what} has mode ${modeOf(mode)}, the server creates it as ${modeOf(expected)}: other users may be able to read it (chmod ${expected.toString(8)} "${path}" if that is not intended).`;
+  const bits = mode & 0o777;
+  if (bits & 0o077) return `${what} has mode ${modeOf(mode)}, the server creates it as ${modeOf(expected)}: other users may be able to read it (chmod ${expected.toString(8)} "${path}" if that is not intended).`;
+  const lacking = (["r", "w", "x"] as const).filter((_, i) => (expected & (0o400 >> i)) !== 0 && (bits & (0o400 >> i)) === 0).map((c) => ({ r: "read", w: "write", x: "enter" })[c]);
+  return lacking.length === 0 ? null : `${what} has mode ${modeOf(mode)}: its owner cannot ${lacking.join(" or ")} it, so the server could not use or update it (chmod ${expected.toString(8)} "${path}" restores ${modeOf(expected)}).`;
 }
 
 async function inspectFile(spec: FileSpec) {

@@ -374,7 +374,7 @@ const OUTPUT_CALLS: Record<string, (c: Ctx) => Record<string, unknown>> = {
   estimate_route_time: (c) => ({ routeId: c.routeId }),
   adjust_guide: () => ({ guide: GUIDE }),
   propose_next_week: () => ({}), // the plan above has a guided session in the week before the next Monday (2026-11-16)
-  "propose_next_week#queue": () => ({ queue: true, predict: true }), // stores a third approval (a3) and returns the payloads of its increases
+  "propose_next_week#predict": () => ({ predict: true }), // adds the payloads of its increases
   list_approvals: () => ({}),
   "list_approvals#one": () => ({ id: "a2" }),
   get_data_overview: () => ({}),

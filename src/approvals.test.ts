@@ -51,12 +51,13 @@ test("queueAdjustment: stores the exact payload with id, createdAt, forDate, rea
   assert.match(out.note, /nothing was sent to the watch/);
 });
 
-test("queueAdjustment: forDate and expiresAt can be given; a week_plan's forDate is its first guide's date", async () => {
+test("queueAdjustment: forDate (only the payload's own date) and an earlier expiresAt can be given; a week_plan's forDate is its first guide's date", async () => {
   const store = memoryApprovalStore();
   const w = await q({ kind: "week_plan", payload: { guides: [guide("2026-11-18"), guide("2026-11-16", "PULL B")] } }, store);
   assert.equal(w.approval.forDate, "2026-11-16");
-  const e = await q(one({ forDate: "2026-11-20", expiresAt: "2026-11-21T08:00:00Z" }), store);
-  assert.deepEqual([e.approval.forDate, e.approval.expiresAt], ["2026-11-20", "2026-11-21T08:00:00.000Z"]);
+  const noon = new Date(2026, 10, 16, 12, 0, 0).toISOString();
+  const e = await q(one({ forDate: "2026-11-16", expiresAt: noon }), store);
+  assert.deepEqual([e.approval.forDate, e.approval.expiresAt], ["2026-11-16", noon]);
 });
 
 test("queueAdjustment: refuses what the push tool would refuse, before anything is stored", async () => {
@@ -76,7 +77,6 @@ test("queueAdjustment: refuses what the push tool would refuse, before anything 
   await bad(one({ payload: "x" }), /payload must be an object/);
   await bad({ ...one(), extra: 1 }, /extra is not a known field/);
   await bad("x", /arguments must be an object/);
-  await bad(one({ forDate: "2026-11-12" }), /forDate 2026-11-12 is before today \(2026-11-13\)/);
   await bad(one({ forDate: "2026-02-30" }), /forDate must be a calendar date/);
   await bad(one({ expiresAt: "2026-11-13T19:59:59" }), /has already passed/);
   await bad(one({ expiresAt: "soon" }), /expiresAt must be an ISO 8601 date-time/);
@@ -84,7 +84,7 @@ test("queueAdjustment: refuses what the push tool would refuse, before anything 
   await bad(one({ reasons: Array.from({ length: 21 }, () => "r") }), /at most 20 strings/);
   await bad(one({ source: "x".repeat(65) }), /source must be at most 64/);
   await bad(one({ payload: { ...guide("2026-11-16"), title: "x".repeat(200_001) } }), /at most 200000 characters/);
-  assert.ok((await q(one({ forDate: "2026-11-13" }), store)).queued, "forDate today is fine");
+  assert.ok((await q(one({ payload: guide("2026-11-13"), forDate: "2026-11-13" }), store)).queued, "a guide for today is fine");
   assert.ok((await q(one({ expiresAt: new Date(NOW.getTime()).toISOString() }), store)).queued, "expiring exactly now is not yet expired");
 });
 
@@ -137,8 +137,8 @@ test("listApprovals: pending, expired and done with their reasons; a filter; one
   assert.deepEqual((await listApprovals(store, { status: "expired" }, NOW)).items.map((i) => i.id), ["a2"]);
   assert.deepEqual((await listApprovals(store, { status: "pending" }, NOW)).items.map((i) => i.id), ["a1", "a5"]);
   const full = (await listApprovals(store, { id: "a5" }, NOW)).items[0] as any;
-  assert.deepEqual(full.call, { tool: "push_week_plan", arguments: { guides: [guide("2026-11-16")], dryRun: false } });
-  assert.deepEqual(((await listApprovals(store, { id: "a1" }, NOW)).items[0] as any).call, { tool: "push_strength_guide", arguments: guide("2026-11-16") });
+  assert.deepEqual(full.call, { tool: "push_week_plan", arguments: { guides: [guide("2026-11-16")], dryRun: true } });
+  assert.deepEqual(((await listApprovals(store, { id: "a1" }, NOW)).items[0] as any).call, { tool: "push_week_plan", arguments: { guides: [guide("2026-11-16")], dryRun: true } }, "an adjusted guide is shown in the same dry-run form");
   await assert.rejects(listApprovals(store, { id: "a9" }, NOW), /no approval a9/);
   await assert.rejects(listApprovals(store, { status: "old" }, NOW), /status must be one of: pending, expired, done, all/);
   assert.deepEqual((await listApprovals(memoryApprovalStore(), {}, NOW)).items, [], "no file, nothing waiting");
@@ -168,13 +168,13 @@ test("resolveApproval: reject only records it, and nothing is pushed", async () 
   assert.equal(statusOf((await store.load())!.approvals[0], NOW), "rejected");
 });
 
-test("resolveApproval: approve without push returns the push-ready payload and the exact call, and pushes nothing", async () => {
+test("resolveApproval: approve without push returns the payload and the dry-run call, and pushes nothing", async () => {
   const store = await queued();
   const p = pusher();
   const r = await resolve({ id: "a1", decision: "approve" }, store, p) as any;
   assert.deepEqual([r.decision, r.pushed, r.alreadyResolved], ["approve", false, false]);
   assert.deepEqual(r.payload, guide("2026-11-16"));
-  assert.deepEqual(r.call, { tool: "push_strength_guide", arguments: guide("2026-11-16") });
+  assert.deepEqual(r.call, { tool: "push_week_plan", arguments: { guides: [guide("2026-11-16")], dryRun: true } });
   assert.deepEqual(p.calls, []);
 });
 
@@ -372,4 +372,98 @@ test("parseApprovals: strict about fields, ids, kinds and duplicates", () => {
   bad({ resolution: { decision: "approve", at: NOW.toISOString(), pushed: false, x: 1 } }, /x is not a known field/);
   bad({ nope: 1 }, /nope is not a known field/);
   assert.throws(() => parseApprovals({ version: 1, approvals: [item(), item()] }), /id twice/);
+});
+
+// ---------- review fixes: one queue for every writer, stale pushes, the dry-run form ----------
+
+const settle = async (until: () => boolean) => {
+  for (let i = 0; i < 200 && !until(); i++) await new Promise((r) => setImmediate(r));
+};
+
+test("one serialized queue for every writer of approvals.json: a queue_adjustment during a slow push is not lost, the push record survives, a second approve with push pushes nothing", async () => {
+  const store = await queued();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const calls: string[] = [];
+  const slow = { demo: false, appName: "x", validate, now: NOW, push: async (_zip: Buffer, title: string) => { calls.push(title); await gate; return { data: { id: "g1" }, check: { verified: true } }; } };
+  const first = resolveApproval({ id: "a1", decision: "approve", push: true }, store, slow);
+  await settle(() => calls.length === 1);
+  assert.deepEqual(calls, ["PUSH A"], "the push is under way");
+  const during = q(one({ payload: guide("2026-11-17") }), store); // another writer, mid-push
+  const again = resolveApproval({ id: "a1", decision: "approve", push: true }, store, slow); // a second yes, mid-push
+  release();
+  const [r1, r2, r3] = await Promise.all([first, during, again]);
+  const file = (await store.load())!.approvals;
+  assert.deepEqual(file.map((a) => a.id), ["a1", "a2"], "the queued item is not lost");
+  assert.deepEqual([file[0].resolution?.decision, file[0].resolution?.pushed], ["approve", true], "the push record survives");
+  assert.deepEqual([r1.pushed, r1.alreadyResolved, r2.approval.id, r3.alreadyResolved, r3.pushed], [true, false, "a2", true, true]);
+  assert.deepEqual(calls, ["PUSH A"], "pushed once");
+});
+
+test("a resolve during another writer's save, and two queue writers, also keep every record", async () => {
+  const store = await queued();
+  const p = pusher();
+  const [a, b, c] = await Promise.all([q(one({ payload: guide("2026-11-17") }), store), resolve({ id: "a1", decision: "reject" }, store, p), q(one({ payload: guide("2026-11-18") }), store)]);
+  assert.deepEqual([a.approval.id, c.approval.id], ["a2", "a3"]);
+  assert.equal(b.decision, "reject");
+  const file = (await store.load())!.approvals;
+  assert.deepEqual(file.map((x) => [x.id, x.resolution?.decision ?? null]), [["a1", "reject"], ["a2", null], ["a3", null]]);
+});
+
+test("queueAdjustment: forDate must equal the payload's date (the earliest guide's for a week plan); expiresAt cannot be later than the end of that day", async () => {
+  const store = memoryApprovalStore();
+  const bad = async (args: unknown, re: RegExp) => {
+    await assert.rejects(q(args, store), re);
+    assert.equal(await store.load(), null);
+  };
+  await bad(one({ forDate: "2026-11-20" }), /forDate 2026-11-20 must equal the payload's date 2026-11-16/);
+  await bad({ kind: "week_plan", payload: { guides: [guide("2026-11-18"), guide("2026-11-16", "B")] }, forDate: "2026-11-18" }, /forDate 2026-11-18 must equal the payload's date 2026-11-16/);
+  await bad(one({ expiresAt: new Date(2026, 10, 17, 0, 0, 0, 0).toISOString() }), /expiresAt .* is after the end of 2026-11-16/);
+  await bad(one({ expiresAt: "2027-06-01T00:00:00Z" }), /is after the end of 2026-11-16/);
+  // the reviewer's case: a past guide, a later forDate, a far expiry
+  await bad({ kind: "adjusted_guide", payload: guide("2026-11-10"), forDate: "2026-11-20", expiresAt: "2027-06-01T00:00:00Z" }, /forDate 2026-11-20 must equal the payload's date 2026-11-10/);
+  await bad({ kind: "adjusted_guide", payload: guide("2026-11-10") }, /guide dated 2026-11-10 is before today \(2026-11-13\)/);
+  await bad({ kind: "week_plan", payload: { guides: [guide("2026-11-12"), guide("2026-11-16", "B")] } }, /guide dated 2026-11-12 is before today/);
+  assert.equal((await q(one({ forDate: "2026-11-16", expiresAt: new Date(2026, 10, 16, 23, 59, 59, 999).toISOString() }), store)).approval.forDate, "2026-11-16", "exactly the end of the day is allowed");
+  assert.equal((await q(one({ expiresAt: new Date(2026, 10, 16, 23, 59, 59, 1000).toISOString() }), store).catch((e) => e.message)), "expiresAt " + new Date(2026, 10, 17, 0, 0, 0, 0).toISOString() + " is after the end of 2026-11-16 (" + new Date(2026, 10, 16, 23, 59, 59, 999).toISOString() + "): an approval cannot outlive the day it is for.", "one millisecond later is refused");
+});
+
+test("resolveApproval: approve and push are refused when ANY guide in the payload is dated before today at that time", async () => {
+  const store = memoryApprovalStore();
+  const later = new Date(2026, 10, 15, 9, 0, 0); // two days on
+  await store.save({
+    approvals: [
+      item({ id: "a1", forDate: "2026-11-14", kind: "week_plan", payload: { guides: [guide("2026-11-14"), guide("2026-11-20", "B")] }, expiresAt: "2026-11-30T00:00:00.000Z" }),
+      item({ id: "a2", forDate: "2026-11-20", kind: "week_plan", payload: { guides: [guide("2026-11-20"), guide("2026-11-14", "B")] }, expiresAt: "2026-11-30T00:00:00.000Z" }),
+      item({ id: "a3", forDate: "2026-11-14", payload: guide("2026-11-14"), expiresAt: "2026-11-30T00:00:00.000Z" }),
+    ],
+  });
+  const p = pusher();
+  for (const id of ["a1", "a2", "a3"]) {
+    await assert.rejects(resolveApproval({ id, decision: "approve" }, store, { ...p.deps, now: later }), /guide dated 2026-11-14 is before today \(2026-11-15\)/, id);
+    await assert.rejects(resolveApproval({ id, decision: "approve", push: true, ...(id === "a3" ? {} : { dryRun: false }) }, store, { ...p.deps, now: later }), /before today/, id);
+  }
+  assert.deepEqual(p.calls, []);
+  assert.equal((await store.load())!.approvals.every((a) => a.resolution === undefined), true, "nothing was decided");
+  assert.equal((await resolveApproval({ id: "a3", decision: "reject" }, store, { ...p.deps, now: later })).decision, "reject", "a stale item can still be rejected");
+  // approved in time, pushed after the day has turned
+  const s2 = await queued({ payload: guide("2026-11-13") });
+  await resolve({ id: "a1", decision: "approve" }, s2);
+  await assert.rejects(resolveApproval({ id: "a1", decision: "approve", push: true }, s2, { ...pusher().deps, now: new Date(2026, 10, 14, 8, 0, 0) }), /expired|before today/);
+});
+
+test("resolveApproval: after approve without push the call is the DRY-RUN form (push_week_plan, dryRun true); the only push path named is resolve_approval with push: true", async () => {
+  const store = await queued();
+  const r = (await resolve({ id: "a1", decision: "approve" }, store)) as any;
+  assert.deepEqual(r.call, { tool: "push_week_plan", arguments: { guides: [guide("2026-11-16")], dryRun: true } });
+  assert.match(r.howToPush, /resolve_approval with \{ id: "a1", decision: "approve", push: true \}/);
+  assert.doesNotMatch(JSON.stringify(r), /"dryRun":false/, "no ready real-push call is handed out");
+  const w = memoryApprovalStore();
+  await q({ kind: "week_plan", payload: { guides: [guide("2026-11-16")] } }, w);
+  const wr = (await resolve({ id: "a1", decision: "approve" }, w)) as any;
+  assert.deepEqual(wr.call, { tool: "push_week_plan", arguments: { guides: [guide("2026-11-16")], dryRun: true } });
+  assert.match(wr.howToPush, /dryRun: false/);
+  const full = (await listApprovals(w, { id: "a1" }, NOW)).items[0] as any;
+  assert.equal(full.call.arguments.dryRun, true);
+  assert.doesNotMatch(JSON.stringify(await listApprovals(store, { id: "a1" }, NOW)), /"dryRun":false/);
 });

@@ -263,7 +263,7 @@ export async function buildCatchup(
     notes.push("Plan items were not checked: the workout list was not read completely.");
   }
 
-  // what waits for the user's yes (queue_adjustment, or queue: true on propose_next_week / adjust_guide): never pushed from here
+  // what waits for the user's yes (queue_adjustment): never pushed from here
   let approvalsBriefing: Awaited<ReturnType<typeof approvalsBrief>> & { error?: string } = { pending: 0, expired: 0, items: [] };
   if (approvals) {
     try {
