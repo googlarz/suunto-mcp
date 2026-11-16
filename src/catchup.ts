@@ -4,6 +4,7 @@
 // only reads (list calls bounded by a look-back window). The marker moves only when the caller passes markSeen: true,
 // so a call without it changes nothing and an answer that never reached the user can be asked for again. In demo mode
 // the marker lives in memory.
+import { approvalsBrief, type ApprovalStore } from "./approvals.js";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
@@ -156,6 +157,7 @@ export async function buildCatchup(
   plans: PlanStore,
   opts: { markSeen?: boolean } = {},
   now = new Date(),
+  approvals?: ApprovalStore,
 ) {
   const marker = await seen.load(); // an unreadable marker stops the call: "new" cannot be told
   const today = localDate(0, now);
@@ -261,6 +263,17 @@ export async function buildCatchup(
     notes.push("Plan items were not checked: the workout list was not read completely.");
   }
 
+  // what waits for the user's yes (queue_adjustment): never pushed from here
+  let approvalsBriefing: Awaited<ReturnType<typeof approvalsBrief>> & { error?: string } = { pending: 0, expired: 0, items: [] };
+  if (approvals) {
+    try {
+      approvalsBriefing = await approvalsBrief(approvals, now);
+    } catch (err: any) {
+      approvalsBriefing = { pending: 0, expired: 0, items: [], error: err?.message ?? String(err) };
+      errors.push({ section: "approvals", error: err?.message ?? String(err) });
+    }
+  }
+
   const result = {
     today,
     since: { from, firstCall: marker === null },
@@ -270,6 +283,7 @@ export async function buildCatchup(
     plan,
     lastSessionDate: lastDate,
     daysSinceLastSession: lastDate ? dayNumber(today) - dayNumber(lastDate) : null,
+    approvals: approvalsBriefing,
     markSeen: opts.markSeen === true,
     marked: false,
     errors,

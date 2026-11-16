@@ -13,7 +13,7 @@ What you can rely on from suunto-mcp 1.0 onward, and what you cannot. It covers 
 
   | File | Rule |
   |---|---|
-  | `journal.json`, `plan.json`, `seen.json`, `predictions.json`, `experiments.json`, archive records (`archive/<key>.json`) | Carry `"version": 1`. A file of a version this server does not know, or a damaged one, is refused with a message naming the file, and is left untouched. If a later 1.x changes a format, it reads the old version (any migration is announced in the CHANGELOG); it never discards what it cannot read. |
+  | `journal.json`, `plan.json`, `seen.json`, `predictions.json`, `experiments.json`, `approvals.json`, archive records (`archive/<key>.json`) | Carry `"version": 1`. A file of a version this server does not know, or a damaged one, is refused with a message naming the file, and is left untouched. If a later 1.x changes a format, it reads the old version (any migration is announced in the CHANGELOG); it never discards what it cannot read. |
   | `tokens.json` | Written by the pairing step, read and rewritten when a token is refreshed. It has no version number. Pair again if a release ever says so. |
   | `health-export-state.json` (`sync-to-health-skill`'s watermark) | Unversioned: one `lastDate`. An unreadable one stops the sync instead of being treated as a first run. |
   | `cache/` | Derived data, rebuilt on demand. An entry written by another server version or schema is ignored and rebuilt, so the first call after an upgrade may be slower. |
@@ -45,3 +45,12 @@ One rule. Everything inside this contract is removed or changed incompatibly onl
 - `surface.json`: the `bin` commands, the environment variables the code reads (also required to be in the README's table), the MCP prompts with their arguments, and the MCP resources.
 
 Any difference fails the test and says whether it is BREAKING or additive. Breaking: a removed or renamed tool, property, name or output key, a changed type, a newly required input, a narrowed input (fewer enum values, a lower maximum, a higher minimum), an annotation made less cautious. Additive: a new tool, optional input, output key or name, a widened input, and an annotation made more cautious (additive with notice: say so in the CHANGELOG). An additive change is allowed, but only on purpose: run `UPDATE_CONTRACT=1 npm test` and commit the changed fixtures. See [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+## Planned for 2.0
+
+Intentions, not promises. They change names or behaviour, so they wait for a major version; where 1.x could add the new way without removing the old, it already did.
+
+- **One naming for date parameters.** `from` / `to` everywhere. Done additively in 1.2 (`list_workouts` and `get_daily_activity_statistics` accept them next to `since` / `until` and `startdate` / `enddate`); 2.0 may drop the older names.
+- **`dryRun` on every write tool**, not only `push_week_plan`, with the same default (validate only).
+- **One data store with a migration**, instead of separate files (journal, plan, seen, predictions, experiments, approvals, cache, archive), so one version number, one backup and one overview cover them.
+- **Removal of the legacy tools** `get_workout_samples`, `export_workout_gpx` and `list_subscriptions`. They are already hidden and outside this contract, and marked deprecated in their descriptions; they may go in a later 1.x minor release, announced in the CHANGELOG.

@@ -74,6 +74,12 @@ export function adjustStrengthGuide(guide: StrengthPlan, readiness: Readiness) {
   return { level: cutLoad ? ("reduced" as const) : ("lighter" as const), adjusted: changes.length > 0, signals, reasons, changes, guide: out };
 }
 
+// The arguments to hand to queue_adjustment for an adjusted guide (the client queues explicitly: adjust_guide queues nothing); null when nothing was changed.
+export function adjustQueuePayload(adjusted: { adjusted: boolean; guide: StrengthPlan; reasons: string[] }) {
+  if (!adjusted.adjusted) return null;
+  return { kind: "adjusted_guide" as const, payload: adjusted.guide, forDate: adjusted.guide.date, reasons: adjusted.reasons.map((r) => r.slice(0, 500)).slice(0, 20), source: "adjust_guide" };
+}
+
 // ---------- push_week_plan ----------
 
 export const MAX_WEEK_GUIDES = 14;

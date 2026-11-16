@@ -64,7 +64,7 @@ test("stdio: reports the package.json version, not a hardcoded one", async () =>
 });
 
 // tools that touch local files only and never read Suunto
-const LOCAL_ONLY = ["log_session", "set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment"];
+const LOCAL_ONLY = ["log_session", "set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "list_approvals", "get_data_overview"];
 
 test("stdio: every tool has a title and annotations consistent with what it does", async () => {
   await withServer(async (call) => {
@@ -78,8 +78,8 @@ test("stdio: every tool has a title and annotations consistent with what it does
 
       // get_catchup and get_weekly_report read by name but are not read-only: markSeen: true and save: true write a local file
       const catchup = t.name === "get_catchup" || t.name === "get_weekly_report";
-      const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate|analyze|draft)_/.test(t.name) && !catchup;
-      const writes = /^(push|delete|upload|generate|log|set|archive|void|score|start|stop)_/.test(t.name) || catchup;
+      const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate|analyze|draft|propose|simulate)_/.test(t.name) && !catchup;
+      const writes = /^(push|delete|upload|generate|log|set|archive|void|score|start|stop|queue|resolve)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
       if (/^(push_.*_guide|delete_guide|generate_daily_digest|log_session)$/.test(t.name)) {
@@ -107,6 +107,15 @@ test("stdio: every tool has a title and annotations consistent with what it does
         analyze_experiment: { readOnlyHint: true, openWorldHint: true },
         stop_experiment: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
         draft_session_log: { readOnlyHint: true, openWorldHint: true },
+        // 1.2: planning tools: they read Suunto and return a proposal or a what-if, and write nothing
+        propose_next_week: { readOnlyHint: true, openWorldHint: true },
+        adjust_guide: { readOnlyHint: true, openWorldHint: true }, // as in 1.1.0: it returns a spec and a queuePayload, queues nothing
+        // 1.2: the approval queue: only resolve_approval can lead to a push, and only with push: true on an approve; it never overwrites. Not idempotent: an approve without push can be followed by the push itself
+        queue_adjustment: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+        list_approvals: { readOnlyHint: true, openWorldHint: false },
+        resolve_approval: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+        get_data_overview: { readOnlyHint: true, openWorldHint: false },
+        simulate_plan: { readOnlyHint: true, openWorldHint: true },
       };
       if (t.name in NEW) assert.deepEqual(t.annotations, NEW[t.name], t.name);
     }

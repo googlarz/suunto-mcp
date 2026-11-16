@@ -25,7 +25,7 @@ import {
 import { readFileSync } from "node:fs";
 import { loadConfig, assertCredentials } from "./config.js";
 import { SuuntoClient, localDate } from "./api.js";
-import { adjustStrengthGuide, planWeek } from "./week-plan.js";
+import { adjustQueuePayload, adjustStrengthGuide, planWeek } from "./week-plan.js";
 import { parseFit, summarizeFit } from "./fit.js";
 import { RESOURCES, readResource } from "./resources.js";
 import { PROMPTS, getPrompt } from "./prompts.js";
@@ -52,7 +52,12 @@ import { archiveStatus, archiveWorkouts, fileArchiveStore, memoryArchiveStore } 
 import { buildBenchmark } from "./benchmark.js";
 import { buildWeeklyReport, fileReportStore, memoryReportStore } from "./report.js";
 import { estimateRouteTime } from "./route-time.js";
-import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoWriteResult, isDemo, markDemo } from "./demo.js";
+import { DemoClient, DEMO_INSTRUCTIONS, DEMO_NOTICE, demoPlan, demoWriteResult, isDemo, markDemo } from "./demo.js";
+import { RULES as PROPOSE_RULES, proposeNextWeek } from "./propose-week.js";
+import { simulatePlan } from "./simulate-plan.js";
+import { fileApprovalStore, listApprovals, memoryApprovalStore, queueAdjustment, resolveApproval, STATUS_FILTERS as APPROVAL_STATUSES } from "./approvals.js";
+import { dataOverview } from "./data-overview.js";
+import { aliased, requiredAliased } from "./aliases.js";
 
 const cfg = loadConfig();
 // SUUNTO_DEMO=1: synthetic data, no credentials, no network (see demo.ts).
@@ -68,12 +73,14 @@ const reportStore = demo ? memoryReportStore() : fileReportStore();
 // The prediction ledger and the experiments: in memory in demo mode (seeded with deterministic demo data), never on disk.
 const predictionStore = demo ? memoryPredictionStore() : filePredictionStore();
 const experimentStore = demo ? memoryExperimentStore() : fileExperimentStore();
+// The approval queue (queue_adjustment / list_approvals / resolve_approval): in memory in demo mode, and the push path is never called there.
+const approvalStore = demo ? memoryApprovalStore() : fileApprovalStore();
 if (demo) await seedDemoState(predictionStore, experimentStore);
 // Not read-only (they can write local state) but they never change anything at Suunto, so demo mode runs them on the
 // in-memory stores instead of answering with the generic "nothing was written" note.
-const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment"]);
+const LOCAL_STATE_TOOLS = new Set(["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "resolve_approval"]);
 // These only touch local files, so they work before any Suunto credentials are set up.
-const NO_CREDENTIALS_TOOLS = new Set(["set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment"]);
+const NO_CREDENTIALS_TOOLS = new Set(["set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "list_approvals", "resolve_approval", "get_data_overview"]);
 
 // Read the version from package.json instead of hardcoding it here — a
 // hardcoded string silently drifts from the real published version on
@@ -131,13 +138,25 @@ const toolDefs = [
           type: "string",
           format: "date-time",
           examples: ["2026-04-01T00:00:00Z"],
-          description: "ISO 8601 lower bound on startTime (inclusive). Filters on workout start time; omit for all time. Pagination is automatic so since does not affect page size.",
+          description: "ISO 8601 lower bound on startTime (inclusive). Filters on workout start time; omit for all time. Pagination is automatic so since does not affect page size. Same as `from` (preferred); both given and different is an error.",
+        },
+        from: {
+          type: "string",
+          format: "date-time",
+          examples: ["2026-04-01T00:00:00Z"],
+          description: "Preferred name of `since`: ISO 8601 lower bound on startTime (inclusive). Same meaning; both given and different is an error.",
         },
         until: {
           type: "string",
           format: "date-time",
           examples: ["2026-04-30T23:59:59Z"],
-          description: "ISO 8601 upper bound on startTime (inclusive). Omit to include workouts up to the present. Combine with since to target a specific window.",
+          description: "ISO 8601 upper bound on startTime (inclusive). Omit to include workouts up to the present. Combine with since to target a specific window. Same as `to` (preferred); both given and different is an error.",
+        },
+        to: {
+          type: "string",
+          format: "date-time",
+          examples: ["2026-04-30T23:59:59Z"],
+          description: "Preferred name of `until`: ISO 8601 upper bound on startTime (inclusive). Same meaning; both given and different is an error.",
         },
         limit: {
           type: "integer",
@@ -168,7 +187,7 @@ const toolDefs = [
   {
     name: "get_workout_samples",
     description:
-      "UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/workout/samples) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error; it is not an authentication problem. Use get_workout_fit with full=true for record-level data (heart rate etc.), or get_workout_laps for laps. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
+      "DEPRECATED (hidden unless SUUNTO_ENABLE_LEGACY_TOOLS=1; outside the 1.x contract; may be removed in a later 1.x minor release). UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/workout/samples) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error; it is not an authentication problem. Use get_workout_fit with full=true for record-level data (heart rate etc.), or get_workout_laps for laps. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -477,7 +496,7 @@ const toolDefs = [
   {
     name: "export_workout_gpx",
     description:
-      "UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/workout/exportGpx) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error; it is not an authentication problem. Would return the workout's GPS route as a GPX 1.1 XML string. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
+      "DEPRECATED (hidden unless SUUNTO_ENABLE_LEGACY_TOOLS=1; outside the 1.x contract; may be removed in a later 1.x minor release). UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/workout/exportGpx) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error; it is not an authentication problem. Would return the workout's GPS route as a GPX 1.1 XML string. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -640,7 +659,7 @@ const toolDefs = [
   {
     name: "get_daily_activity_statistics",
     description:
-      "Returns aggregated daily step count and energy consumption (joules) from the /247 API for the given datetime range. Response is an array of AggregatedActivityData objects, each with a Name ('stepcount' or 'energyconsumption'), Aggregation ('sum'), and Sources array containing per-device Samples with TimeISO8601 and Value. The window must be less than 28 days (exactly 28 is rejected). Samples with null Value indicate no data synced for that day. Each daily Sample is stamped local noon (TimeISO8601 like 2026-09-27T12:00:00+02:00); a one-day window (startdate = enddate = D) was observed returning the samples for D and the day after, so select samples by the date in TimeISO8601 rather than summing the response. Prefer this tool over list_daily_activity when you need totals rather than intraday time-series. Read-only.",
+      "Returns aggregated daily step count and energy consumption (joules) from the /247 API for the given datetime range. Response is an array of AggregatedActivityData objects, each with a Name ('stepcount' or 'energyconsumption'), Aggregation ('sum'), and Sources array containing per-device Samples with TimeISO8601 and Value. The window must be less than 28 days (exactly 28 is rejected). Samples with null Value indicate no data synced for that day. Each daily Sample is stamped local noon (TimeISO8601 like 2026-09-27T12:00:00+02:00); a one-day window (startdate = enddate = D) was observed returning the samples for D and the day after, so select samples by the date in TimeISO8601 rather than summing the response. Prefer this tool over list_daily_activity when you need totals rather than intraday time-series. `from` / `to` are the preferred names of `startdate` / `enddate` (both pairs work; neither pair is required by the schema, but each end must be given one way). Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -648,22 +667,31 @@ const toolDefs = [
           type: "string",
           examples: ["2026-04-01T00:00:00"],
           description:
-            "Start datetime in ISO-8601 format, with or without a UTC offset (e.g. 2026-04-01T00:00:00 or 2026-04-01T00:00:00+02:00). An offset written +0200, as `date +%z` prints it, is rewritten to +02:00 because Suunto rejects the former.",
+            "Start datetime in ISO-8601 format, with or without a UTC offset (e.g. 2026-04-01T00:00:00 or 2026-04-01T00:00:00+02:00). An offset written +0200, as `date +%z` prints it, is rewritten to +02:00 because Suunto rejects the former. Same as `from` (preferred).",
         },
         enddate: {
           type: "string",
           examples: ["2026-04-27T23:59:59"],
           description:
-            "End datetime in ISO-8601 format, same forms as startdate (e.g. 2026-04-27T23:59:59). Must be less than 28 days after startdate.",
+            "End datetime in ISO-8601 format, same forms as startdate (e.g. 2026-04-27T23:59:59). Must be less than 28 days after startdate. Same as `to` (preferred).",
+        },
+        from: {
+          type: "string",
+          examples: ["2026-04-01T00:00:00"],
+          description: "Preferred name of `startdate` (same meaning and forms). Give `from` or `startdate`; both given and different is an error.",
+        },
+        to: {
+          type: "string",
+          examples: ["2026-04-27T23:59:59"],
+          description: "Preferred name of `enddate` (same meaning and forms). Give `to` or `enddate`; both given and different is an error.",
         },
       },
-      required: ["startdate", "enddate"],
     },
   },
   {
     name: "list_subscriptions",
     description:
-      "UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/subscriptions) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error rather than returning a list. Would return the active webhook subscriptions as an array of { id, eventType, callbackUrl, createdAt }. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
+      "DEPRECATED (hidden unless SUUNTO_ENABLE_LEGACY_TOOLS=1; outside the 1.x contract; may be removed in a later 1.x minor release). UNAVAILABLE — Suunto's API gateway currently rejects this endpoint (/v2/subscriptions) with 401 OperationNotFound on the account it was tested with (September 2026), so the call fails with an 'endpoint unavailable' error rather than returning a list. Would return the active webhook subscriptions as an array of { id, eventType, callbackUrl, createdAt }. Kept so the tool starts working again if Suunto restores the endpoint. Read-only.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -994,6 +1022,8 @@ const strengthSpec: any = (() => {
   const { guideId: _guideId, ...properties } = (toolDefs.find((t) => t.name === "push_strength_guide")!.inputSchema as any).properties;
   return { type: "object", properties, required: ["title", "date", "exercises"] };
 })();
+// push_strength_guide's own input check, as the approval queue and push_week_plan use it
+const validateGuide = (g: unknown): string[] => validateAgainstSchema(strengthSpec, g, "guide");
 const dateProp = (description?: string) => ({ type: "string", format: "date", pattern: "^\\d{4}-\\d{2}-\\d{2}$", minLength: 10, maxLength: 10, ...(description ? { description } : {}) });
 const specTools = [
   {
@@ -1136,7 +1166,7 @@ const specTools = [
   {
     name: "adjust_guide",
     description:
-      "Adjusts a strength guide spec (the arguments of push_strength_guide) to how recovered the user is on `date` (default today), and RETURNS the adjusted spec with the reasons. It does not push anything: show the user the changes, and push the returned `guide` with push_strength_guide only if they agree. Reads get_baselines for `date`: HRV (metrics.hrv.latestVsBand) and recovery on waking (metrics.recoveryMorning.latestVsBand) against the user's own band of the last 28 days. Rules: neither below the band, or no reading yet -> unchanged (it never adds load or sets); one of the two below -> one set less on every exercise with 3 or more sets (the 'NxM' in detail is rewritten to match; an exercise whose detail has no matching 'NxM' keeps its sets and says so in reasons); both below -> that, plus every load in detail (the first '<n>kg', not bodyweight) 10% lower rounded to 2.5 kg, a plates breakdown is dropped when the load changed, and an exercise's `target` is dropped whenever that exercise changed at all (sets or load; a reason says so, `last` stays). Output: { level ('unchanged' | 'lighter' | 'reduced'), adjusted (whether anything changed), signals: { hrv, recoveryMorning } (below | within | above | null), reasons, changes: [{ exercise, from: { sets, detail }, to: { sets, detail } }], guide (the full adjusted spec), baselineErrors (only when a baseline section failed) }. The band is the middle half of the user's own recent days, not a medical reference. Read-only.",
+      "Adjusts a strength guide spec (the arguments of push_strength_guide) to how recovered the user is on `date` (default today), and RETURNS the adjusted spec with the reasons. It does not push anything: show the user the changes, and push the returned `guide` with push_strength_guide only if they agree. Reads get_baselines for `date`: HRV (metrics.hrv.latestVsBand) and recovery on waking (metrics.recoveryMorning.latestVsBand) against the user's own band of the last 28 days. Rules: neither below the band, or no reading yet -> unchanged (it never adds load or sets); one of the two below -> one set less on every exercise with 3 or more sets (the 'NxM' in detail is rewritten to match; an exercise whose detail has no matching 'NxM' keeps its sets and says so in reasons); both below -> that, plus every load in detail (the first '<n>kg', not bodyweight) 10% lower rounded to 2.5 kg, a plates breakdown is dropped when the load changed, and an exercise's `target` is dropped whenever that exercise changed at all (sets or load; a reason says so, `last` stays). Output: { level ('unchanged' | 'lighter' | 'reduced'), adjusted (whether anything changed), signals: { hrv, recoveryMorning } (below | within | above | null), reasons, changes: [{ exercise, from: { sets, detail }, to: { sets, detail } }], guide (the full adjusted spec), baselineErrors (only when a baseline section failed) }. The band is the middle half of the user's own recent days, not a medical reference. To put the adjusted guide in the approval queue, pass `queuePayload` (queue_adjustment's exact arguments: kind adjusted_guide, the adjusted guide as payload, reasons, source; null when nothing was changed) to queue_adjustment: this tool queues nothing and pushes nothing. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1314,6 +1344,114 @@ const specTools = [
       },
     },
   },
+  {
+    name: "propose_next_week",
+    description:
+      "Proposes next week's strength sessions from the stored plan (set_plan), what the user's journal says they ACTUALLY lifted (log_session), and how recovered and loaded they are. It writes NOTHING: it returns a proposal that the caller shows to the user and may pass on, there is no auto-write (reading the history fills only the same rebuildable derived-data cache as get_exercise_history; nothing is sent to the watch). To put the proposal in the approval queue, pass its `queuePayload` (exactly queue_adjustment's arguments) to queue_adjustment: nothing is queued by this tool, and nothing is pushed until the user approves with resolve_approval. With `predict: true` it also returns, for each proposed INCREASE, a ready log_prediction payload in `predictions` (kind reps_hit, date = the session's date, rule 'progression'; probability = the user's own hit rate for that rule from get_prediction_stats once 20 are scored, else 0.65, always kept inside 0.5 to 0.9); it never logs them itself. The base week is the latest week of the plan (within 4 weeks before weekStart) with a guided session; its sessions are repeated one week on (weekStart = a Monday after today, default the next Monday) with each exercise's load decided by a small closed set of NAMED rules, reported in `rulesUsed` with their values (`rules` overrides some, each inside a stated range; unknown names are refused). PROGRESS: in the lift's latest logged session every planned set reached its planned reps at one weight -> load + one step (get_exercise_history's suggestion: at most incrementKg, default 2.5 kg, at most 5% of the load, at least 1.25 kg). HOLD: anything else with evidence -> the load that was done is repeated. DELOAD (load lowered deloadPct, default 10%, rounded to 1.25 kg): stallSessions (default 2) logged sessions of the lift in a row without hitting the plan; OR today's TSB (get_training_load) below tsbDeloadBelow (default -25); OR HRV and recovery on waking (get_baselines, today) both below the user's band. NEVER raises a load without evidence: a lift with no log_session entry for the plan's own sets x reps is left as it is (and the watch records only the plan, not what was lifted), one of HRV / recovery below the band or an unread part of the history blocks every increase, and a lift whose detail has no kg ('BW 3x15', 'RPE6') or no 'NxM' is never touched. The result is `insufficient` (status, `missing` says what; sessions, guides and forecast empty or null: no changes proposed) when there is no plan, no guided session to repeat, fewer than 2 sessions with logged sets in the last 8 weeks, or no lift with usable evidence. Output: { status ('ok' | 'insufficient'), weekStart, weekEnd, asOf (today), planSource ('stored' | 'demo' | 'none'), rulesUsed: [{ name, value, default, overridden, overridable, rule }], missing, basedOn: { from, to }, signals: { ctl, atl, tsb, hrv, recoveryMorning (below | within | above | null) }, sessions: [{ date, title, guide? }] (pass to set_plan; mode 'merge' replaces the plan's sessions on those dates), guides: [strength guide specs] (pass to push_week_plan, dryRun by default; each exercise's `last` and `target` are set for the watch), changes: [{ date, session, exercise, action ('progress' | 'hold' | 'deload' | 'unchanged'), changed, from: { detail, kg }, to: { detail, kg }, reasons }] (every exercise, with the reasons for it), reasons (what applies to the whole week), forecast: { asOf, start, series: [{ date, tss, ctl, atl, tsb }], basis } (forecast_training_load's own projection from today's values through the proposed week), risk: { level ('none' | 'caution'), flags: [{ rule, detail }], tsbFloor: { threshold (default -30), minTsb, date }, weeklyLoad: { threshold (default 30 %), proposedTss, previous4wAvgTss, jumpPct, complete } } (flags: the forecast TSB below tsbRiskFloor, or the week's TSS more than weeklyJumpPct over the average week of the 28 days before it, the upper edge of the 0.8-1.3 acute:chronic range: heuristics, not safe/unsafe lines), queuePayload ({ kind: 'week_plan', payload: { guides }, forDate (the earliest guide's date), reasons, source } to pass to queue_adjustment as it is; null when nothing is proposed), predictions: [{ session, payload (log_prediction's arguments), basis: { source ('history' | 'default'), rule, n, hitRate } }] (empty unless predict), estimates: [{ date, title, tss, sessions, scope }] (each session's TSS for the forecast: the median of the user's last 90 days' sessions of the same title, at least 2 needed, else null and counted as 0), history: { from, to, guidedSessions, loggedSessions, pending, errors }, notes, errors }. MODEL-BASED: every number is a projection or a rule's output from the user's own data, not a measurement or a prediction of how they will respond; CTL can be about 1 point off the watch. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        predict: { type: "boolean", default: false, description: "true: also return a ready log_prediction payload per proposed increase in `predictions` (never logged by this tool). Default false." },
+        weekStart: { ...dateProp("The Monday the proposed week starts on, YYYY-MM-DD; must be after today. Default: the next Monday."), examples: ["2026-11-16"] },
+        rules: {
+          type: "object",
+          description: "Optional overrides of the named rules (unknown names are refused). Each is a number inside the stated range; leave out what should stay at its default.",
+          properties: Object.fromEntries(
+            Object.entries(PROPOSE_RULES).map(([name, def]) => [name, { type: "integer" in def && def.integer ? "integer" : "number", minimum: def.min, maximum: def.max, default: def.default, description: def.text }]),
+          ),
+        },
+      },
+    },
+  },
+  {
+    name: "simulate_plan",
+    description:
+      "A WHAT-IF for a candidate week or multi-week plan: what it does to Fitness (CTL), Fatigue (ATL) and Form (TSB), day by day, before the user commits to it. READ-ONLY, writes nothing, keeps no state. Give `sessions`: [{ date, tss? , title?, guide? }], each after `asOf` (default today; at most 120 days ahead), several on one date add up. A session's TSS is the given `tss`, else the median TSS of the user's own sessions with the same title (or guide.title) in the last 90 days, needing at least 2 of them; with no estimate the call is REFUSED and asks for `tss` (never a guess). propose_next_week's `sessions` fit as they are. Optional `goalDate` (a race or test day) and `compare` ({ sessions, label? }: a second candidate over the same days from the same start). Starts from today's values with forecast_training_load's own math (the 42-day / 7-day model; CTL can be about 1 point off the watch) and runs to the Sunday of the last session's week or goalDate, whichever is later. Output: { modelBased: true, asOf, start: { ctl, atl, tsb }, from, to, totalTss, sessions: [{ date, title, tss, tssSource ('given' | 'history'), historySessions }], series: [{ date, tss, ctl, atl, tsb }] (the values at the end of each day), weeks: [{ weekStart (Monday), days, complete, tss, ctlStart, ctlEnd, rampRate (CTL gained over the week), previous4wAvgTss, jumpPct }], goal: { date, ctl, atl, tsb, band ('below' | 'fresh' | 'above'), freshBand: { min: 5, max: 25 } } | null (TSB on goalDate against the stated fresh band, inclusive), lowestTsb: { date, tsb }, end, risks: [{ rule, scope ('day' | 'week'), date | weekStart, value, threshold, detail }] (the days and full weeks where the stated risk rules trip: a day with TSB below -30; a full Monday-to-Sunday week whose CTL rises by more than 8; a full week whose TSS is more than 30% over the average week of the 28 days before it; compared as printed; a part of a week is no weekly rate and is not checked; heuristics with contested evidence, not safe/unsafe lines), responseToPlan, compare: { label, ...the same fields for the second plan, difference: { totalTss, endCtl, endTsb, lowestTsb, goalTsb, risks } (second minus first) } | null, personalResponse, thresholds, notes, errors }. personalResponse is the user's OWN history, shown only when it can be: for each of the last 90 days, the next night's HRV and recovery on waking after a HIGH-load day (TSS at or above the median of the user's training days) against after the other days (rest days included), by get_tag_effects' own rule (at least 15 nights of each, and a median gap larger than 3 standard errors of the difference of two medians, the spread from the other days' nights); status 'ok' when at least one metric can be judged, else 'insufficient' with `missing` saying what (nights counted against the 15 needed); each metric's verdict ('insufficient' | 'within-noise' | 'tagged-higher' (higher after high-load days) | 'tagged-lower'). `responseToPlan` counts the plan's high-load days and gives the expected shift of the next night ONLY for a metric whose history showed a difference beyond the noise (null otherwise: no effect is claimed). An association in the user's own data, not a cause. EVERY number is MODEL-BASED: a projection of a simple model, never a prediction of how the user will feel or respond. Reads workouts, sleep and recovery; a section that cannot be read is named in errors / personalResponse.missing instead of failing the call. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 200,
+          description: "The candidate plan: one entry per session (several may share a date).",
+          items: {
+            type: "object",
+            properties: {
+              date: { ...dateProp("The session's day, YYYY-MM-DD, after asOf.") },
+              title: { type: "string", minLength: 1, maxLength: 100, description: "The session's title, e.g. 'PUSH A': its TSS is estimated from the user's own sessions of that title when `tss` is not given." },
+              tss: { type: "number", minimum: 0, maximum: 1000, description: "The session's training stress, in the unit get_training_load shows (a typical easy hour is about 40-60, a hard one 80-100+). Overrides any estimate." },
+              guide: { type: "object", description: "Optional: the session's strength guide spec (as from propose_next_week); its `title` is used for the TSS estimate, its `date` must equal the session's.", properties: { title: { type: "string" }, date: { ...dateProp() } } },
+            },
+            required: ["date"],
+          },
+        },
+        goalDate: { ...dateProp("Optional: a race or test day, YYYY-MM-DD, after asOf: the result gives TSB that day against the fresh band (TSB 5 to 25) and the series runs to it."), examples: ["2026-12-06"] },
+        asOf: { ...dateProp("The last local day whose workouts are counted as done (default today; not in the future). The simulation starts the day after; to include today in the plan pass yesterday.") },
+        compare: {
+          type: "object",
+          description: "Optional: a second candidate plan to compare, simulated over the same days from the same start.",
+          properties: {
+            sessions: { type: "array", minItems: 1, maxItems: 200, description: "Same shape as the top-level sessions.", items: { type: "object", properties: { date: { ...dateProp() }, title: { type: "string", minLength: 1, maxLength: 100 }, tss: { type: "number", minimum: 0, maximum: 1000 }, guide: { type: "object" } }, required: ["date"] } },
+            label: { type: "string", maxLength: 100, description: "A name for the compared plan." },
+          },
+          required: ["sessions"],
+        },
+      },
+      required: ["sessions"],
+    },
+  },
+  {
+    name: "queue_adjustment",
+    description:
+      "Stores a prepared change in the local APPROVAL QUEUE (~/.suunto-mcp/approvals.json, SUUNTO_APPROVALS_PATH moves it; version 1, written atomically, 0600) so the user can decide on it later. It writes only that file, never contacts Suunto and NEVER pushes anything to the watch: nothing is pushed unless the user approves with resolve_approval (decision approve AND push: true in the same call). `kind` 'adjusted_guide': `payload` is the exact push_strength_guide arguments (an adjust_guide result's `guide`; a guideId is refused, an approval only creates a new guide); kind 'week_plan': `payload` is { guides: [...] } as push_week_plan takes them (a propose_next_week result's `guides`). The payload is checked as the push tool itself checks it (its input schema, then building each guide as a dry run), and a payload that would not pass is refused and nothing is stored. `forDate` is the day of the guide (the earliest guide's for a week_plan): leave it out, or pass exactly that date. A guide dated before today is refused, in a week_plan too. Optional `reasons` (up to 20 short strings shown to the user), `source` (e.g. 'adjust_guide', 'propose_next_week'; default 'manual') and `expiresAt` (ISO 8601; default the end of forDate in the server's local time; it can be earlier, never later: an approval cannot outlive the day it is for; it cannot be approved after it expires). Pass a `queuePayload` from propose_next_week or adjust_guide as it is. Output: { queued, approval: { id (a1, a2, ...), kind, status 'pending', forDate, source, createdAt, expiresAt, reasons, resolution: null }, note }. At most 1000 approvals; nothing is deleted automatically. Every writer of the file (this tool and resolve_approval, a push included) runs one at a time in this process, so none can erase another's record; a second server process writing in the same moments could still collide.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["adjusted_guide", "week_plan"], description: "adjusted_guide: one strength guide (push_strength_guide's arguments). week_plan: { guides } (push_week_plan's guides)." },
+        payload: { type: "object", description: "The exact arguments of the push tool: for adjusted_guide a strength guide spec (title, date, exercises, ...); for week_plan { guides: [strength guide specs] }." },
+        forDate: { ...dateProp("Optional: must equal the guide's own date (the earliest guide's for a week_plan), which is the default.") },
+        reasons: { type: "array", maxItems: 20, items: { type: "string", maxLength: 500 }, description: "Why this change, in short sentences, shown with the approval." },
+        source: { type: "string", maxLength: 64, description: "Where the change came from, e.g. 'adjust_guide' or 'propose_next_week'. Default 'manual'." },
+        expiresAt: { type: "string", format: "date-time", description: "ISO 8601 moment after which the approval can no longer be approved; not later than the end of forDate (server local time), which is the default." },
+      },
+      required: ["kind", "payload"],
+    },
+  },
+  {
+    name: "list_approvals",
+    description:
+      "Lists the approval queue (filled by queue_adjustment; propose_next_week and adjust_guide hand back a `queuePayload` for it) from the local file only: never contacts Suunto, needs no credentials, writes nothing. Each item: { id, kind, status ('pending' | 'expired' | 'approved' | 'rejected'), forDate, source, createdAt, expiresAt, reasons, resolution: { decision, at, note, pushed } | null }. pending: waiting for the user; expired: not decided before expiresAt, can no longer be approved (it can still be rejected); approved / rejected: decided. `status` filters ('pending', 'expired', 'done' = approved or rejected, 'all' default); with `id` the one item in full: its `payload` and `call` (the DRY-RUN form, push_week_plan with dryRun true: never a ready real push) and `howToPush`. Output: { now, counts: { pending, expired, approved, rejected }, items, notes }. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: [...APPROVAL_STATUSES], default: "all", description: "Which items to list: pending, expired, done (approved or rejected) or all (default)." },
+        id: { type: "string", minLength: 2, maxLength: 20, description: "One approval's id, e.g. 'a3': returns it in full with its payload and the exact call." },
+      },
+    },
+  },
+  {
+    name: "resolve_approval",
+    description:
+      "The user's decision on one queued approval, and THE ONE PLACE where an explicit yes becomes a push to the watch. decision 'reject': recorded (with an optional note), nothing is pushed. decision 'approve': recorded, and the result carries the `payload`, a `call` in the DRY-RUN form (push_week_plan with dryRun true; an adjusted guide is shown as a one-guide week) and `howToPush`; no ready real-push call is ever handed out; nothing is pushed unless `push: true` is passed in the SAME call, which then pushes through the existing push path: one new strength guide for adjusted_guide; for week_plan a DRY RUN (validate only, nothing sent) unless `dryRun: false` is also passed (a real push stops at the first failure, and is never retried automatically: the days already pushed would be duplicated). `push: true` with decision reject is refused. An EXPIRED item cannot be approved or pushed (it can be rejected). Resolving an item that was resolved before returns the first result (`alreadyResolved: true`) and never pushes twice; the only thing still open on an item that was approved without push is the push itself, once, with push: true. Because that push can still happen on a later call, it is NOT annotated idempotent. A guide dated before today cannot be approved or pushed (stale); an item cannot be approved after its expiry, which is at most the end of the day it is for. A failed push is an error and records nothing, so it can be tried again. Real pushes need SUUNTO_APP_NAME and credentials (a reject or an approve without push does not); same delivery caveat as push_strength_guide: it appears after the phone's next normal Suunto app sync. In demo mode the queue is in memory and push: true NEVER calls the push path (it returns a demo note). Output: { alreadyResolved, id, kind, decision, resolvedAt, note, pushed (a real push was made), payload, call and howToPush (when approved), pushResult (the push's own result), notes }. Not read-only (it writes the decision to the local file, and may push), not destructive: a push only ever creates new guides.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", minLength: 2, maxLength: 20, description: "The approval's id from list_approvals, e.g. 'a3'." },
+        decision: { type: "string", enum: ["approve", "reject"], description: "approve: the user said yes. reject: the user said no (nothing is pushed)." },
+        note: { type: "string", maxLength: 500, description: "Optional: the user's remark, stored with the decision." },
+        push: { type: "boolean", default: false, description: "true (with decision approve only): also push now through the existing push path. Default false: only record the decision and return the call to make. Pass it only when the user has said to push." },
+        dryRun: { type: "boolean", description: "week_plan with push: true only: true (the default there) validates and sends nothing; false pushes the guides for real." },
+      },
+      required: ["id", "decision"],
+    },
+  },
+  {
+    name: "get_data_overview",
+    description:
+      "Every local file the server keeps, in one read-only look, with no Suunto call and no credentials: the journal, the plan, the catch-up marker (seen), the prediction ledger, the experiments and the approval queue (path, exists, status, version, size in bytes, mode, counts of what they hold), and the cache, archive and reports folders (path, size, counts). `status`: 'ok', 'missing' (nothing there yet), 'unreadable', 'damaged' (not valid JSON), 'foreign' (not a suunto-mcp file of that kind), 'newer-version' (written by a newer server: refused and left untouched) or 'in-memory' (demo mode). `modeWarning` says when a file is not 0600 (or a folder not 0700), so other users of the machine could read it. Nothing is modified, created or repaired. Output: { inMemory, files: [...], directories: [...], warnings, notes }. The counts come from reading each file's JSON without the strict check. Demo mode: the counts of the in-memory stores, no paths. Read-only.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 // Titles + annotations live in tool-meta.ts; a tool without an entry there
@@ -1360,8 +1498,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!NO_CREDENTIALS_TOOLS.has(name)) ensureReady();
     switch (name) {
       case "list_workouts": {
-        const since = a.since ? Date.parse(a.since) : undefined;
-        const until = a.until ? Date.parse(a.until) : undefined;
+        const sinceRaw = aliased(a, "from", "since") as string | undefined;
+        const untilRaw = aliased(a, "to", "until") as string | undefined;
+        const since = sinceRaw ? Date.parse(sinceRaw) : undefined;
+        const until = untilRaw ? Date.parse(untilRaw) : undefined;
         const data = await suunto.listWorkouts({
           since,
           until,
@@ -1397,14 +1537,14 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const baselines = await buildBaselines(suunto, { date: a.date ?? localDate() });
         const m: any = baselines.metrics;
         const adjusted = adjustStrengthGuide(a.guide, { hrv: m.hrv?.latestVsBand, recoveryMorning: m.recoveryMorning?.latestVsBand });
-        return text(JSON.stringify({ ...adjusted, ...(baselines.errors.length ? { baselineErrors: baselines.errors } : {}) }));
+        return text(JSON.stringify({ ...adjusted, queuePayload: adjustQueuePayload(adjusted), ...(baselines.errors.length ? { baselineErrors: baselines.errors } : {}) }));
       }
       case "set_plan":
         return text(JSON.stringify(await setPlan(a, planStore)));
       case "get_plan":
         return text(JSON.stringify(await getPlan(planStore, { date: a.date })));
       case "get_catchup":
-        return text(JSON.stringify(await buildCatchup(suunto, seenStore, planStore, { markSeen: a.markSeen === true })));
+        return text(JSON.stringify(await buildCatchup(suunto, seenStore, planStore, { markSeen: a.markSeen === true }, new Date(), approvalStore)));
       case "get_tag_effects":
         // demo mode has a journal of its own (the real file is never read there)
         return text(JSON.stringify(await buildTagEffects(suunto, { date: a.date, days: a.days, tag: a.tag }, demo ? { loadJournal: () => (suunto as DemoClient).demoJournal() } : {})));
@@ -1436,6 +1576,37 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return text(JSON.stringify(await analyzeExperiment(suunto, experimentStore, { id: a.id, early: a.early === true })));
       case "stop_experiment":
         return text(JSON.stringify(await stopExperiment(a, experimentStore)));
+      case "propose_next_week":
+        // demo mode: the lifts it logged and the programme's plan are generated (nothing is read from or written to the disk there)
+        return text(JSON.stringify(await proposeNextWeek(suunto, planStore, a, { predictions: predictionStore, ...(demo ? { journal: await (suunto as DemoClient).demoLiftJournal(), demoPlan } : {}) })));
+      case "queue_adjustment":
+        return text(JSON.stringify(await queueAdjustment(a, approvalStore, { validate: validateGuide })));
+      case "list_approvals":
+        return text(JSON.stringify(await listApprovals(approvalStore, { status: a.status, id: a.id })));
+      case "resolve_approval": {
+        // the one place a user's yes becomes a push: decision approve AND push: true, in the same call
+        if (a.push === true && a.decision === "approve" && !demo) ensureReady();
+        return text(JSON.stringify(await resolveApproval(a, approvalStore, { demo, appName: cfg.appName, validate: validateGuide, push: (zip, title) => suunto.pushGuideVerified(zip, title) })));
+      }
+      case "get_data_overview":
+        return text(
+          JSON.stringify(
+            await dataOverview(
+              demo
+                ? {
+                    journal: { entries: await (suunto as DemoClient).demoJournal() },
+                    plan: (await planStore.load()) ? { plan: (await planStore.load())!.plan } : undefined,
+                    seen: (await seenStore.load()) ?? undefined,
+                    predictions: (await predictionStore.load()) ?? undefined,
+                    experiments: (await experimentStore.load()) ?? undefined,
+                    approvals: (await approvalStore.load()) ?? undefined,
+                  }
+                : undefined,
+            ),
+          ),
+        );
+      case "simulate_plan":
+        return text(JSON.stringify(await simulatePlan(suunto, a)));
       case "draft_session_log":
         return text(JSON.stringify(await buildDraft(suunto, { workoutKey: a.workoutKey, date: a.date, plan: a.plan })));
       case "push_week_plan": {
@@ -1484,7 +1655,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case "list_recovery":
         return text(JSON.stringify(await suunto.listRecovery(a.from, a.to)));
       case "get_daily_activity_statistics": {
-        const data = await suunto.getDailyStats(a.startdate, a.enddate);
+        const data = await suunto.getDailyStats(requiredAliased(a, "from", "startdate") as string, requiredAliased(a, "to", "enddate") as string);
         return text(JSON.stringify(data));
       }
       case "list_subscriptions": {

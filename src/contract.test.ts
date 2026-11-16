@@ -373,6 +373,16 @@ const OUTPUT_CALLS: Record<string, (c: Ctx) => Record<string, unknown>> = {
   get_weekly_report: () => ({}), // save defaults to false: a pure read
   estimate_route_time: (c) => ({ routeId: c.routeId }),
   adjust_guide: () => ({ guide: GUIDE }),
+  propose_next_week: () => ({}), // the plan above has a guided session in the week before the next Monday (2026-11-16)
+  "propose_next_week#predict": () => ({ predict: true }), // adds the payloads of its increases
+  list_approvals: () => ({}),
+  "list_approvals#one": () => ({ id: "a2" }),
+  get_data_overview: () => ({}),
+  queue_adjustment: () => ({ kind: "adjusted_guide", payload: { ...GUIDE, date: "2026-11-14" }, reasons: ["contract check"] }), // not read-only: recorded like push_week_plan
+  "resolve_approval#approve": () => ({ id: "a2", decision: "approve" }),
+  "propose_next_week#insufficient": () => ({ weekStart: "2026-12-28" }), // no guided session within 4 weeks before it: the other shape
+  simulate_plan: () => ({ sessions: [{ date: "2026-11-16", title: "PUSH A" }, { date: "2026-11-18", tss: 70 }], goalDate: "2026-11-29" }),
+  "simulate_plan#compare": () => ({ sessions: [{ date: "2026-11-16", tss: 80 }], compare: { label: "lighter", sessions: [{ date: "2026-11-16", tss: 40 }] } }),
   push_week_plan: () => ({ guides: [GUIDE] }), // not read-only; dryRun (the default) validates and sends nothing, in demo mode too
   get_prediction_stats: () => ({}), // the demo ledger is scored first (see takeSnapshot), so the statistics are filled in
   get_experiment: () => ({}),
@@ -458,6 +468,10 @@ async function takeSnapshot(): Promise<Snapshot> {
     const gymDate = new Date(gym.startTime + gym.timeOffsetInMinutes * 60_000).toISOString().slice(0, 10);
     const ctx: Ctx = { gymKey: gym.workoutKey, runKey: run.workoutKey, routeId: routes[0].id, gymDate };
     await call("set_plan", PLAN);
+    // two approvals in the demo server's memory (a1 rejected, a2 pending), so list_approvals and get_catchup show their shapes
+    await call("queue_adjustment", { kind: "adjusted_guide", payload: GUIDE, reasons: ["HRV below your band"], source: "adjust_guide" });
+    await call("queue_adjustment", { kind: "week_plan", payload: { guides: [GUIDE] }, reasons: ["contract check"], source: "propose_next_week" });
+    await call("resolve_approval", { id: "a1", decision: "reject", note: "contract check" });
     // the demo ledger starts with predictions that are due: score them (20 per call), so the statistics show their full shape
     for (let i = 0; i < 5 && (await call("score_predictions", {})).remaining > 0; i++);
 

@@ -7,6 +7,7 @@
   ],
   "envVars": [
     "PORT",
+    "SUUNTO_APPROVALS_PATH",
     "SUUNTO_APP_NAME",
     "SUUNTO_ARCHIVE_DIR",
     "SUUNTO_CACHE",

@@ -78,6 +78,21 @@
       "days[].sleep.otherNights: always an empty list",
       "errors: always an empty list"
     ],
+    "get_data_overview": [
+      "directories[].error: always null",
+      "directories[].mode: always null",
+      "directories[].modeWarning: always null",
+      "directories[].path: always null",
+      "directories[].sizeBytes: always null",
+      "directories[].version: always null",
+      "files[].counts.$oneOf[]: always null",
+      "files[].error: always null",
+      "files[].mode: always null",
+      "files[].modeWarning: always null",
+      "files[].path: always null",
+      "files[].sizeBytes: always null",
+      "warnings: always an empty list"
+    ],
     "get_exercise_history": [
       "errors: always an empty list"
     ],
@@ -136,6 +151,10 @@
       "note: always null",
       "rests[].note: always null"
     ],
+    "list_approvals#one": [
+      "items[].resolution: always null",
+      "notes: always an empty list"
+    ],
     "list_guides": [
       "error: always null",
       "payload[].activities: always null",
@@ -150,6 +169,74 @@
     ],
     "list_workouts": [
       "payload[].extensions[].feeling: always null"
+    ],
+    "propose_next_week": [
+      "errors: always an empty list",
+      "estimates: always an empty list",
+      "forecast: always null",
+      "guides: always an empty list",
+      "history.errors: always an empty list",
+      "predictions: always an empty list",
+      "queuePayload: always null",
+      "risk: always null",
+      "sessions: always an empty list"
+    ],
+    "propose_next_week#insufficient": [
+      "basedOn: always null",
+      "changes: always an empty list",
+      "errors: always an empty list",
+      "estimates: always an empty list",
+      "forecast: always null",
+      "guides: always an empty list",
+      "history: always null",
+      "predictions: always an empty list",
+      "queuePayload: always null",
+      "reasons: always an empty list",
+      "risk: always null",
+      "sessions: always an empty list",
+      "signals: always null"
+    ],
+    "propose_next_week#predict": [
+      "errors: always an empty list",
+      "estimates: always an empty list",
+      "forecast: always null",
+      "guides: always an empty list",
+      "history.errors: always an empty list",
+      "predictions: always an empty list",
+      "queuePayload: always null",
+      "risk: always null",
+      "sessions: always an empty list"
+    ],
+    "queue_adjustment": [
+      "approval.resolution: always null"
+    ],
+    "resolve_approval#approve": [
+      "note: always null"
+    ],
+    "simulate_plan": [
+      "compare: always null",
+      "errors: always an empty list",
+      "personalResponse.missing: always an empty list",
+      "responseToPlan.afterHighLoad.hrv.expectedShiftVsOtherDays: always null",
+      "responseToPlan.afterHighLoad.recoveryMorning.expectedShiftVsOtherDays: always null",
+      "risks: always an empty list"
+    ],
+    "simulate_plan#compare": [
+      "compare.difference.goalTsb: always null",
+      "compare.goal: always null",
+      "compare.responseToPlan.afterHighLoad.hrv.expectedShiftVsOtherDays: always null",
+      "compare.responseToPlan.afterHighLoad.recoveryMorning.expectedShiftVsOtherDays: always null",
+      "compare.risks: always an empty list",
+      "compare.sessions[].historySessions: always null",
+      "compare.sessions[].title: always null",
+      "errors: always an empty list",
+      "goal: always null",
+      "personalResponse.missing: always an empty list",
+      "responseToPlan.afterHighLoad.hrv.expectedShiftVsOtherDays: always null",
+      "responseToPlan.afterHighLoad.recoveryMorning.expectedShiftVsOtherDays: always null",
+      "risks: always an empty list",
+      "sessions[].historySessions: always null",
+      "sessions[].title: always null"
     ]
   },
   "shapes": {
@@ -182,6 +269,26 @@
         "title": "string"
       },
       "level": "string",
+      "queuePayload": {
+        "forDate": "string",
+        "kind": "string",
+        "payload": {
+          "date": "string",
+          "exercises": [
+            {
+              "detail": "string",
+              "name": "string",
+              "restSec": "number",
+              "sets": "number"
+            }
+          ],
+          "title": "string"
+        },
+        "reasons": [
+          "string"
+        ],
+        "source": "string"
+      },
       "reasons": [
         "string"
       ],
@@ -888,6 +995,20 @@
       "to": "string"
     },
     "get_catchup": {
+      "approvals": {
+        "expired": "number",
+        "items": [
+          {
+            "expiresAt": "string",
+            "expiresToday": "boolean",
+            "forDate": "string",
+            "id": "string",
+            "kind": "string",
+            "source": "string"
+          }
+        ],
+        "pending": "number"
+      },
       "daysSinceLastSession": "number",
       "demo": "boolean",
       "errors": [],
@@ -1161,6 +1282,65 @@
       "errors": [],
       "from": "string",
       "to": "string"
+    },
+    "get_data_overview": {
+      "demo": "boolean",
+      "directories": [
+        {
+          "counts": {
+            "fitFiles": "number",
+            "records": "number",
+            "reports": "number",
+            "workouts": "number"
+          },
+          "error": "null",
+          "exists": "boolean",
+          "kind": "string",
+          "mode": "null",
+          "modeWarning": "null",
+          "name": "string",
+          "path": "null",
+          "sizeBytes": "null",
+          "status": "string",
+          "version": "null"
+        }
+      ],
+      "files": [
+        {
+          "counts": {
+            "$oneOf": [
+              "null",
+              {
+                "draftMarks": "number",
+                "entries": "number",
+                "phases": "number",
+                "sessions": "number"
+              }
+            ],
+            "approvals": "number",
+            "experiments": "number",
+            "predictions": "number",
+            "scored": "number",
+            "unresolved": "number",
+            "voided": "number"
+          },
+          "error": "null",
+          "exists": "boolean",
+          "kind": "string",
+          "mode": "null",
+          "modeWarning": "null",
+          "name": "string",
+          "path": "null",
+          "sizeBytes": "null",
+          "status": "string",
+          "version": "null|number"
+        }
+      ],
+      "inMemory": "boolean",
+      "notes": [
+        "string"
+      ],
+      "warnings": []
     },
     "get_exercise_history": {
       "demo": "boolean",
@@ -2321,6 +2501,107 @@
       "status": "string",
       "workoutKey": "string"
     },
+    "list_approvals": {
+      "counts": {
+        "approved": "number",
+        "expired": "number",
+        "pending": "number",
+        "rejected": "number"
+      },
+      "demo": "boolean",
+      "items": [
+        {
+          "createdAt": "string",
+          "expiresAt": "string",
+          "forDate": "string",
+          "id": "string",
+          "kind": "string",
+          "reasons": [
+            "string"
+          ],
+          "resolution": {
+            "$oneOf": [
+              "null",
+              {
+                "at": "string",
+                "decision": "string",
+                "note": "string",
+                "pushed": "boolean"
+              }
+            ]
+          },
+          "source": "string",
+          "status": "string"
+        }
+      ],
+      "notes": [
+        "string"
+      ],
+      "now": "string"
+    },
+    "list_approvals#one": {
+      "counts": {
+        "approved": "number",
+        "expired": "number",
+        "pending": "number",
+        "rejected": "number"
+      },
+      "demo": "boolean",
+      "items": [
+        {
+          "call": {
+            "arguments": {
+              "dryRun": "boolean",
+              "guides": [
+                {
+                  "date": "string",
+                  "exercises": [
+                    {
+                      "detail": "string",
+                      "name": "string",
+                      "restSec": "number",
+                      "sets": "number"
+                    }
+                  ],
+                  "title": "string"
+                }
+              ]
+            },
+            "tool": "string"
+          },
+          "createdAt": "string",
+          "expiresAt": "string",
+          "forDate": "string",
+          "howToPush": "string",
+          "id": "string",
+          "kind": "string",
+          "payload": {
+            "guides": [
+              {
+                "date": "string",
+                "exercises": [
+                  {
+                    "detail": "string",
+                    "name": "string",
+                    "restSec": "number",
+                    "sets": "number"
+                  }
+                ],
+                "title": "string"
+              }
+            ]
+          },
+          "reasons": [
+            "string"
+          ],
+          "resolution": "null",
+          "source": "string",
+          "status": "string"
+        }
+      ],
+      "notes": [],
+      "now": "string"
+    },
     "list_daily_activity": {
       "data": [
         {
@@ -2513,6 +2794,194 @@
         }
       ]
     },
+    "propose_next_week": {
+      "asOf": "string",
+      "basedOn": {
+        "from": "string",
+        "to": "string"
+      },
+      "changes": [
+        {
+          "action": "string",
+          "changed": "boolean",
+          "date": "string",
+          "exercise": "string",
+          "from": {
+            "detail": "string",
+            "kg": "number"
+          },
+          "reasons": [
+            "string"
+          ],
+          "session": "string",
+          "to": {
+            "detail": "string",
+            "kg": "number"
+          }
+        }
+      ],
+      "demo": "boolean",
+      "errors": [],
+      "estimates": [],
+      "forecast": "null",
+      "guides": [],
+      "history": {
+        "errors": [],
+        "from": "string",
+        "guidedSessions": "number",
+        "loggedSessions": "number",
+        "pending": "number",
+        "to": "string"
+      },
+      "missing": [
+        "string"
+      ],
+      "notes": [
+        "string"
+      ],
+      "pending": "number",
+      "planSource": "string",
+      "predictions": [],
+      "queuePayload": "null",
+      "reasons": [
+        "string"
+      ],
+      "risk": "null",
+      "rulesUsed": [
+        {
+          "default": "number",
+          "name": "string",
+          "overridable": "boolean",
+          "overridden": "boolean",
+          "rule": "string",
+          "value": "number"
+        }
+      ],
+      "sessions": [],
+      "signals": {
+        "atl": "number",
+        "ctl": "number",
+        "hrv": "string",
+        "recoveryMorning": "string",
+        "tsb": "number"
+      },
+      "status": "string",
+      "weekEnd": "string",
+      "weekStart": "string"
+    },
+    "propose_next_week#insufficient": {
+      "asOf": "string",
+      "basedOn": "null",
+      "changes": [],
+      "demo": "boolean",
+      "errors": [],
+      "estimates": [],
+      "forecast": "null",
+      "guides": [],
+      "history": "null",
+      "missing": [
+        "string"
+      ],
+      "notes": [
+        "string"
+      ],
+      "pending": "number",
+      "planSource": "string",
+      "predictions": [],
+      "queuePayload": "null",
+      "reasons": [],
+      "risk": "null",
+      "rulesUsed": [
+        {
+          "default": "number",
+          "name": "string",
+          "overridable": "boolean",
+          "overridden": "boolean",
+          "rule": "string",
+          "value": "number"
+        }
+      ],
+      "sessions": [],
+      "signals": "null",
+      "status": "string",
+      "weekEnd": "string",
+      "weekStart": "string"
+    },
+    "propose_next_week#predict": {
+      "asOf": "string",
+      "basedOn": {
+        "from": "string",
+        "to": "string"
+      },
+      "changes": [
+        {
+          "action": "string",
+          "changed": "boolean",
+          "date": "string",
+          "exercise": "string",
+          "from": {
+            "detail": "string",
+            "kg": "number"
+          },
+          "reasons": [
+            "string"
+          ],
+          "session": "string",
+          "to": {
+            "detail": "string",
+            "kg": "number"
+          }
+        }
+      ],
+      "demo": "boolean",
+      "errors": [],
+      "estimates": [],
+      "forecast": "null",
+      "guides": [],
+      "history": {
+        "errors": [],
+        "from": "string",
+        "guidedSessions": "number",
+        "loggedSessions": "number",
+        "pending": "number",
+        "to": "string"
+      },
+      "missing": [
+        "string"
+      ],
+      "notes": [
+        "string"
+      ],
+      "pending": "number",
+      "planSource": "string",
+      "predictions": [],
+      "queuePayload": "null",
+      "reasons": [
+        "string"
+      ],
+      "risk": "null",
+      "rulesUsed": [
+        {
+          "default": "number",
+          "name": "string",
+          "overridable": "boolean",
+          "overridden": "boolean",
+          "rule": "string",
+          "value": "number"
+        }
+      ],
+      "sessions": [],
+      "signals": {
+        "atl": "number",
+        "ctl": "number",
+        "hrv": "string",
+        "recoveryMorning": "string",
+        "tsb": "number"
+      },
+      "status": "string",
+      "weekEnd": "string",
+      "weekStart": "string"
+    },
     "push_week_plan": {
       "demo": "boolean",
       "dryRun": "boolean",
@@ -2526,6 +2995,406 @@
           "exercises": "number",
           "sets": "number",
           "title": "string"
+        }
+      ]
+    },
+    "queue_adjustment": {
+      "approval": {
+        "createdAt": "string",
+        "expiresAt": "string",
+        "forDate": "string",
+        "id": "string",
+        "kind": "string",
+        "reasons": [
+          "string"
+        ],
+        "resolution": "null",
+        "source": "string",
+        "status": "string"
+      },
+      "demo": "boolean",
+      "note": "string",
+      "queued": "boolean"
+    },
+    "resolve_approval#approve": {
+      "alreadyResolved": "boolean",
+      "call": {
+        "arguments": {
+          "dryRun": "boolean",
+          "guides": [
+            {
+              "date": "string",
+              "exercises": [
+                {
+                  "detail": "string",
+                  "name": "string",
+                  "restSec": "number",
+                  "sets": "number"
+                }
+              ],
+              "title": "string"
+            }
+          ]
+        },
+        "tool": "string"
+      },
+      "decision": "string",
+      "demo": "boolean",
+      "howToPush": "string",
+      "id": "string",
+      "kind": "string",
+      "note": "null",
+      "notes": [
+        "string"
+      ],
+      "payload": {
+        "guides": [
+          {
+            "date": "string",
+            "exercises": [
+              {
+                "detail": "string",
+                "name": "string",
+                "restSec": "number",
+                "sets": "number"
+              }
+            ],
+            "title": "string"
+          }
+        ]
+      },
+      "pushed": "boolean",
+      "resolvedAt": "string"
+    },
+    "simulate_plan": {
+      "asOf": "string",
+      "compare": "null",
+      "demo": "boolean",
+      "end": {
+        "atl": "number",
+        "ctl": "number",
+        "tsb": "number"
+      },
+      "errors": [],
+      "from": "string",
+      "goal": {
+        "atl": "number",
+        "band": "string",
+        "basis": "string",
+        "ctl": "number",
+        "date": "string",
+        "freshBand": {
+          "max": "number",
+          "min": "number"
+        },
+        "tsb": "number"
+      },
+      "lowestTsb": {
+        "date": "string",
+        "tsb": "number"
+      },
+      "modelBased": "boolean",
+      "notes": [
+        "string"
+      ],
+      "personalResponse": {
+        "basis": "string",
+        "cutoffTss": "number",
+        "highLoadDays": "number",
+        "metrics": {
+          "hrv": {
+            "controlIqr": "number",
+            "controlMedian": "number",
+            "meanDiff": "number",
+            "medianDiff": "number",
+            "nControl": "number",
+            "nTagged": "number",
+            "noiseThreshold": "number",
+            "taggedMedian": "number",
+            "verdict": "string"
+          },
+          "recoveryMorning": {
+            "controlIqr": "number",
+            "controlMedian": "number",
+            "meanDiff": "number",
+            "medianDiff": "number",
+            "nControl": "number",
+            "nTagged": "number",
+            "noiseThreshold": "number",
+            "taggedMedian": "number",
+            "verdict": "string"
+          }
+        },
+        "missing": [],
+        "otherDays": "number",
+        "status": "string",
+        "thresholds": {
+          "k": "number",
+          "minNightsPerGroup": "number",
+          "minPairedDays": "number",
+          "rule": "string"
+        },
+        "window": {
+          "from": "string",
+          "to": "string"
+        }
+      },
+      "responseToPlan": {
+        "afterHighLoad": {
+          "hrv": {
+            "expectedShiftVsOtherDays": "null",
+            "verdict": "string"
+          },
+          "recoveryMorning": {
+            "expectedShiftVsOtherDays": "null",
+            "verdict": "string"
+          }
+        },
+        "basis": "string",
+        "highLoadDays": "number"
+      },
+      "risks": [],
+      "series": [
+        {
+          "atl": "number",
+          "ctl": "number",
+          "date": "string",
+          "tsb": "number",
+          "tss": "number"
+        }
+      ],
+      "sessions": [
+        {
+          "date": "string",
+          "historySessions": "null|number",
+          "title": "null|string",
+          "tss": "number",
+          "tssSource": "string"
+        }
+      ],
+      "start": {
+        "atl": "number",
+        "ctl": "number",
+        "tsb": "number"
+      },
+      "thresholds": {
+        "ctlRampPerWeek": "number",
+        "freshTsb": {
+          "max": "number",
+          "min": "number"
+        },
+        "minTssSessions": "number",
+        "tsbFloor": "number",
+        "weeklyJumpPct": "number"
+      },
+      "to": "string",
+      "totalTss": "number",
+      "weeks": [
+        {
+          "complete": "boolean",
+          "ctlEnd": "number",
+          "ctlStart": "number",
+          "days": "number",
+          "jumpPct": "null|number",
+          "previous4wAvgTss": "null|number",
+          "rampRate": "number",
+          "tss": "number",
+          "weekStart": "string"
+        }
+      ]
+    },
+    "simulate_plan#compare": {
+      "asOf": "string",
+      "compare": {
+        "difference": {
+          "endCtl": "number",
+          "endTsb": "number",
+          "goalTsb": "null",
+          "lowestTsb": "number",
+          "risks": "number",
+          "totalTss": "number"
+        },
+        "end": {
+          "atl": "number",
+          "ctl": "number",
+          "tsb": "number"
+        },
+        "from": "string",
+        "goal": "null",
+        "label": "string",
+        "lowestTsb": {
+          "date": "string",
+          "tsb": "number"
+        },
+        "responseToPlan": {
+          "afterHighLoad": {
+            "hrv": {
+              "expectedShiftVsOtherDays": "null",
+              "verdict": "string"
+            },
+            "recoveryMorning": {
+              "expectedShiftVsOtherDays": "null",
+              "verdict": "string"
+            }
+          },
+          "basis": "string",
+          "highLoadDays": "number"
+        },
+        "risks": [],
+        "series": [
+          {
+            "atl": "number",
+            "ctl": "number",
+            "date": "string",
+            "tsb": "number",
+            "tss": "number"
+          }
+        ],
+        "sessions": [
+          {
+            "date": "string",
+            "historySessions": "null",
+            "title": "null",
+            "tss": "number",
+            "tssSource": "string"
+          }
+        ],
+        "to": "string",
+        "totalTss": "number",
+        "weeks": [
+          {
+            "complete": "boolean",
+            "ctlEnd": "number",
+            "ctlStart": "number",
+            "days": "number",
+            "jumpPct": "null|number",
+            "previous4wAvgTss": "null|number",
+            "rampRate": "number",
+            "tss": "number",
+            "weekStart": "string"
+          }
+        ]
+      },
+      "demo": "boolean",
+      "end": {
+        "atl": "number",
+        "ctl": "number",
+        "tsb": "number"
+      },
+      "errors": [],
+      "from": "string",
+      "goal": "null",
+      "lowestTsb": {
+        "date": "string",
+        "tsb": "number"
+      },
+      "modelBased": "boolean",
+      "notes": [
+        "string"
+      ],
+      "personalResponse": {
+        "basis": "string",
+        "cutoffTss": "number",
+        "highLoadDays": "number",
+        "metrics": {
+          "hrv": {
+            "controlIqr": "number",
+            "controlMedian": "number",
+            "meanDiff": "number",
+            "medianDiff": "number",
+            "nControl": "number",
+            "nTagged": "number",
+            "noiseThreshold": "number",
+            "taggedMedian": "number",
+            "verdict": "string"
+          },
+          "recoveryMorning": {
+            "controlIqr": "number",
+            "controlMedian": "number",
+            "meanDiff": "number",
+            "medianDiff": "number",
+            "nControl": "number",
+            "nTagged": "number",
+            "noiseThreshold": "number",
+            "taggedMedian": "number",
+            "verdict": "string"
+          }
+        },
+        "missing": [],
+        "otherDays": "number",
+        "status": "string",
+        "thresholds": {
+          "k": "number",
+          "minNightsPerGroup": "number",
+          "minPairedDays": "number",
+          "rule": "string"
+        },
+        "window": {
+          "from": "string",
+          "to": "string"
+        }
+      },
+      "responseToPlan": {
+        "afterHighLoad": {
+          "hrv": {
+            "expectedShiftVsOtherDays": "null",
+            "verdict": "string"
+          },
+          "recoveryMorning": {
+            "expectedShiftVsOtherDays": "null",
+            "verdict": "string"
+          }
+        },
+        "basis": "string",
+        "highLoadDays": "number"
+      },
+      "risks": [],
+      "series": [
+        {
+          "atl": "number",
+          "ctl": "number",
+          "date": "string",
+          "tsb": "number",
+          "tss": "number"
+        }
+      ],
+      "sessions": [
+        {
+          "date": "string",
+          "historySessions": "null",
+          "title": "null",
+          "tss": "number",
+          "tssSource": "string"
+        }
+      ],
+      "start": {
+        "atl": "number",
+        "ctl": "number",
+        "tsb": "number"
+      },
+      "thresholds": {
+        "ctlRampPerWeek": "number",
+        "freshTsb": {
+          "max": "number",
+          "min": "number"
+        },
+        "minTssSessions": "number",
+        "tsbFloor": "number",
+        "weeklyJumpPct": "number"
+      },
+      "to": "string",
+      "totalTss": "number",
+      "weeks": [
+        {
+          "complete": "boolean",
+          "ctlEnd": "number",
+          "ctlStart": "number",
+          "days": "number",
+          "jumpPct": "null|number",
+          "previous4wAvgTss": "null|number",
+          "rampRate": "number",
+          "tss": "number",
+          "weekStart": "string"
         }
       ]
     }

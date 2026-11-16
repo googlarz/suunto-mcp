@@ -120,7 +120,7 @@ export const PLANNED = /(?<![\d.,])(\d+)\s*x\s*(\d+)(?!\d|\s*kg|\s*[-\u2010-\u20
 const num = (n: number): number => Number(n.toFixed(2));
 // The largest step is `max` (default 2.5 kg), but at most 5% of the load rounded to 1.25 kg, and never below 1.25 kg
 // (so a 5 kg dumbbell goes up 1.25 kg, 100 kg goes up 2.5 kg).
-const stepFor = (kg: number, max: number): number => Math.min(max, Math.max(1.25, Math.round((kg * 0.05) / 1.25) * 1.25));
+export const stepFor = (kg: number, max: number): number => Math.min(max, Math.max(1.25, Math.round((kg * 0.05) / 1.25) * 1.25));
 
 // What to show next to an exercise on the watch: `last` (the newest session in a named get_exercise_history
 // result) and a simple `target`. The load goes up only when a log_session entry shows every planned set done

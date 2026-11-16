@@ -337,7 +337,7 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     const nonRead = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
     // set_plan, get_catchup, archive_workouts and get_weekly_report are not read-only either, but in demo mode they work on in-memory state (tested below);
     // so do the prediction ledger and experiment writers (tested in demo-state.test.ts and state-tools.test.ts)
-    const inMemory = ["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment"];
+    const inMemory = ["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "resolve_approval"];
     assert.deepEqual(nonRead.filter((n) => !inMemory.includes(n)), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
     for (const [name, args] of writes) {
       const r = await call(name, args);
@@ -594,5 +594,190 @@ test("e2e demo: exercise history works across the demo sessions and caches nothi
     assert.ok(index.sessions > 8);
     assert.ok(index.exercises[0].sessions >= 6);
     assert.equal(index.notes.filter((n: string) => /unreliable heart-rate/.test(n)).length, 1, "the demo's one session with a sensor dropout is called out");
+  });
+});
+
+// ---------- propose_next_week and simulate_plan in demo mode ----------
+
+// calls again until the demo sessions are all read (8 uncached ones per call), as the result's `pending` says
+async function proposeConverged(call: Call, args: Record<string, unknown> = {}) {
+  let r: any;
+  for (let i = 0; i < 8; i++) {
+    r = await ok(call, "propose_next_week", args);
+    if (r.pending === 0) break;
+  }
+  assert.equal(r.pending, 0);
+  return r;
+}
+
+test("e2e demo: propose_next_week proposes from the demo programme and lifts, deterministically, and its output goes straight to set_plan and push_week_plan", async () => {
+  await withDemo(async (call, rpc) => {
+    const defs: any[] = (await rpc("tools/list")).result.tools;
+    for (const name of ["propose_next_week", "simulate_plan", "adjust_guide"]) assert.deepEqual(defs.find((t) => t.name === name).annotations, { readOnlyHint: true, openWorldHint: true }, name);
+    const a = await proposeConverged(call);
+    const b = await proposeConverged(call);
+    assert.equal(JSON.stringify(a), JSON.stringify(b), "the same on every call");
+    assert.equal(a.status, "ok");
+    assert.equal(a.planSource, "demo");
+    assert.deepEqual(a.sessions.map((s: any) => s.title), ["PUSH A", "PULL B", "LEGS C"]);
+    const squat = a.changes.find((c: any) => c.exercise === "Back Squat");
+    assert.equal(squat.action, "deload", "the demo lifter missed it twice in a row");
+    assert.ok(a.changes.every((c: any) => c.reasons.length > 0));
+    assert.ok(a.changes.find((c: any) => c.exercise === "Bench Press").action !== "progress", "the newest bench session was a rep short");
+    assert.equal(a.rulesUsed.find((r: any) => r.name === "stallSessions").value, 2);
+    assert.ok(a.forecast.series.length >= 7 && a.risk.basis === "model-based");
+    // straight on: the guides pass push_week_plan's own schema (dry run), the sessions pass set_plan (the demo's memory store)
+    const week = await call("push_week_plan", { guides: a.guides });
+    assert.equal(week.isError, false, week.text);
+    assert.equal(week.json.dryRun, true);
+    assert.deepEqual(week.json.wouldPush.map((w: any) => w.date), a.sessions.map((s: any) => s.date));
+    const saved = await call("set_plan", { goal: "From the proposal", sessions: a.sessions });
+    assert.equal(saved.isError, false, saved.text);
+    // with a plan stored, the stored one is used
+    assert.equal((await proposeConverged(call)).planSource, "stored");
+  });
+});
+
+test("e2e demo: propose_next_week refuses a past weekStart and an unknown rule, and is insufficient when the plan has nothing to repeat", async () => {
+  await withDemo(async (call) => {
+    const past = await call("propose_next_week", { weekStart: "2020-01-06" });
+    assert.equal(past.isError, true);
+    assert.match(past.text, /must be after today/);
+    const rule = await call("propose_next_week", { rules: { deloadPct: 99 } });
+    assert.equal(rule.isError, true);
+    assert.match(rule.text, /deloadPct/);
+    const unknown = await call("propose_next_week", { rules: { bogus: 1 } });
+    assert.equal(unknown.isError, true);
+    assert.match(unknown.text, /rules.bogus is not a known rule/);
+    const extra = await call("propose_next_week", { nope: 1 });
+    assert.equal(extra.isError, true);
+    assert.match(extra.text, /nope is not a known field/);
+    await call("set_plan", { goal: "Runs only", sessions: [{ date: localDate(-3), title: "Run" }] });
+    const thin = await ok(call, "propose_next_week");
+    assert.equal(thin.status, "insufficient");
+    assert.deepEqual([thin.sessions, thin.guides, thin.forecast], [[], [], null]);
+    assert.match(thin.missing[0], /no session with a strength guide/);
+  });
+});
+
+test("e2e demo: simulate_plan is deterministic, model-based, asks for tss where there is no estimate, and refuses what it does not know", async () => {
+  await withDemo(async (call) => {
+    const args = { sessions: [{ date: localDate(-3), title: "PUSH A" }, { date: localDate(-5), tss: 60 }], goalDate: localDate(-14), compare: { label: "lighter", sessions: [{ date: localDate(-3), tss: 20 }] } };
+    const a = await ok(call, "simulate_plan", args);
+    assert.equal(JSON.stringify(a), JSON.stringify(await ok(call, "simulate_plan", args)));
+    assert.equal(a.modelBased, true);
+    assert.equal(a.asOf, localDate(0));
+    assert.equal(a.sessions.find((s: any) => s.title === "PUSH A").tssSource, "history");
+    assert.ok(a.goal.band && a.series.length >= 14 && a.compare.difference.totalTss !== undefined);
+    assert.ok(["ok", "insufficient"].includes(a.personalResponse.status));
+    const noEstimate = await call("simulate_plan", { sessions: [{ date: localDate(-3), title: "NOT A GUIDE" }] });
+    assert.equal(noEstimate.isError, true);
+    assert.match(noEstimate.text, /Give its tss/);
+    assert.match((await call("simulate_plan", { sessions: [{ date: localDate(-3), tss: 5, load: 1 }] })).text, /load is not a known field/);
+    assert.match((await call("simulate_plan", { sessions: [{ date: localDate(0), tss: 5 }] })).text, /must be after asOf/);
+    assert.match((await call("simulate_plan", {})).text, /Invalid arguments for simulate_plan/);
+  });
+});
+
+// ---------- the approval queue, predictions, aliases and the data overview in demo mode ----------
+
+const GUIDE_FOR = (date: string) => ({ title: "Approval check", date, exercises: [{ name: "Bench Press", detail: "70kg 3x8", sets: 3, restSec: 90 }] });
+
+test("e2e demo: propose_next_week hands back a queuePayload and predictions; queue_adjustment takes it as it is; resolve_approval with push: true NEVER calls the push path", async () => {
+  await withDemo(async (call, rpc) => {
+    const defs: any[] = (await rpc("tools/list")).result.tools;
+    assert.deepEqual(defs.find((t) => t.name === "resolve_approval").annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
+    assert.deepEqual(defs.find((t) => t.name === "list_approvals").annotations, { readOnlyHint: true, openWorldHint: false });
+    assert.equal((await ok(call, "list_approvals")).items.length, 0);
+    const q = await proposeConverged(call, { predict: true });
+    assert.equal((await ok(call, "list_approvals")).items.length, 0, "the proposal queues nothing");
+    assert.ok(q.queuePayload && q.queuePayload.kind === "week_plan" && q.queuePayload.source === "propose_next_week");
+    assert.ok(q.predictions.length > 0 || q.changes.every((c: any) => c.action !== "progress"), "a payload per increase");
+    for (const p of q.predictions) {
+      const logged = await call("log_prediction", p.payload);
+      assert.equal(logged.isError, false, logged.text);
+    }
+    const queued = await ok(call, "queue_adjustment", q.queuePayload);
+    assert.equal(queued.approval.id, "a1");
+    const listed = await ok(call, "list_approvals", { status: "pending" });
+    assert.deepEqual(listed.items.map((i: any) => [i.id, i.kind, i.status, i.source]), [["a1", "week_plan", "pending", "propose_next_week"]]);
+    const full = await ok(call, "list_approvals", { id: "a1" });
+    assert.deepEqual([full.items[0].call.tool, full.items[0].call.arguments.dryRun], ["push_week_plan", true]);
+
+    const approved = await ok(call, "resolve_approval", { id: "a1", decision: "approve", push: true, dryRun: false });
+    assert.equal(approved.pushed, false);
+    assert.match(approved.notes[0], /Demo mode: nothing was pushed/);
+    assert.deepEqual(approved.call.arguments, { guides: q.guides, dryRun: true }, "the dry-run form, never a ready real push");
+    assert.doesNotMatch(JSON.stringify(approved), /"dryRun":false/);
+    const again = await ok(call, "resolve_approval", { id: "a1", decision: "reject" });
+    assert.deepEqual([again.alreadyResolved, again.decision], [true, "approve"], "the first answer, never twice");
+    const bad = await call("resolve_approval", { id: "a1", decision: "reject", push: true });
+    assert.equal(bad.isError, true);
+    assert.match(bad.text, /push: true needs decision approve/);
+    // get_catchup summarizes what is waiting
+    await ok(call, "queue_adjustment", { kind: "adjusted_guide", payload: GUIDE_FOR(localDate(-2)), reasons: ["HRV below band"], source: "adjust_guide" });
+    const catchup = await ok(call, "get_catchup");
+    assert.deepEqual([catchup.approvals.pending, catchup.approvals.items.map((i: any) => i.id)], [1, ["a2"]]);
+  });
+});
+
+test("e2e demo: queue_adjustment refuses what push_strength_guide would refuse and a stale or too long-lived item; adjust_guide returns a queuePayload and queues nothing", async () => {
+  await withDemo(async (call) => {
+    const refused = await call("queue_adjustment", { kind: "adjusted_guide", payload: { title: "x", date: localDate(-1), exercises: [] } });
+    assert.equal(refused.isError, true);
+    assert.match(refused.text, /not a valid push_strength_guide spec/);
+    assert.match((await call("queue_adjustment", { kind: "adjusted_guide", payload: { ...GUIDE_FOR(localDate(-1)), guideId: "g" } })).text, /guideId is not allowed/);
+    assert.match((await call("queue_adjustment", { kind: "week_plan", payload: { guides: [] } })).text, /at least one guide|Invalid arguments/);
+    assert.match((await call("queue_adjustment", { kind: "adjusted_guide", payload: GUIDE_FOR(localDate(2)) })).text, /before today/);
+    assert.match((await call("queue_adjustment", { kind: "adjusted_guide", payload: GUIDE_FOR(localDate(-1)), forDate: localDate(-5) })).text, /must equal the payload's date/);
+    assert.match((await call("queue_adjustment", { kind: "adjusted_guide", payload: GUIDE_FOR(localDate(-1)), expiresAt: `${localDate(-20)}T00:00:00Z` })).text, /cannot outlive the day it is for/);
+    assert.equal((await ok(call, "list_approvals")).items.length, 0, "nothing stored");
+    const out = await ok(call, "adjust_guide", { guide: GUIDE_FOR(localDate(-1)) });
+    assert.equal(out.queuePayload === null, !out.adjusted, "only a change has a payload");
+    if (out.adjusted) assert.deepEqual(Object.keys(out.queuePayload), ["kind", "payload", "forDate", "reasons", "source"]);
+    assert.equal((await call("adjust_guide", { guide: GUIDE_FOR(localDate(-1)), queue: true })).isError, false, "an unknown input is ignored by the schema check, as for every tool");
+    assert.equal((await ok(call, "list_approvals")).items.length, 0, "adjust_guide queues nothing");
+  });
+});
+
+test("e2e demo: from / to are accepted wherever since / until and startdate / enddate are; both given and different is an error", async () => {
+  await withDemo(async (call) => {
+    const since = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    const until = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const old = await ok(call, "list_workouts", { since, until, limit: 100 });
+    const alias = await ok(call, "list_workouts", { from: since, to: until, limit: 100 });
+    assert.deepEqual(alias.payload, old.payload);
+    assert.ok(old.payload.length > 0);
+    const same = await ok(call, "list_workouts", { from: since, since, to: until, until, limit: 100 });
+    assert.deepEqual(same.payload, old.payload, "both names with the same value are fine");
+    const clash = await call("list_workouts", { since, from: until });
+    assert.equal(clash.isError, true);
+    assert.match(clash.text, /from and since mean the same thing but differ/);
+    assert.match((await call("list_workouts", { until, to: since })).text, /to and until mean the same thing but differ/);
+
+    const [start, end] = [`${localDate(8)}T00:00:00`, `${localDate(2)}T23:59:59`];
+    const stats = await ok(call, "get_daily_activity_statistics", { startdate: start, enddate: end });
+    const statsAlias = await ok(call, "get_daily_activity_statistics", { from: start, to: end });
+    assert.deepEqual(statsAlias.data, stats.data);
+    assert.deepEqual((await ok(call, "get_daily_activity_statistics", { startdate: start, enddate: end, from: start, to: end })).data, stats.data);
+    assert.match((await call("get_daily_activity_statistics", { startdate: start, from: end, enddate: end })).text, /from and startdate mean the same thing but differ/);
+    assert.match((await call("get_daily_activity_statistics", { startdate: start, enddate: end, to: start })).text, /to and enddate mean the same thing but differ/);
+    assert.match((await call("get_daily_activity_statistics", { startdate: start })).text, /to \(or enddate\) is required/);
+    assert.match((await call("get_daily_activity_statistics", {})).text, /from \(or startdate\) is required/);
+  });
+});
+
+test("e2e demo: get_data_overview shows the in-memory counts, no paths, and changes nothing", async () => {
+  await withDemo(async (call) => {
+    await call("queue_adjustment", { kind: "adjusted_guide", payload: GUIDE_FOR(localDate(-1)) });
+    const o = await ok(call, "get_data_overview");
+    assert.equal(o.inMemory, true);
+    const by = Object.fromEntries(o.files.map((f: any) => [f.name, f]));
+    assert.deepEqual(Object.keys(by), ["journal", "plan", "seen", "predictions", "experiments", "approvals"]);
+    assert.ok(by.predictions.counts.predictions >= 30 && by.journal.counts.entries > 0, "the demo ledger and journal");
+    assert.deepEqual([by.approvals.counts, by.approvals.status, by.approvals.path], [{ approvals: 1, unresolved: 1 }, "in-memory", null]);
+    assert.equal(by.plan.status, "missing", "no plan stored yet");
+    assert.deepEqual(o.directories.map((d: any) => [d.name, d.status]), [["cache", "in-memory"], ["archive", "in-memory"], ["reports", "in-memory"]]);
+    assert.deepEqual(o.warnings, []);
   });
 });

@@ -18,6 +18,10 @@ import { estimateRouteTime } from "./route-time.js";
 import { filePredictionStore, predictionStats } from "./predictions.js";
 import { analyzeExperiment, fileExperimentStore, getExperiment } from "./experiments.js";
 import { buildDraft } from "./draft.js";
+import { proposeNextWeek } from "./propose-week.js";
+import { simulatePlan } from "./simulate-plan.js";
+import { fileApprovalStore, listApprovals } from "./approvals.js";
+import { dataOverview } from "./data-overview.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -42,10 +46,14 @@ Workout commands:
 Analysis commands:
   get-training-load    <YYYY-MM-DD> [--days N]
   forecast-training-load <YYYY-MM-DD:TSS>... [--as-of YYYY-MM-DD]   (CTL/ATL/TSB for planned days, from today's values)
+  propose-next-week    [MONDAY YYYY-MM-DD] [--rules JSON]   (next week's strength sessions from your plan, your logged lifts and recovery, with reasons, a forecast and a risk note; read-only: prints the proposal, writes nothing)
+  simulate-plan        <YYYY-MM-DD:TSS | YYYY-MM-DD:TITLE>... [--goal-date D] [--as-of D] [--compare ENTRY]...   (what-if: CTL/ATL/TSB day by day, ramp, risk days, your own response when your history allows; model-based, read-only)
   compare-workout      <workoutKey>   (laps only, no plan comparison)
   get-workout-rest-profile <workoutKey>
   get-exercise-history [name] [--weeks N]   (load, sets, rest recovery per session; writes only the local cache)
   get-plan             [YYYY-MM-DD]   (the plan from set_plan: today and the next 7 days, or one day; reads the local plan file only)
+  list-approvals       [ID] [--status pending|expired|done|all]   (the approval queue: what waits for a yes; reads the local file only, no credentials; deciding is MCP-only: resolve_approval)
+  get-data-overview    (every local file the server keeps: path, version, size, counts, mode warnings, unreadable or newer-version files; reads the files only, no credentials, changes nothing)
   get-tag-effects      [--days N] [--tag T] [--date YYYY-MM-DD]   (journal tags against the next night's sleep, HRV and recovery; read-only)
   get-benchmark        --guide TITLE | --exercise NAME [--weeks N]   (a repeatable session over time: load, rest HR, duration, TSS; writes only the local cache)
   get-archive-status   (what the local workout archive holds; reads the archive folder only, no credentials)
@@ -112,6 +120,27 @@ export async function runCli(argv: string[]) {
     if (rest.length > 1) die("Usage: get-plan [YYYY-MM-DD]");
     try {
       out(await getPlan(filePlanStore(), { date: rest[0] }));
+    } catch (err: any) {
+      die(err.message ?? String(err));
+    }
+    return;
+  }
+
+  // these two only read local files, so they need no Suunto credentials either (queue_adjustment and resolve_approval are MCP-only: they write)
+  if (cmd === "list-approvals") {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { status: { type: "string" } } });
+    if (positionals.length > 1) die("Usage: list-approvals [ID] [--status pending|expired|done|all]");
+    try {
+      out(await listApprovals(fileApprovalStore(), { status: values.status, id: positionals[0] }));
+    } catch (err: any) {
+      die(err.message ?? String(err));
+    }
+    return;
+  }
+  if (cmd === "get-data-overview") {
+    if (rest.length > 0) die("Usage: get-data-overview (it takes no options)");
+    try {
+      out(await dataOverview());
     } catch (err: any) {
       die(err.message ?? String(err));
     }
@@ -232,6 +261,44 @@ export async function runCli(argv: string[]) {
         break;
       }
 
+      case "propose-next-week": {
+        const usage = "Usage: propose-next-week [MONDAY YYYY-MM-DD] [--rules JSON, e.g. '{\"deloadPct\":15}']";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { rules: { type: "string" } } });
+        if (positionals.length > 1) die(usage);
+        let rules: unknown;
+        if (values.rules !== undefined) {
+          try {
+            rules = JSON.parse(values.rules);
+          } catch {
+            die(`--rules must be a JSON object, got "${values.rules}". ${usage}`);
+          }
+        }
+        out(await proposeNextWeek(suunto, filePlanStore(), { ...(positionals[0] !== undefined ? { weekStart: positionals[0] } : {}), ...(rules !== undefined ? { rules } : {}) }));
+        break;
+      }
+
+      case "simulate-plan": {
+        const usage = "Usage: simulate-plan <YYYY-MM-DD:TSS | YYYY-MM-DD:TITLE>... [--goal-date YYYY-MM-DD] [--as-of YYYY-MM-DD] [--compare ENTRY]...  (ENTRY is DATE:TSS or DATE:TITLE, repeated for each session of the compared plan)";
+        const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { "goal-date": { type: "string" }, "as-of": { type: "string" }, compare: { type: "string", multiple: true } } });
+        if (positionals.length === 0) die(usage);
+        // DATE:TSS when what follows the first colon is a number, else DATE:TITLE (a title may hold colons)
+        const session = (entry: string) => {
+          const at = entry.indexOf(":");
+          const [date, what] = at < 0 ? [entry, ""] : [entry.slice(0, at), entry.slice(at + 1)];
+          if (!date || what === "") die(`"${entry}" is not DATE:TSS or DATE:TITLE (e.g. 2026-11-17:60 or 2026-11-17:PUSH A). ${usage}`);
+          return Number.isFinite(Number(what)) ? { date, tss: Number(what) } : { date, title: what };
+        };
+        out(
+          await simulatePlan(suunto, {
+            sessions: positionals.map(session),
+            ...(values["goal-date"] !== undefined ? { goalDate: values["goal-date"] } : {}),
+            ...(values["as-of"] !== undefined ? { asOf: values["as-of"] } : {}),
+            ...(values.compare !== undefined ? { compare: { sessions: values.compare.map(session) } } : {}),
+          }),
+        );
+        break;
+      }
+
       case "compare-workout": {
         const key = rest[0] ?? die("Usage: compare-workout <workoutKey>");
         const data = await suunto.getWorkoutWithExtensions(key, LAP_EXTENSIONS);
@@ -302,7 +369,7 @@ export async function runCli(argv: string[]) {
 
       case "get-catchup": {
         if (rest.length > 0) die("Usage: get-catchup (it takes no options and never moves the marker)");
-        out(await buildCatchup(suunto, fileSeenStore(), filePlanStore()));
+        out(await buildCatchup(suunto, fileSeenStore(), filePlanStore(), {}, new Date(), fileApprovalStore()));
         break;
       }
 
