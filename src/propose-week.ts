@@ -18,6 +18,8 @@ import { COLS, PLANNED, collectRecords, loadOf, nameMatches, parseLoadKg, sugges
 import type { JournalEntry } from "./journal.js";
 import type { Plan, PlanSession, PlanStore } from "./plan.js";
 import { MIN_TSS_SESSIONS, TSB_RISK_FLOOR, TSS_HISTORY_DAYS, WEEKLY_JUMP_PCT, estimateTss, mondayOf, projectLoad, roundPoint, tsbFloorCheck, weekLoad } from "./plan-load.js";
+import { MAX_DAYS_AHEAD, MIN_SCORED, predictionStats, type PredictionStore } from "./predictions.js";
+import { queueAdjustment, type ApprovalStore } from "./approvals.js";
 import { isValidCalendarDate } from "./schema-validate.js";
 import { addDays, buildTrainingLoad } from "./training-load.js";
 
@@ -47,6 +49,12 @@ export const HISTORY_WEEKS = 8; // the journal is read this far back
 export const BASE_LOOKBACK_WEEKS = 4; // the base week is the latest week with a guided session within this many weeks before weekStart
 export const MIN_LOGGED_SESSIONS = 2; // sessions with logged sets (log_session) needed in the history before anything is proposed
 export const LOAD_STEP_KG = 1.25; // loads are rounded to this
+// predict: true -> a log_prediction payload per increase. The rule label the predictions carry (get_prediction_stats' byRule groups by it),
+// the probability when there is no history of that rule yet (a conservative guess: a planned step up is more often done than not, but not by much), and its bounds.
+export const PREDICT_RULE = "progression";
+export const PREDICT_DEFAULT = 0.65;
+export const PREDICT_MIN = 0.5;
+export const PREDICT_MAX = 0.9;
 
 const DEFAULTS = Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.default])) as Rules;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -72,6 +80,9 @@ export const rulesUsed = (rules: Rules) => [
   { name: "minLoggedSessions", value: MIN_LOGGED_SESSIONS, default: MIN_LOGGED_SESSIONS, overridden: false, overridable: false, rule: "Fewer sessions with logged sets (log_session) than this in the history: nothing is proposed." },
   { name: "baseLookbackWeeks", value: BASE_LOOKBACK_WEEKS, default: BASE_LOOKBACK_WEEKS, overridden: false, overridable: false, rule: "The base week is the latest week of the stored plan with a guided session, within this many weeks before weekStart; its sessions are repeated one week on." },
   { name: "recoverySignals", value: 2, default: 2, overridden: false, overridable: false, rule: "HRV and recovery on waking (get_baselines, today) both below your band deloads every load; one of them below allows no increase." },
+  { name: "predictionDefault", value: PREDICT_DEFAULT, default: PREDICT_DEFAULT, overridden: false, overridable: false, rule: `With predict: true, each proposed increase comes with a log_prediction payload (kind reps_hit, rule '${PREDICT_RULE}'). Its probability is your own hit rate for that rule (get_prediction_stats byRule) once at least ${MIN_SCORED} are scored, else this number.` },
+  { name: "predictionMin", value: PREDICT_MIN, default: PREDICT_MIN, overridden: false, overridable: false, rule: "A predicted probability is never lower than this." },
+  { name: "predictionMax", value: PREDICT_MAX, default: PREDICT_MAX, overridden: false, overridable: false, rule: "A predicted probability is never higher than this." },
   { name: "loadStepKg", value: LOAD_STEP_KG, default: LOAD_STEP_KG, overridden: false, overridable: false, rule: "Loads are rounded to this many kg." },
   { name: "minTssSessions", value: MIN_TSS_SESSIONS, default: MIN_TSS_SESSIONS, overridden: false, overridable: false, rule: `A session's TSS for the forecast is the median of your last ${TSS_HISTORY_DAYS} days' sessions of the same title, needing at least this many; with fewer it counts as 0 and is listed in estimates.` },
 ];
@@ -225,14 +236,25 @@ export interface ProposeDeps {
   history?: HistoryDeps;
   journal?: Record<string, JournalEntry>; // used instead of the journal file (demo mode has a journal of its own)
   demoPlan?: (weekStart: string) => Plan; // demo mode: the plan to use when none is stored
+  approvals?: { store: ApprovalStore; validate: (guide: unknown) => string[] }; // for queue: true
+  predictions?: PredictionStore; // for predict: true: the ledger whose 'progression' hit rate sets the probability
+}
+
+// The probability of a predicted increase: the user's own hit rate for the rule when at least MIN_SCORED are scored (get_prediction_stats), else the default; kept inside [PREDICT_MIN, PREDICT_MAX].
+export function predictionProbability(stats: { n: number; hitRate: number | null } | null): { probability: number; basis: { source: "history" | "default"; rule: string; n: number; hitRate: number | null } } {
+  const usable = stats !== null && stats.n >= MIN_SCORED && stats.hitRate !== null;
+  const base = usable ? stats!.hitRate! : PREDICT_DEFAULT;
+  return { probability: Math.round(Math.min(PREDICT_MAX, Math.max(PREDICT_MIN, base)) * 100) / 100, basis: { source: usable ? "history" : "default", rule: PREDICT_RULE, n: stats?.n ?? 0, hitRate: usable ? stats!.hitRate : null } };
 }
 
 type Client = SuuntoClient;
 
 export async function proposeNextWeek(client: Client, planStore: PlanStore, args: unknown, deps: ProposeDeps = {}) {
   if (!isObject(args)) throw new Error("arguments must be an object");
-  const extra = Object.keys(args).find((k) => k !== "weekStart" && k !== "rules");
-  if (extra !== undefined) throw new Error(`${extra} is not a known field (allowed: weekStart, rules)`);
+  const extra = Object.keys(args).find((k) => !["weekStart", "rules", "queue", "predict"].includes(k));
+  if (extra !== undefined) throw new Error(`${extra} is not a known field (allowed: weekStart, rules, queue, predict)`);
+  for (const flag of ["queue", "predict"] as const) if (args[flag] !== undefined && typeof args[flag] !== "boolean") throw new Error(`${flag} must be a boolean`);
+  if (args.queue === true && deps.approvals === undefined) throw new Error("queue: true needs the approval queue, which this caller does not have.");
   const rules = parseRules(args.rules);
   const today = localDate(0, deps.now);
   const nextMonday = addDays(mondayOf(today), 7);
@@ -264,6 +286,8 @@ export async function proposeNextWeek(client: Client, planStore: PlanStore, args
     forecast: null as unknown,
     risk: null as unknown,
     estimates: [] as unknown[],
+    queued: (args.queue === true ? { queued: false, reason: "Nothing is proposed, so nothing was queued." } : null) as unknown,
+    predictions: [] as unknown[],
     history: null as unknown,
     notes: ["Nothing is proposed. Model-based throughout: a proposal from simple stated rules, not a prescription."],
     errors: [] as { section: string; error: string }[],
@@ -383,6 +407,34 @@ export async function proposeNextWeek(client: Client, planStore: PlanStore, args
   if (existing.length) notes.push(`The stored plan already has sessions on ${existing.join(", ")} in that week; set_plan 'merge' replaces them by date.`);
   if (history.notes.length) notes.push(...history.notes.filter((n) => /not read|could not be read|ignored/.test(n)));
 
+  // ---- queue: true (the approval queue, nothing is pushed) and predict: true (payloads only, nothing is logged) ----
+  let queued: unknown = null;
+  if (args.queue === true) {
+    const lines = [...reasons, ...changes.filter((c) => c.action !== "unchanged").map((c) => `${c.session} ${c.exercise}: ${c.action}, ${c.from.detail} -> ${c.to.detail}. ${c.reasons[0] ?? ""}`)];
+    try {
+      queued = await queueAdjustment({ kind: "week_plan", payload: { guides }, forDate: weekStart, reasons: lines.map((l) => l.slice(0, 500)).slice(0, 20), source: "propose_next_week" }, deps.approvals!.store, { now: deps.now, validate: deps.approvals!.validate });
+    } catch (err: any) {
+      queued = { queued: false, reason: String(err?.message ?? err) };
+    }
+  }
+  const predictions: { session: string; payload: Record<string, unknown>; basis: unknown }[] = [];
+  if (args.predict === true) {
+    let stats: { n: number; hitRate: number | null } | null = null;
+    try {
+      const row = predictionStats((await deps.predictions?.load()) ?? null, deps.now).byRule.find((r) => r.rule === PREDICT_RULE);
+      stats = row ? { n: row.n, hitRate: row.hitRate } : null;
+    } catch (err: any) {
+      errors.push({ section: "predictions", error: String(err?.message ?? err) });
+    }
+    const { probability, basis } = predictionProbability(stats);
+    for (const c of changes.filter((x) => x.action === "progress")) {
+      const m = PLANNED.exec(c.to.detail);
+      if (!m || c.to.kg === null || Number(m[1]) > 20 || Number(m[2]) > 200 || c.date > addDays(today, MAX_DAYS_AHEAD)) continue;
+      predictions.push({ session: c.session, payload: { date: c.date, kind: "reps_hit", probability, exercise: c.exercise, sets: Number(m[1]), reps: Number(m[2]), kg: c.to.kg, rule: PREDICT_RULE, note: `Proposed by propose_next_week: ${c.from.kg} -> ${c.to.kg} kg.` }, basis });
+    }
+    notes.push("predictions: ready log_prediction payloads, one per proposed increase (the user logs them, or not: nothing was logged). Score them later with score_predictions; get_prediction_stats' byRule shows how the 'progression' rule does.");
+  }
+
   return {
     status: "ok" as const,
     weekStart,
@@ -407,6 +459,8 @@ export async function proposeNextWeek(client: Client, planStore: PlanStore, args
       basis: "model-based",
     },
     estimates,
+    queued,
+    predictions,
     history: historyInfo,
     notes,
     errors,

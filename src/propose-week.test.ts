@@ -10,6 +10,9 @@ import type { ParsedFit } from "./fit.js";
 import { COLS, clearFailedSessions, suggestProgression, type WorkoutRecord } from "./history.js";
 import type { JournalEntry } from "./journal.js";
 import { memoryPlanStore, setPlan, type Plan, type PlanStore } from "./plan.js";
+import { memoryApprovalStore, resolveApproval } from "./approvals.js";
+import { logPrediction, memoryPredictionStore, type Prediction } from "./predictions.js";
+import { PREDICT_DEFAULT, PREDICT_MAX, PREDICT_MIN, PREDICT_RULE, predictionProbability } from "./propose-week.js";
 import { BASE_LOOKBACK_WEEKS, buildGates, HISTORY_WEEKS, MIN_LOGGED_SESSIONS, RULES, baseWeek, decideLift, deloadKg, hit, liftEvidence, parseRules, proposeNextWeek, rulesUsed, withKg, type Evidence, type Gates, type Rules } from "./propose-week.js";
 import { forecastTrainingLoad, addDays } from "./training-load.js";
 import { planWeek } from "./week-plan.js";
@@ -484,7 +487,7 @@ test("proposeNextWeek: weekStart must be a future Monday (default: the next one)
   await bad({ weekStart: "2026-02-30" }, /weekStart must be a calendar date/);
   await bad({ weekStart: 5 }, /weekStart must be a calendar date/);
   await bad({ rules: { bogus: 1 } }, /rules.bogus is not a known rule/);
-  await bad({ extra: 1 }, /extra is not a known field \(allowed: weekStart, rules\)/);
+  await bad({ extra: 1 }, /extra is not a known field \(allowed: weekStart, rules, queue, predict\)/);
   await bad("x", /arguments must be an object/);
   assert.deepEqual(acc.calls, []);
   assert.equal((await propose(acc, store, { weekStart: "2026-11-23" })).weekStart, "2026-11-23");
@@ -586,4 +589,91 @@ test("proposeNextWeek: a guideId in the stored guide is dropped (push_week_plan 
   assert.deepEqual([both.planSource, (both.sessions[0] as any).title], ["stored", "Push pull"]);
   const only = await withCacheOff(() => proposeNextWeek(acc.client, memoryPlanStore(), {}, { ...acc.deps, demoPlan }));
   assert.deepEqual([only.planSource, (only.sessions[0] as any).title], ["demo", "Demo"]);
+});
+
+// ---------- predict: true and queue: true ----------
+
+test("predictionProbability: your own hit rate for the rule from 20 scored on, else the default; always inside 0.5..0.9 (edges included)", () => {
+  assert.deepEqual([PREDICT_RULE, PREDICT_DEFAULT, PREDICT_MIN, PREDICT_MAX], ["progression", 0.65, 0.5, 0.9]);
+  const p = (n: number, hitRate: number | null) => predictionProbability({ n, hitRate });
+  assert.deepEqual(p(20, 0.8), { probability: 0.8, basis: { source: "history", rule: "progression", n: 20, hitRate: 0.8 } });
+  assert.deepEqual(p(19, 0.95).basis, { source: "default", rule: "progression", n: 19, hitRate: null }, "19 scored is not enough");
+  assert.equal(p(19, 0.95).probability, 0.65);
+  assert.equal(p(20, null).probability, 0.65);
+  assert.equal(predictionProbability(null).probability, 0.65);
+  assert.deepEqual([p(30, 0.3).probability, p(30, 0.5).probability, p(30, 0.499).probability], [0.5, 0.5, 0.5], "never below 0.5");
+  assert.deepEqual([p(30, 0.9).probability, p(30, 0.905).probability, p(30, 1).probability, p(30, 0.899).probability], [0.9, 0.9, 0.9, 0.9], "never above 0.9");
+  assert.equal(p(30, 0.666).probability, 0.67, "two decimals");
+  assert.equal(p(30, 0.7).probability, 0.7);
+});
+
+const scoredLedger = (n: number, hits: number): { predictions: Prediction[] } => ({
+  predictions: Array.from({ length: n }, (_, i) => ({ id: `p${i + 1}`, madeAt: "2026-10-01T00:00:00Z", date: "2026-10-05", kind: "reps_hit" as const, probability: 0.7, exercise: "Bench Press", sets: 3, reps: 8, rule: PREDICT_RULE, due: "2026-10-07", outcome: { result: (i < hits ? "hit" : "miss") as "hit" | "miss", scoredAt: "2026-10-08T00:00:00Z", detail: "x" } })),
+});
+
+test("proposeNextWeek predict: one ready log_prediction payload per proposed increase, never logged by it; the probability is the stated mapping", async () => {
+  const acc = account({ sessions: sixSessions(() => ALL_HIT) });
+  const store = await planStoreOf();
+  const ledger = memoryPredictionStore();
+  const off = await propose(acc, store, {});
+  assert.deepEqual(off.predictions, [], "predict defaults to off");
+  const out = await withCacheOff(() => proposeNextWeek(acc.client, store, { predict: true }, { ...acc.deps, predictions: ledger }));
+  assert.equal(out.predictions.length, 3, "three lifts go up");
+  const pr: any = out.predictions[1];
+  assert.deepEqual(pr.payload, { date: "2026-11-16", kind: "reps_hit", probability: 0.65, exercise: "Bench Press", sets: 3, reps: 8, kg: 72.5, rule: "progression", note: "Proposed by propose_next_week: 70 -> 72.5 kg." });
+  assert.deepEqual(pr.basis, { source: "default", rule: "progression", n: 0, hitRate: null });
+  assert.equal(await ledger.load(), null, "nothing was logged");
+  for (const p of out.predictions as any[]) await logPrediction(p.payload, ledger, { now: NOW }); // each is accepted by log_prediction as it is
+  assert.equal((await ledger.load())!.predictions.length, 3);
+  assert.match(out.notes.join(" "), /nothing was logged/);
+  // from 20 scored 'progression' predictions the user's own hit rate is used
+  const rich = memoryPredictionStore();
+  await rich.save(scoredLedger(20, 15));
+  const rated = await withCacheOff(() => proposeNextWeek(acc.client, store, { predict: true }, { ...acc.deps, predictions: rich }));
+  assert.deepEqual([(rated.predictions[0] as any).payload.probability, (rated.predictions[0] as any).basis.source], [0.75, "history"]);
+  const thin = memoryPredictionStore();
+  await thin.save(scoredLedger(19, 19));
+  assert.equal(((await withCacheOff(() => proposeNextWeek(acc.client, store, { predict: true }, { ...acc.deps, predictions: thin }))).predictions[0] as any).payload.probability, 0.65);
+});
+
+test("proposeNextWeek predict: only increases get one (a hold or a deload does not); nothing when insufficient; a bad flag is refused", async () => {
+  const acc = account({ sessions: sixSessions(() => ALL_HIT), hrvToday: 20 });
+  const held = await withCacheOff(async () => proposeNextWeek(acc.client, await planStoreOf(), { predict: true }, acc.deps));
+  assert.equal(held.status, "ok");
+  assert.deepEqual(held.predictions, [], "one signal below the band: every load is held, nothing to predict");
+  await assert.rejects(propose(acc, await planStoreOf(), { predict: "yes" }), /predict must be a boolean/);
+  await assert.rejects(propose(acc, await planStoreOf(), { queue: 1 }), /queue must be a boolean/);
+});
+
+test("proposeNextWeek queue: true stores the proposal as a pending week_plan approval and pushes nothing; the default stores nothing", async () => {
+  const acc = account({ sessions: sixSessions(() => ALL_HIT) });
+  const store = await planStoreOf();
+  const approvals = memoryApprovalStore();
+  const validate = (g: unknown) => (typeof (g as any)?.title === "string" ? [] : ["bad guide"]);
+  const plain = await withCacheOff(() => proposeNextWeek(acc.client, store, {}, { ...acc.deps, approvals: { store: approvals, validate } }));
+  assert.equal(plain.queued, null);
+  assert.equal(await approvals.load(), null, "queue defaults to false: nothing stored");
+  const out: any = await withCacheOff(() => proposeNextWeek(acc.client, store, { queue: true }, { ...acc.deps, approvals: { store: approvals, validate } }));
+  assert.equal(out.queued.queued, true);
+  const a = (await approvals.load())!.approvals[0];
+  assert.deepEqual([a.id, a.kind, a.forDate, a.source, a.resolution], ["a1", "week_plan", "2026-11-16", "propose_next_week", undefined]);
+  assert.deepEqual((a.payload as any).guides, out.guides, "the exact guides push_week_plan would take");
+  assert.ok(a.reasons.length > 0 && a.reasons.length <= 20 && a.reasons.every((r) => r.length <= 500));
+  assert.match(a.reasons.join(" "), /Bench Press: progress/);
+  // approving it hands back the exact call and still pushes nothing
+  const r: any = await resolveApproval({ id: "a1", decision: "approve" }, approvals, { demo: false, appName: "x", validate, push: async () => assert.fail("approve alone never pushes") });
+  assert.equal(r.call.tool, "push_week_plan");
+  assert.deepEqual(r.call.arguments.guides, out.guides);
+});
+
+test("proposeNextWeek queue: true without a proposal queues nothing and says so; without the queue it is refused; a queue failure does not lose the proposal", async () => {
+  const acc = account({ sessions: sixSessions(() => ALL_HIT) });
+  const approvals = memoryApprovalStore();
+  const none: any = await withCacheOff(() => proposeNextWeek(acc.client, memoryPlanStore(), { queue: true }, { ...acc.deps, approvals: { store: approvals, validate: () => [] } }));
+  assert.deepEqual([none.status, none.queued.queued, await approvals.load()], ["insufficient", false, null]);
+  await assert.rejects(propose(acc, await planStoreOf(), { queue: true }), /queue: true needs the approval queue/);
+  const refusing: any = await withCacheOff(async () => proposeNextWeek(acc.client, await planStoreOf(), { queue: true }, { ...acc.deps, approvals: { store: approvals, validate: () => ["schema says no"] } }));
+  assert.equal(refusing.status, "ok", "the proposal is still returned");
+  assert.match(refusing.queued.reason, /schema says no/);
+  assert.equal(refusing.queued.queued, false);
 });

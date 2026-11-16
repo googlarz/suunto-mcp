@@ -64,7 +64,7 @@ test("stdio: reports the package.json version, not a hardcoded one", async () =>
 });
 
 // tools that touch local files only and never read Suunto
-const LOCAL_ONLY = ["log_session", "set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment"];
+const LOCAL_ONLY = ["log_session", "set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "list_approvals", "get_data_overview"];
 
 test("stdio: every tool has a title and annotations consistent with what it does", async () => {
   await withServer(async (call) => {
@@ -77,9 +77,10 @@ test("stdio: every tool has a title and annotations consistent with what it does
       assert.equal(t.annotations.openWorldHint, !LOCAL_ONLY.includes(t.name), `${t.name}: talks to Suunto's cloud (${LOCAL_ONLY.join(", ")} alone are local files)`);
 
       // get_catchup and get_weekly_report read by name but are not read-only: markSeen: true and save: true write a local file
-      const catchup = t.name === "get_catchup" || t.name === "get_weekly_report";
+      // 1.2: propose_next_week and adjust_guide read by name but queue: true adds an entry to the approval queue (a local file)
+      const catchup = ["get_catchup", "get_weekly_report", "propose_next_week", "adjust_guide"].includes(t.name);
       const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate|analyze|draft|propose|simulate)_/.test(t.name) && !catchup;
-      const writes = /^(push|delete|upload|generate|log|set|archive|void|score|start|stop)_/.test(t.name) || catchup;
+      const writes = /^(push|delete|upload|generate|log|set|archive|void|score|start|stop|queue|resolve)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
       if (/^(push_.*_guide|delete_guide|generate_daily_digest|log_session)$/.test(t.name)) {
@@ -108,7 +109,13 @@ test("stdio: every tool has a title and annotations consistent with what it does
         stop_experiment: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
         draft_session_log: { readOnlyHint: true, openWorldHint: true },
         // 1.2: planning tools: they read Suunto and return a proposal or a what-if, and write nothing
-        propose_next_week: { readOnlyHint: true, openWorldHint: true },
+        propose_next_week: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        adjust_guide: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        // 1.2: the approval queue: only resolve_approval can lead to a push, and only with push: true on an approve; it never overwrites
+        queue_adjustment: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+        list_approvals: { readOnlyHint: true, openWorldHint: false },
+        resolve_approval: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+        get_data_overview: { readOnlyHint: true, openWorldHint: false },
         simulate_plan: { readOnlyHint: true, openWorldHint: true },
       };
       if (t.name in NEW) assert.deepEqual(t.annotations, NEW[t.name], t.name);

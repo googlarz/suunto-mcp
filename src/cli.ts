@@ -20,6 +20,8 @@ import { analyzeExperiment, fileExperimentStore, getExperiment } from "./experim
 import { buildDraft } from "./draft.js";
 import { proposeNextWeek } from "./propose-week.js";
 import { simulatePlan } from "./simulate-plan.js";
+import { fileApprovalStore, listApprovals } from "./approvals.js";
+import { dataOverview } from "./data-overview.js";
 
 function die(msg: string): never {
   console.error(`suunto-mcp: ${msg}`);
@@ -50,6 +52,8 @@ Analysis commands:
   get-workout-rest-profile <workoutKey>
   get-exercise-history [name] [--weeks N]   (load, sets, rest recovery per session; writes only the local cache)
   get-plan             [YYYY-MM-DD]   (the plan from set_plan: today and the next 7 days, or one day; reads the local plan file only)
+  list-approvals       [ID] [--status pending|expired|done|all]   (the approval queue: what waits for a yes; reads the local file only, no credentials; deciding is MCP-only: resolve_approval)
+  get-data-overview    (every local file the server keeps: path, version, size, counts, mode warnings, unreadable or newer-version files; reads the files only, no credentials, changes nothing)
   get-tag-effects      [--days N] [--tag T] [--date YYYY-MM-DD]   (journal tags against the next night's sleep, HRV and recovery; read-only)
   get-benchmark        --guide TITLE | --exercise NAME [--weeks N]   (a repeatable session over time: load, rest HR, duration, TSS; writes only the local cache)
   get-archive-status   (what the local workout archive holds; reads the archive folder only, no credentials)
@@ -116,6 +120,27 @@ export async function runCli(argv: string[]) {
     if (rest.length > 1) die("Usage: get-plan [YYYY-MM-DD]");
     try {
       out(await getPlan(filePlanStore(), { date: rest[0] }));
+    } catch (err: any) {
+      die(err.message ?? String(err));
+    }
+    return;
+  }
+
+  // these two only read local files, so they need no Suunto credentials either (queue_adjustment and resolve_approval are MCP-only: they write)
+  if (cmd === "list-approvals") {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { status: { type: "string" } } });
+    if (positionals.length > 1) die("Usage: list-approvals [ID] [--status pending|expired|done|all]");
+    try {
+      out(await listApprovals(fileApprovalStore(), { status: values.status, id: positionals[0] }));
+    } catch (err: any) {
+      die(err.message ?? String(err));
+    }
+    return;
+  }
+  if (cmd === "get-data-overview") {
+    if (rest.length > 0) die("Usage: get-data-overview (it takes no options)");
+    try {
+      out(await dataOverview());
     } catch (err: any) {
       die(err.message ?? String(err));
     }
@@ -344,7 +369,7 @@ export async function runCli(argv: string[]) {
 
       case "get-catchup": {
         if (rest.length > 0) die("Usage: get-catchup (it takes no options and never moves the marker)");
-        out(await buildCatchup(suunto, fileSeenStore(), filePlanStore()));
+        out(await buildCatchup(suunto, fileSeenStore(), filePlanStore(), {}, new Date(), fileApprovalStore()));
         break;
       }
 

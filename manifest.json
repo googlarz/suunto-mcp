@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "suunto-mcp",
   "display_name": "Suunto MCP",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Your Suunto watch data (workouts, sleep, recovery, training load) for Claude. Works out of the box on synthetic demo data.",
   "long_description": "Connects your Suunto watch data to Claude: workouts, laps, sleep, HRV, recovery, 24/7 activity, training load, weekly reports and route time estimates. With the demo checkbox on (the default) it runs on generated sample data and needs no Suunto account. For your own data you need approved access to Suunto's developer API and a one-time pairing step; see the README on GitHub.",
   "author": {
@@ -177,6 +177,22 @@
     {
       "name": "simulate_plan",
       "description": "What-if for a candidate plan: fitness, fatigue and form day by day, ramp and risk days; model-based, writes nothing."
+    },
+    {
+      "name": "queue_adjustment",
+      "description": "Stores a prepared change for your approval in a local queue; pushes nothing."
+    },
+    {
+      "name": "list_approvals",
+      "description": "Lists what waits for your approval: pending, expired and decided items."
+    },
+    {
+      "name": "resolve_approval",
+      "description": "Approve or reject a queued change; only an approval with push set pushes it to the watch."
+    },
+    {
+      "name": "get_data_overview",
+      "description": "Lists the local files the server keeps: path, version, size, counts and permission warnings; changes nothing."
     },
     {
       "name": "adjust_guide",

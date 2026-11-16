@@ -93,6 +93,10 @@
             "exercises"
           ],
           "type": "object"
+        },
+        "queue": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
@@ -101,8 +105,10 @@
       "type": "object"
     },
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
       "openWorldHint": true,
-      "readOnlyHint": true
+      "readOnlyHint": false
     }
   },
   "analyze_experiment": {
@@ -497,14 +503,16 @@
         "enddate": {
           "type": "string"
         },
+        "from": {
+          "type": "string"
+        },
         "startdate": {
+          "type": "string"
+        },
+        "to": {
           "type": "string"
         }
       },
-      "required": [
-        "startdate",
-        "enddate"
-      ],
       "type": "object"
     },
     "annotations": {
@@ -537,6 +545,16 @@
     },
     "annotations": {
       "openWorldHint": true,
+      "readOnlyHint": true
+    }
+  },
+  "get_data_overview": {
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": false,
       "readOnlyHint": true
     }
   },
@@ -881,6 +899,32 @@
       "readOnlyHint": true
     }
   },
+  "list_approvals": {
+    "inputSchema": {
+      "properties": {
+        "id": {
+          "maxLength": 20,
+          "minLength": 2,
+          "type": "string"
+        },
+        "status": {
+          "default": "all",
+          "enum": [
+            "pending",
+            "expired",
+            "done",
+            "all"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true
+    }
+  },
   "list_daily_activity": {
     "inputSchema": {
       "properties": {
@@ -991,6 +1035,10 @@
   "list_workouts": {
     "inputSchema": {
       "properties": {
+        "from": {
+          "format": "date-time",
+          "type": "string"
+        },
         "limit": {
           "default": 25,
           "maximum": 1000,
@@ -998,6 +1046,10 @@
           "type": "integer"
         },
         "since": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "to": {
           "format": "date-time",
           "type": "string"
         },
@@ -1217,6 +1269,14 @@
   "propose_next_week": {
     "inputSchema": {
       "properties": {
+        "predict": {
+          "default": false,
+          "type": "boolean"
+        },
+        "queue": {
+          "default": false,
+          "type": "boolean"
+        },
         "rules": {
           "properties": {
             "deloadPct": {
@@ -1269,8 +1329,10 @@
       "type": "object"
     },
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
       "openWorldHint": true,
-      "readOnlyHint": true
+      "readOnlyHint": false
     }
   },
   "push_interval_guide": {
@@ -1606,6 +1668,96 @@
     "annotations": {
       "destructiveHint": true,
       "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    }
+  },
+  "queue_adjustment": {
+    "inputSchema": {
+      "properties": {
+        "expiresAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "forDate": {
+          "format": "date",
+          "maxLength": 10,
+          "minLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "adjusted_guide",
+            "week_plan"
+          ],
+          "type": "string"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "reasons": {
+          "items": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "type": "array"
+        },
+        "source": {
+          "maxLength": 64,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    }
+  },
+  "resolve_approval": {
+    "inputSchema": {
+      "properties": {
+        "decision": {
+          "enum": [
+            "approve",
+            "reject"
+          ],
+          "type": "string"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "id": {
+          "maxLength": 20,
+          "minLength": 2,
+          "type": "string"
+        },
+        "note": {
+          "maxLength": 500,
+          "type": "string"
+        },
+        "push": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
       "openWorldHint": true,
       "readOnlyHint": false
     }
