@@ -73,7 +73,7 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   // approve without push can be followed by the push itself, so it is not annotated idempotent) and, only with push: true on an approve, pushes NEW guides through the existing push path (never overwrites: not destructive).
   queue_adjustment: { title: "Queue a prepared change for the user's approval (local file, pushes nothing)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   list_approvals: { title: "List the approval queue (pending, expired, done)", annotations: { readOnlyHint: true, openWorldHint: false } },
-  resolve_approval: { title: "Approve or reject a queued change (push: true with approve is the only way it reaches the watch)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+  resolve_approval: { title: "Approve or reject a queued change (push: true with approve is the only way it reaches the watch)", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
   // Looks at the local files only (stat, readdir, read); changes none and never contacts Suunto.
   get_data_overview: { title: "Get an overview of the local files the server keeps (read-only)", annotations: { readOnlyHint: true, openWorldHint: false } },
   // Reads Suunto's workouts, sleep and recovery; keeps no state and writes nothing.

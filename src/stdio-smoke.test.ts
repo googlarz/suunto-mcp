@@ -113,7 +113,7 @@ test("stdio: every tool has a title and annotations consistent with what it does
         // 1.2: the approval queue: only resolve_approval can lead to a push, and only with push: true on an approve; it never overwrites. Not idempotent: an approve without push can be followed by the push itself
         queue_adjustment: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
         list_approvals: { readOnlyHint: true, openWorldHint: false },
-        resolve_approval: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        resolve_approval: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
         get_data_overview: { readOnlyHint: true, openWorldHint: false },
         simulate_plan: { readOnlyHint: true, openWorldHint: true },
       };

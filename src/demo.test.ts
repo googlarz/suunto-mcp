@@ -686,7 +686,7 @@ const GUIDE_FOR = (date: string) => ({ title: "Approval check", date, exercises:
 test("e2e demo: propose_next_week hands back a queuePayload and predictions; queue_adjustment takes it as it is; resolve_approval with push: true NEVER calls the push path", async () => {
   await withDemo(async (call, rpc) => {
     const defs: any[] = (await rpc("tools/list")).result.tools;
-    assert.deepEqual(defs.find((t) => t.name === "resolve_approval").annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
+    assert.deepEqual(defs.find((t) => t.name === "resolve_approval").annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
     assert.deepEqual(defs.find((t) => t.name === "list_approvals").annotations, { readOnlyHint: true, openWorldHint: false });
     assert.equal((await ok(call, "list_approvals")).items.length, 0);
     const q = await proposeConverged(call, { predict: true });
