@@ -5,7 +5,7 @@
 // clients may ask before running destructive ones.
 //
 // Every tool talks to Suunto's cloud, so openWorldHint is true throughout, except the tools that touch local files only: log_session, set_plan, get_plan, queue_adjustment, list_approvals, get_data_overview,
-// get_archive_status, and the prediction ledger and experiment tools that never read Suunto (log_prediction, void_prediction, get_prediction_stats, start_experiment,
+// get_archive_status, import_workouts, get_import_status, and the prediction ledger and experiment tools that never read Suunto (log_prediction, void_prediction, get_prediction_stats, start_experiment,
 // get_experiment, log_experiment_day, stop_experiment).
 export interface ToolAnnotations {
   readOnlyHint: boolean;
@@ -51,6 +51,9 @@ export const TOOL_META: Record<string, { title: string; annotations: ToolAnnotat
   // Reads one route from Suunto and the local archive; writes nothing.
   estimate_route_time: { title: "Estimate a route's time from your own pace (and the latest start before sunset)", annotations: READ },
   get_archive_status: { title: "Get the local workout archive status", annotations: { readOnlyHint: true, openWorldHint: false } },
+  // Reads only the files it is pointed at and writes ONLY new files in the local imports folder: never overwrites or deletes, never contacts Suunto or a network. Not idempotent (cautious: each call imports the next batch; the same files again are skipped).
+  import_workouts: { title: "Import workouts from other systems (Garmin, Strava, GPX/TCX/FIT files) to local files", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+  get_import_status: { title: "Get the local imported-workouts status", annotations: { readOnlyHint: true, openWorldHint: false } },
   // The prediction ledger (predictions.json). Nothing is ever replaced or deleted: a new prediction is a new entry (so not idempotent), a void and an outcome are added to the entry.
   // A void cannot be undone (the prediction is out of the scoring for good), so void_prediction is destructive; so is stop_experiment.
   log_prediction: { title: "Log a prediction before the fact (local ledger, immutable)", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },

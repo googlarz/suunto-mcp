@@ -33,7 +33,8 @@
       "sessionIssues: always an empty list"
     ],
     "estimate_route_time": [
-      "latestStart: always null"
+      "latestStart: always null",
+      "model.sources.importedBySource: always an empty object"
     ],
     "get_archive_status": [
       "dir: always null",
@@ -114,6 +115,14 @@
       "experiments[].today.followed: always null",
       "experiments[].today.instruction: always null",
       "note: always null"
+    ],
+    "get_import_status": [
+      "bySource: always an empty object",
+      "dir: always null",
+      "incomplete: always an empty list",
+      "newest: always null",
+      "oldest: always null",
+      "problems: always an empty list"
     ],
     "get_prediction_stats": [
       "byKind[].basis.draftConfirmed.hitRate: always null",
@@ -675,6 +684,17 @@
           "noMotionData": "number",
           "otherSport": "number",
           "unreadable": "number"
+        },
+        "sources": {
+          "imported": "number",
+          "importedBySource": {},
+          "importedSkipped": {
+            "duplicateOfArchive": "number",
+            "noMotionData": "number",
+            "otherSport": "number",
+            "unreadable": "number"
+          },
+          "suuntoArchive": "number"
         },
         "status": "string",
         "workoutsConsidered": "number",
@@ -1753,6 +1773,21 @@
         "washout": "number"
       },
       "today": "string"
+    },
+    "get_import_status": {
+      "bySource": {},
+      "bytes": "number",
+      "demo": "boolean",
+      "dir": "null",
+      "imported": "number",
+      "incomplete": [],
+      "newest": "null",
+      "notes": [
+        "string"
+      ],
+      "oldest": "null",
+      "otherFiles": "number",
+      "problems": []
     },
     "get_plan": {
       "currentPhase": {

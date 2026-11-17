@@ -13,6 +13,7 @@ import { buildCatchup, fileSeenStore } from "./catchup.js";
 import { buildTagEffects } from "./tag-effects.js";
 import { buildBenchmark } from "./benchmark.js";
 import { archiveStatus, fileArchiveStore } from "./archive.js";
+import { fileImportStore, importedSource } from "./import.js";
 import { buildWeeklyReport, fileReportStore } from "./report.js";
 import { estimateRouteTime } from "./route-time.js";
 import { filePredictionStore, predictionStats } from "./predictions.js";
@@ -397,7 +398,7 @@ export async function runCli(argv: string[]) {
         const routeId = positionals[0] ?? die(usage);
         if (positionals.length > 1) die(usage);
         const marginMinutes = values.margin !== undefined ? Number(values.margin) : undefined;
-        out(await estimateRouteTime(suunto, fileArchiveStore(), { routeId, activity: values.activity as any, sunset: values.sunset, marginMinutes }));
+        out(await estimateRouteTime(suunto, fileArchiveStore(), { routeId, activity: values.activity as any, sunset: values.sunset, marginMinutes }, { imported: await importedSource(fileImportStore()) }));
         break;
       }
 

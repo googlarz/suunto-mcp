@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -139,6 +139,7 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
     SUUNTO_PLAN_PATH: join(cwd, "plan.json"),
     SUUNTO_SEEN_PATH: join(cwd, "seen.json"),
     SUUNTO_ARCHIVE_DIR: join(cwd, "archive"),
+    SUUNTO_IMPORT_DIR: join(cwd, "imported"),
     SUUNTO_REPORTS_DIR: join(cwd, "reports"),
   };
   const child = spawn(process.execPath, ["--import", throwingFetch, distIndex], { cwd, env, stdio: ["pipe", "pipe", "ignore"] });
@@ -180,7 +181,7 @@ async function withDemo(fn: (call: Call, rpc: Rpc, fetchLog: () => Promise<strin
     };
     await fn(call, rpc, () => readFile(fetchLogPath, "utf8").catch(() => ""));
     // demo data must never reach the cache, the journal, the plan or the seen marker
-    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => ["cache", "journal.json", "plan.json", "seen.json", "archive", "reports"].includes(x))), []);
+    assert.deepEqual(await readdir(cwd).then((f) => f.filter((x) => ["cache", "journal.json", "plan.json", "seen.json", "archive", "imported", "reports"].includes(x))), []);
     assert.deepEqual(noise, [], "the server wrote non-JSON-RPC output to stdout");
     assert.equal(await readFile(fetchLogPath, "utf8").catch(() => ""), "", "demo mode made a network call");
   } finally {
@@ -337,7 +338,7 @@ test("e2e demo: write tools return the demo message and write nothing", async ()
     const nonRead = tools.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name).sort();
     // set_plan, get_catchup, archive_workouts and get_weekly_report are not read-only either, but in demo mode they work on in-memory state (tested below);
     // so do the prediction ledger and experiment writers (tested in demo-state.test.ts and state-tools.test.ts)
-    const inMemory = ["set_plan", "get_catchup", "archive_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "resolve_approval"];
+    const inMemory = ["set_plan", "get_catchup", "archive_workouts", "import_workouts", "get_weekly_report", "log_prediction", "void_prediction", "score_predictions", "start_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "resolve_approval"];
     assert.deepEqual(nonRead.filter((n) => !inMemory.includes(n)), writes.map(([n]) => n).sort(), "the write list in this test covers every non-read-only tool");
     for (const [name, args] of writes) {
       const r = await call(name, args);
@@ -468,6 +469,34 @@ test("e2e demo: archive_workouts and get_archive_status work in memory, bounded 
     assert.equal(await fetchLog(), "");
     // the archive folder the server was given (SUUNTO_ARCHIVE_DIR) is checked by withDemo: it must not exist afterwards
   });
+});
+
+test("e2e demo: import_workouts and get_import_status work in memory (the files are only read), refuse bad ones, and write nothing to disk", async () => {
+  const src = await mkdtemp(join(tmpdir(), "suunto-demo-import-"));
+  try {
+    const point = (i: number) => `<trkpt lat="${(52 + i * 0.0001).toFixed(4)}" lon="13.4"><time>${new Date(Date.parse("2026-10-01T07:00:00Z") + i * 5000).toISOString()}</time></trkpt>`;
+    await writeFile(join(src, "walk.gpx"), `<gpx><trk><trkseg>${Array.from({ length: 30 }, (_, i) => point(i)).join("")}</trkseg></trk></gpx>`);
+    await writeFile(join(src, "bad.fit"), "not a fit file");
+    await withDemo(async (call, rpc, fetchLog) => {
+      const tools: any[] = (await rpc("tools/list")).result.tools;
+      const ann = (n: string) => tools.find((t) => t.name === n).annotations;
+      assert.deepEqual(ann("import_workouts"), { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false });
+      assert.deepEqual(ann("get_import_status"), { readOnlyHint: true, openWorldHint: false });
+      const empty = await ok(call, "get_import_status");
+      assert.deepEqual([empty.imported, empty.dir, empty.problems], [0, null, []]);
+      const r = await ok(call, "import_workouts", { path: src, source: "garmin" });
+      assert.deepEqual([r.dir, r.found, r.newlyImported, r.refused.map((x: any) => x.file)], [null, 2, 1, ["bad.fit"]]);
+      const st = await ok(call, "get_import_status");
+      assert.deepEqual([st.imported, st.bySource, st.oldest], [1, { garmin: 1 }, "2026-10-01"]);
+      assert.equal((await ok(call, "import_workouts", { path: src })).alreadyImported.length, 1);
+      assert.equal((await call("import_workouts", { path: "relative" })).isError, true);
+      assert.equal((await call("import_workouts", { path: src, limit: 51 })).isError, true);
+      assert.equal(await fetchLog(), "");
+      // the imports folder the server was given (SUUNTO_IMPORT_DIR) is checked by withDemo: it must not exist afterwards
+    });
+  } finally {
+    await rm(src, { recursive: true, force: true });
+  }
 });
 
 test("e2e demo: get_weekly_report assembles the synthetic week, saves only in memory and writes nothing to disk", async () => {

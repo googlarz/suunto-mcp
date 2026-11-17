@@ -9,6 +9,8 @@
 //   sessionStartUnixS  session.start_time; omit to write no session message
 //   distanceM, altitudeM  (per record) cumulative distance and altitude in metres; when the first record has distanceM every
 //                         record carries both (route-time tests)
+//   latDeg, lonDeg  (per record) position in degrees, written as semicircles (sint32), the way a real FIT file stores it; when the
+//                         first record has latDeg every record carries both
 //   sport      session.sport (FIT enum: 1 running, 11 walking, 17 hiking); only with a session message
 const FIT_EPOCH_OFFSET_S = 631065600;
 
@@ -54,10 +56,13 @@ export function buildFit({ records, sessionStartUnixS, devField, sport }) {
   const motion = records.length > 0 && records[0].distanceM !== undefined;
   // record (20): timestamp (253), heart_rate (3), and with motion distance (5, uint32, scale 100 m) and altitude (2, uint16, scale 5, offset 500 m)
   const recordFields = [[253, 4, 0x86], [3, 1, 0x02], ...(motion ? [[5, 4, 0x86], [2, 2, 0x84]] : [])];
+  const gps = records.length > 0 && records[0].latDeg !== undefined;
+  if (gps) recordFields.push([0, 4, 0x85], [1, 4, 0x85]); // position_lat, position_long
   body.push(...definition(3, 20, recordFields, devField ? [[0, 1, 0]] : []));
   for (const r of records) {
     body.push(0x03, ...u32(r.unixS - FIT_EPOCH_OFFSET_S), r.hr ?? 0xff);
     if (motion) body.push(...u32(Math.round(r.distanceM * 100)), ...u16(Math.round((r.altitudeM + 500) * 5)));
+    if (gps) body.push(...u32(Math.round((r.latDeg * 2 ** 31) / 180)), ...u32(Math.round((r.lonDeg * 2 ** 31) / 180)));
     if (devField) body.push(r.dev ?? 0xff);
   }
   if (sessionStartUnixS !== undefined) {

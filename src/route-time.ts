@@ -2,9 +2,11 @@
 // time = flat * distance + up * metres climbed + down * metres descended (Naismith's rule with the three constants fitted
 // to the user's archived walking/hiking (or running) workouts: record-level distance, altitude and time from the FIT
 // files archive_workouts keeps). Without enough such data it says so (model.status "insufficient") and falls back to
-// Naismith's generic rule, clearly labelled. Reads one GPX from Suunto and the local archive; writes nothing.
+// Naismith's generic rule, clearly labelled. Reads one GPX from Suunto, the local archive and (as a supplement, after the
+// archive) the workouts import_workouts keeps; writes nothing.
 import type { SuuntoClient } from "./api.js";
 import type { ArchiveStore } from "./archive.js";
+import type { ImportedSource } from "./import.js";
 import { parseFit, type ParsedFit } from "./fit.js";
 import { isValidCalendarDate } from "./schema-validate.js";
 
@@ -63,7 +65,7 @@ export function parseGpx(gpx: string): { name: string | null; points: { lat: num
 }
 
 const R = 6_371_008.8;
-function haversine(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+export function haversine(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const rad = Math.PI / 180;
   const dLat = (b.lat - a.lat) * rad;
   const dLon = (b.lon - a.lon) * rad;
@@ -296,6 +298,7 @@ export interface RouteTimeOpts {
 }
 export interface RouteTimeDeps {
   parse?: (bytes: Buffer) => Promise<ParsedFit>;
+  imported?: ImportedSource; // workouts from other systems: used only to fill what the Suunto archive does not
   now?: Date;
 }
 type Client = Pick<SuuntoClient, "exportRoute">;
@@ -323,6 +326,7 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
     .sort((a, b) => (Number((b.workout as any).startTime) || 0) - (Number((a.workout as any).startTime) || 0))
     .slice(0, MAX_FILES);
   const workouts: Piece[][] = [];
+  const origin: string[] = []; // where each workout in `workouts` came from: "suunto" or an import source
   const skipped = { otherSport: 0, noMotionData: 0, unreadable: 0 };
   for (const r of records) {
     if (workouts.length >= MAX_USED) break;
@@ -335,12 +339,47 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
       }
       const wp = toPieces(fitPts(fit));
       if (wp.length === 0) skipped.noMotionData++;
-      else workouts.push(wp);
+      else {
+        workouts.push(wp);
+        origin.push("suunto");
+      }
     } catch {
       skipped.unreadable++;
     }
   }
+  // Imported workouts come after the Suunto archive and only fill the slots it leaves; one that starts within a minute of an
+  // archived workout is the same workout and is not counted twice.
+  const importedRecords = [...(deps.imported?.records.entries() ?? [])]
+    .sort(([, a], [, b]) => Date.parse(b.summary.startTime) - Date.parse(a.summary.startTime))
+    .slice(0, MAX_FILES);
+  const importedSkipped = { otherSport: 0, noMotionData: 0, unreadable: 0, duplicateOfArchive: 0 };
+  const archivedStarts = records.map((r) => Number((r.workout as any).startTime)).filter(Number.isFinite);
+  for (const [id, r] of importedRecords) {
+    if (workouts.length >= MAX_USED) break;
+    if (!(GROUPS[activity] as readonly string[]).includes(r.summary.sport ?? "")) {
+      importedSkipped.otherSport++;
+      continue;
+    }
+    const start = Date.parse(r.summary.startTime);
+    if (archivedStarts.some((a) => Math.abs(a - start) <= 60_000)) {
+      importedSkipped.duplicateOfArchive++;
+      continue;
+    }
+    try {
+      const wp = toPieces(await deps.imported!.points(id));
+      if (wp.length === 0) importedSkipped.noMotionData++;
+      else {
+        workouts.push(wp);
+        origin.push(r.source);
+      }
+    } catch {
+      importedSkipped.unreadable++;
+    }
+  }
   const fitted = buildModel(workouts);
+  const usedFrom = (pick: (o: string) => boolean): number => workouts.filter((w, i) => pick(origin[i]) && sum(trainingPieces(w).map((p) => p.dist)) >= MIN_WORKOUT_M).length;
+  const importedBySource: Record<string, number> = {};
+  for (const o of new Set(origin)) if (o !== "suunto") importedBySource[o] = usedFrom((x) => x === o);
   const personal = fitted.status === "ok";
   const model = personal ? fitted.model! : GENERIC;
   const est = estimate(routePieces, model, personal ? fitted.gradeRange : undefined);
@@ -353,7 +392,7 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
   const notes = [
     "An ESTIMATE of walking (or running) time without stops, photos, food or navigation pauses: add time for those. Weather, load, trail surface and fatigue are not modelled, and a route's altitude (often from a map, not a barometer) differs from what your watch records.",
   ];
-  if (!personal) notes.push(`Your own pace could not be modelled (${fitted.reason}); the estimate below is the generic Naismith rule (5 km/h plus 1 h per 600 m climbed, nothing for descent), NOT your pace. Archive more ${activity} workouts with archive_workouts (FIT files with altitude and distance) to get a personal estimate.`);
+  if (!personal) notes.push(`Your own pace could not be modelled (${fitted.reason}); the estimate below is the generic Naismith rule (5 km/h plus 1 h per 600 m climbed, nothing for descent), NOT your pace. Archive more ${activity} workouts with archive_workouts, or import some from other systems with import_workouts (files with altitude, distance and time), to get a personal estimate.`);
   if (personal && est.outsideRangeM > 0) {
     const g = fitted.gradeRange!;
     const pct = (x: number) => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)} %`;
@@ -361,7 +400,9 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
   }
   if (activity === "running" && !personal) notes.push("The generic fallback is a WALKING rule even though activity is running.");
   if (!hasElevation) notes.push("The route has no altitude on every point, so climbing and descent are not counted: the estimate is flat-ground time and a hilly route will take longer.");
-  if (records.length === 0) notes.push("The local archive is empty or missing: run archive_workouts first.");
+  if (records.length === 0 && importedRecords.length === 0) notes.push("The local archive is empty or missing: run archive_workouts first.");
+  if (deps.imported?.error) notes.push(`The imports folder could not be read (${deps.imported.error}), so imported workouts were not used.`);
+  if (fitted.status === "ok" && Object.values(importedBySource).some((n) => n > 0)) notes.push(`The pace was fitted to workouts from other systems as well as your Suunto archive (see model.sources): their altitude and GPS come from other devices and apps, so the fit is less uniform than one from a single watch.`);
 
   return {
     route: { name: parsedGpx.name, points: parsedGpx.points.length, distanceM: sumOf((p) => p.dist), ascentM: sumOf((p) => climb(p).up), descentM: sumOf((p) => climb(p).down), hasElevation },
@@ -373,6 +414,7 @@ export async function estimateRouteTime(client: Client, store: ArchiveStore, opt
       workoutsUsed: fitted.workoutsUsed,
       workoutsConsidered: records.length,
       skipped,
+      sources: { suuntoArchive: usedFrom((o) => o === "suunto"), imported: usedFrom((o) => o !== "suunto"), importedBySource, importedSkipped },
       distanceM: fitted.distanceM,
       ascentM: fitted.ascentM,
       descentM: fitted.descentM,

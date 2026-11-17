@@ -596,6 +596,16 @@
       "readOnlyHint": true
     }
   },
+  "get_import_status": {
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    },
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true
+    }
+  },
   "get_plan": {
     "inputSchema": {
       "properties": {
@@ -891,6 +901,46 @@
     "annotations": {
       "openWorldHint": true,
       "readOnlyHint": true
+    }
+  },
+  "import_workouts": {
+    "inputSchema": {
+      "properties": {
+        "after": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "source": {
+          "default": "other",
+          "enum": [
+            "garmin",
+            "strava",
+            "apple",
+            "other"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
     }
   },
   "list_approvals": {
