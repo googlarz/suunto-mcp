@@ -282,6 +282,7 @@ async function withDemoServer<T>(fn: (rpc: (method: string, params?: unknown) =>
     SUUNTO_PLAN_PATH: join(cwd, "plan.json"),
     SUUNTO_SEEN_PATH: join(cwd, "seen.json"),
     SUUNTO_ARCHIVE_DIR: join(cwd, "archive"),
+    SUUNTO_IMPORT_DIR: join(cwd, "imported"),
     SUUNTO_REPORTS_DIR: join(cwd, "reports"),
     SUUNTO_PREDICTIONS_PATH: join(cwd, "predictions.json"),
     SUUNTO_EXPERIMENTS_PATH: join(cwd, "experiments.json"),
@@ -368,6 +369,7 @@ const OUTPUT_CALLS: Record<string, (c: Ctx) => Record<string, unknown>> = {
   get_catchup: () => ({}), // markSeen defaults to false: a pure read
   get_tag_effects: () => ({}),
   get_archive_status: () => ({}),
+  get_import_status: () => ({}),
   get_benchmark: () => ({ guide: "push a", weeks: 8 }),
   "get_benchmark#exercise": () => ({ exercise: "Bench Press", weeks: 8 }),
   get_weekly_report: () => ({}), // save defaults to false: a pure read

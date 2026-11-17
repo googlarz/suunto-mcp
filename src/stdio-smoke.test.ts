@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, rm, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -64,7 +64,7 @@ test("stdio: reports the package.json version, not a hardcoded one", async () =>
 });
 
 // tools that touch local files only and never read Suunto
-const LOCAL_ONLY = ["log_session", "set_plan", "get_plan", "get_archive_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "list_approvals", "get_data_overview"];
+const LOCAL_ONLY = ["log_session", "set_plan", "get_plan", "get_archive_status", "import_workouts", "get_import_status", "log_prediction", "void_prediction", "get_prediction_stats", "start_experiment", "get_experiment", "log_experiment_day", "stop_experiment", "queue_adjustment", "list_approvals", "get_data_overview"];
 
 test("stdio: every tool has a title and annotations consistent with what it does", async () => {
   await withServer(async (call) => {
@@ -79,7 +79,7 @@ test("stdio: every tool has a title and annotations consistent with what it does
       // get_catchup and get_weekly_report read by name but are not read-only: markSeen: true and save: true write a local file
       const catchup = t.name === "get_catchup" || t.name === "get_weekly_report";
       const readsOnly = /^(get|list|export|compare|forecast|adjust|estimate|analyze|draft|propose|simulate)_/.test(t.name) && !catchup;
-      const writes = /^(push|delete|upload|generate|log|set|archive|void|score|start|stop|queue|resolve)_/.test(t.name) || catchup;
+      const writes = /^(push|delete|upload|generate|log|set|archive|import|void|score|start|stop|queue|resolve)_/.test(t.name) || catchup;
       assert.ok(readsOnly !== writes, `${t.name}: unclassified tool name — add it to a rule here and to tool-meta.ts`);
       assert.equal(t.annotations.readOnlyHint, readsOnly, `${t.name}: readOnlyHint disagrees with its name`);
       if (/^(push_.*_guide|delete_guide|generate_daily_digest|log_session)$/.test(t.name)) {
@@ -94,6 +94,9 @@ test("stdio: every tool has a title and annotations consistent with what it does
       // archive_workouts writes only new local files and reads Suunto: not destructive, not idempotent (each call archives more), open-world
       if (t.name === "archive_workouts") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
       if (t.name === "get_archive_status") assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
+      // import_workouts reads only the given files and writes only new local files: not destructive, not idempotent (cautious), not open-world
+      if (t.name === "import_workouts") assert.deepEqual(t.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false });
+      if (t.name === "get_import_status") assert.deepEqual(t.annotations, { readOnlyHint: true, openWorldHint: false });
       // 1.1: the prediction ledger and the experiments only add to their files (nothing replaced), but a void and a stop cannot be undone (destructive); a new prediction or experiment is a new entry (not idempotent); a void, a stop and a day log
       // repeated leave the same state (idempotent); score_predictions scores the next batch each call (not idempotent) and reads Suunto
       const NEW: Record<string, object> = {
@@ -173,6 +176,40 @@ test("CLI: get-plan works with no Suunto credentials", async () => {
     });
     assert.equal(out.code, 0, out.stderr);
     assert.equal(JSON.parse(out.stdout).plan, null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stdio: import_workouts and get_import_status need no Suunto credentials, write only new 0600 files in SUUNTO_IMPORT_DIR, and read nothing outside the named folder", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "suunto-import-smoke-"));
+  const imported = join(dir, "imported");
+  const input = join(dir, "in");
+  const gpx = `<gpx><trk><trkseg>${Array.from({ length: 30 }, (_, i) => `<trkpt lat="${(52 + i * 0.0001).toFixed(4)}" lon="13.4"><time>${new Date(Date.parse("2026-10-01T07:00:00Z") + i * 5000).toISOString()}</time></trkpt>`).join("")}</trkseg></trk></gpx>`;
+  try {
+    await mkdir(input);
+    await writeFile(join(input, "walk.gpx"), gpx);
+    await writeFile(join(input, "bad.tcx"), "<html>");
+    await withServer(async (call) => {
+      const tool = async (name: string, args: object) => (await call("tools/call", { name, arguments: args })).result;
+      const st = JSON.parse((await tool("get_import_status", {})).content[0].text);
+      assert.deepEqual([st.imported, st.dir, st.problems], [0, imported, []]);
+      await assert.rejects(stat(imported), /ENOENT/, "reading the status does not create the folder");
+      const bad = await tool("import_workouts", { path: input, source: "polar" });
+      assert.equal(bad.isError, true);
+      assert.match(bad.content[0].text, /Invalid arguments for import_workouts/);
+      assert.equal((await tool("import_workouts", {})).isError, true, "path is required");
+      const r = await tool("import_workouts", { path: input, source: "strava" });
+      assert.notEqual(r.isError, true, r.content[0].text);
+      const out = JSON.parse(r.content[0].text);
+      assert.deepEqual([out.found, out.newlyImported, out.refused.map((x: any) => x.file), out.dir], [2, 1, ["bad.tcx"], imported]);
+      assert.deepEqual(JSON.parse((await tool("get_import_status", {})).content[0].text).bySource, { strava: 1 });
+    }, { SUUNTO_IMPORT_DIR: imported });
+    const names = await readdir(imported);
+    assert.equal(names.length, 2);
+    assert.equal((await stat(imported)).mode & 0o777, 0o700);
+    for (const n of names) assert.equal((await stat(join(imported, n))).mode & 0o777, 0o600, n);
+    assert.ok((await readFile(join(imported, names.find((n) => n.endsWith(".gpx"))!), "utf8")) === gpx, "the file as given");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -19,12 +19,14 @@ What you can rely on from suunto-mcp 1.0 onward, and what you cannot. It covers 
   | `cache/` | Derived data, rebuilt on demand. An entry written by another server version or schema is ignored and rebuilt, so the first call after an upgrade may be slower. |
   | `reports/week-<Monday>.md` | Written once; a different file of the same name is never replaced unless `overwrite: true` is passed. |
   | `archive/<key>.fit` | Written once, never overwritten or deleted. |
+| `imported/<id>.json` (import records), `imported/<id>.fit`, `.gpx`, `.tcx` | The record carries `"version": 1` and is refused, never overwritten, when damaged, foreign or of another version, like the archive records. The imported file is written once, never overwritten or deleted. Kept apart from `archive/`, which holds only what Suunto sent. |
   | Daily digest history (`SUUNTO_HISTORY.md`) and averages sidecar | The history is append-only markdown, created owner-only (0600). The averages sidecar has no version number; an older file is merged onto the current defaults when read. |
   | Webhook log (`SUUNTO_WEBHOOK_LOG`) | Append-only lines, one event each, with no format version. The receiver stops appending past a size limit instead of rotating or overwriting. |
 
 ## What 1.x does not promise
 
 - **Derived numbers' thresholds and models may be tuned.** For example the cut-offs of the heart-rate quality check, the false-alarm threshold of `get_tag_effects`, the route-time model, the training-load flags and the wording of notes. The fields stay; the verdict a borderline case gets may change. Each tuning is in the CHANGELOG.
+- **`estimate_route_time`'s workout counts.** Since 1.3.0 `model.workoutsUsed` also counts workouts from `import_workouts` (only those whose sport is walking, hiking or running), while `model.workoutsConsidered` and `model.skipped` still count the Suunto archive only, so `workoutsUsed` can exceed `workoutsConsidered`. `model.sources` splits the used count by origin.
 - **The three hidden legacy tools.** `get_workout_samples`, `export_workout_gpx` and `list_subscriptions` are deprecated: Suunto's servers no longer answer them, and they are listed only with `SUUNTO_ENABLE_LEGACY_TOOLS=1`. They are outside this contract and may be removed in a 1.x minor release, with a CHANGELOG note.
 - **Anything the README lists under "Known limits / not yet verified on real devices".** That section says what has not been checked against a real watch or real Suunto files. It may turn out different and be corrected without that being a break.
 - **The text of descriptions, notes and error messages.** Read the fields, not the sentences.
