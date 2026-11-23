@@ -561,18 +561,18 @@ test("contract: bin commands, environment variables, MCP prompts and resources m
   expectNoDiff("the names of bin commands, environment variables, prompts and resources", diffSurface(expected, surface));
 });
 
-test("contract: every bin command has a source file, and every environment variable the code reads is in the README's table", async () => {
+test("contract: every bin command has a source file, and every environment variable the code reads is in the environment table of docs/CONFIGURATION.md", async () => {
   const { surface } = await snap();
   const pkg = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
   for (const [cmd, target] of Object.entries<string>(pkg.bin)) {
     assert.match(target, /^dist\/[\w-]+\.js$/, `${cmd}: ${target}`);
     assert.ok(existsSync(join(repoRoot, "src", target.replace(/^dist\//, "").replace(/\.js$/, ".ts"))), `bin ${cmd} points at ${target}, which has no source file`);
   }
-  const readme = await readFile(join(repoRoot, "README.md"), "utf8");
-  const table = readme.slice(readme.indexOf("## Environment variables"), readme.indexOf("## Local files"));
-  assert.ok(table.length > 100, "README has no environment variables section");
+  const config = await readFile(join(repoRoot, "docs", "CONFIGURATION.md"), "utf8");
+  const table = config.slice(config.indexOf("## Environment variables"), config.indexOf("## Local files"));
+  assert.ok(table.length > 100, "docs/CONFIGURATION.md has no environment variables section");
   const missing = surface.envVars.filter((v) => !INTERNAL_ENV.has(v) && !table.includes(v));
-  assert.deepEqual(missing, [], `the code reads these variables but the README's environment table does not name them: ${missing.join(", ")}`);
+  assert.deepEqual(missing, [], `the code reads these variables but the environment table in docs/CONFIGURATION.md does not name them: ${missing.join(", ")}`);
 });
 
 test("contract: the fixtures hold no values that depend on the day (shapes only: keys and type names)", async () => {

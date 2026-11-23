@@ -2,6 +2,13 @@
 
 Versions on npm: 0.14.1, 0.14.4, 0.15.1 and later. The tags v0.14.0, v0.14.2, v0.14.3, v0.14.5 and v0.15.0 exist on GitHub but were never published to npm. Pre-0.15.1 notes are in the GitHub Releases.
 
+## 1.3.1
+Released 2026-11-23. A patch release: smaller tool descriptions and a shorter README. No behaviour change, and the 1.x contract is untouched (names, input schemas, annotations and output fields are the same; the contract fixtures did not change).
+
+- **Shorter tool descriptions.** What `tools/list` sends to the model went from 162,113 to 92,568 characters (60 tools, measured in demo mode): tool-level text from 98,194 to 42,475 characters and the property descriptions from 28,157 to 14,333. The safety-relevant facts were kept (what writes where, what never pushes, limits, required formats, known failure modes). Cut: release history, repeated explanations, long lists of output fields, most worked examples, and the more detailed statements of how each tool behaves in demo mode (the short "kept in memory" clauses stayed for the tools that write local state). The complete 1.3.0 wording of every tool-level description is kept in [docs/TOOL-DETAILS.md](docs/TOOL-DETAILS.md); the shorter 1.3.0 property descriptions are in the 1.3.0 git history. Two tests that check key phrases in descriptions pass unchanged because those phrases were kept.
+- **README split.** `README.md` is now a short start page (about 11 KB instead of 96 KB): what it is, a 5-minute quick start, things to ask, safety and privacy, and links. The setup guide, troubleshooting, the tool reference, the environment variables and local files, the known limits, the FAQ and the advanced install options moved unchanged into `docs/` (SETUP, TOOLS, CONFIGURATION, LIMITS, FAQ, ADVANCED). The contract test now reads the environment table from `docs/CONFIGURATION.md`; `## Privacy` stays in the README, where `manifest.json` points.
+- **No behaviour change.** No tool, schema, annotation, output, file format or environment variable changed.
+
 ## 1.3.0
 Released 2026-11-17. Import workouts from other systems. Everything is additive within the 1.x contract: two new tools (the server now lists 60 by default), one new local folder, one new environment variable and new output keys. **No annotation of an existing tool changed.**
 
