@@ -192,7 +192,7 @@ behalf:**
 3. **Ask:** *"What was my most recent workout?"*
 
 Real sport, date, distance back → done. If not, see the main
-[README's Troubleshooting](README.md#troubleshooting).
+[Troubleshooting](docs/SETUP.md#troubleshooting).
 
 ---
 
@@ -214,7 +214,7 @@ That means:
   broken, just because Suunto hasn't received it yet. Open the Suunto app,
   let it sync, then ask again.
 - **Pushed guides work the same way in reverse.** When Claude pushes a
-  workout to your account (see the main [README](README.md#what-you-can-push-to-your-watch)),
+  workout to your account (see [What you can push to your watch](docs/TOOLS.md#what-you-can-push-to-your-watch)),
   it lands on Suunto's servers instantly — but it only reaches your *watch*
   on the next normal phone sync. No extra step needed, just not instant.
 - **Nothing is polling in the background.** Claude only fetches data when
@@ -255,7 +255,7 @@ Claude prompt.
 ## Troubleshooting
 
 Full table (every error message and its fix) lives in the main
-[README's Troubleshooting section](README.md#troubleshooting) — this guide
+[Troubleshooting section](docs/SETUP.md#troubleshooting) — this guide
 only covers the happy path.
 
 ---
